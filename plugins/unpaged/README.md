@@ -6,7 +6,7 @@ See the plan before the code. `/visual-plan` renders the plan Claude just made a
 
 ## What you get
 
-- **`/visual-plan`** — turns the current plan (or any text you pass it) into a board and hands you the edit link.
+- **`/visual-plan`** — turns the current plan into a board and hands you the edit link. Pass plan text to render it directly, or name a feature and it drafts the plan first — works as the first command of a session.
 - **Comments flow back** — leave a comment on any element, mention `@agent`, and the agent picks it up in the session.
 - **Approval flips the board** — when you approve the plan in Claude Code, the board's status stamp changes to 🚀 EXECUTING.
 - **Bundled MCP server** — installing the plugin registers UnPaged's MCP server; no manual config.
@@ -26,4 +26,4 @@ First use: run `/mcp` and authenticate the **unpaged** server with your UnPaged 
 2. Run `/visual-plan`.
 3. Open the link, review the board, comment, approve.
 
-`/visual-plan <text>` renders the text you pass instead of the conversation's plan.
+`/visual-plan <text>` renders the text you pass instead of the conversation's plan; if the text names a feature that has no plan yet, the plan is drafted first, then rendered.

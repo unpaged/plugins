@@ -1,15 +1,19 @@
 ---
-description: Render the current plan as a visual board on UnPaged and return the link
-argument-hint: [plan text or topic — omit to use the plan in this conversation]
+description: Render the current plan — or plan the feature you name — as a visual board on UnPaged and return the link
+argument-hint: [plan text, or a feature to plan — omit to use the plan in this conversation]
 ---
 
 Render a plan as a visual board on UnPaged using the `unpaged` MCP tools, then give the user the link. Follow these instructions exactly.
 
 ## Input
 
-- If `$ARGUMENTS` is non-empty, that text is the plan (or the topic whose plan the conversation contains).
-- Otherwise use the most recent plan in this conversation — plan-mode output you presented, approved or not.
-- If the conversation contains no plan and no arguments were given, say so and stop. Never invent a plan just to have something to render.
+Resolve what to render, in this order:
+
+- If `$ARGUMENTS` is itself a plan (it spells out steps or phases), that text is the plan.
+- If `$ARGUMENTS` names a topic or feature and the conversation already contains a plan for it, use that plan.
+- If `$ARGUMENTS` names a topic or feature and the conversation holds no plan for it, **draft the plan first, then render it**: explore the codebase enough to ground the plan (relevant files, existing patterns, constraints), write a normal phased implementation plan, and render that draft. This makes `/visual-plan <feature>` work as the first command of a session. Mention in your reply that the board is a fresh draft for their review.
+- With no arguments, use the most recent plan in this conversation — plan-mode output you presented, approved or not.
+- With no arguments and no plan in the conversation, say so and stop. Never invent a plan the user didn't ask for just to have something to render.
 
 ## Preconditions
 
