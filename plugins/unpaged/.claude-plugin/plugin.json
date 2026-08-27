@@ -1,0 +1,10 @@
+{
+  "name": "unpaged",
+  "displayName": "UnPaged",
+  "description": "Renders Claude Code plans as visual boards on UnPaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies; comments on the board flow back to the agent; approving the plan stamps the board EXECUTING.",
+  "version": "0.2.1",
+  "author": {
+    "name": "UnPaged",
+    "url": "https://unpaged.io"
+  }
+}

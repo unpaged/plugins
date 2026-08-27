@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "unpaged": {
+      "type": "http",
+      "url": "https://mcp.unpaged.io/mcp"
+    }
+  }
+}
