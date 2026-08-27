@@ -1,6 +1,0 @@
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PostToolUse",
-    "additionalContext": "visual-plan plugin: the plan was just approved. If a visual-plan board was created for this plan earlier in this session, update its status stamp now using the unpaged MCP tools: on the board's root node, find the text element whose content starts with **Status:** and set its text to '**Status:** 🚀 EXECUTING'. Make no other change to the board. If no visual-plan board exists in this session, ignore this message entirely and do not mention it."
-  }
-}

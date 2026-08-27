@@ -1,4 +1,4 @@
-# visual-plan — by UnPaged
+# unpaged — visual plans for Claude Code
 
 See the plan before the code. `/visual-plan` renders the plan Claude just made as a visual board on [UnPaged](https://unpaged.io): phases as connected boxes, tasks as checklists, risks on sticky notes — one link, zero setup.
 
@@ -15,7 +15,7 @@ See the plan before the code. `/visual-plan` renders the plan Claude just made a
 
 ```
 /plugin marketplace add iliedanila/unpaged-claude-plugins
-/plugin install visual-plan@unpaged
+/plugin install unpaged@unpaged
 ```
 
 First use: run `/mcp` and authenticate the **unpaged** server with your UnPaged account (the free tier is enough).

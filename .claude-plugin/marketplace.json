@@ -6,8 +6,8 @@
   },
   "plugins": [
     {
-      "name": "visual-plan",
-      "source": "./plugins/visual-plan",
+      "name": "unpaged",
+      "source": "./plugins/unpaged",
       "description": "Turn Claude Code plans into visual boards on UnPaged — review on a canvas, comment on the pieces, approval flips the board to executing."
     }
   ]
