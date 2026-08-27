@@ -11,13 +11,13 @@ Resolve what to render, in this order:
 
 - If `$ARGUMENTS` is itself a plan (it spells out steps or phases), that text is the plan.
 - If `$ARGUMENTS` names a topic or feature and the conversation already contains a plan for it, use that plan.
-- If `$ARGUMENTS` names a topic or feature and the conversation holds no plan for it, **draft the plan first, then render it**: explore the codebase enough to ground the plan (relevant files, existing patterns, constraints), write a normal phased implementation plan, and render that draft. This makes `/visual-plan <feature>` work as the first command of a session. Mention in your reply that the board is a fresh draft for their review.
+- If `$ARGUMENTS` names a topic or feature and the conversation holds no plan for it, **draft the plan first, then render it**: explore the codebase enough to ground the plan (relevant files, existing patterns, constraints), write a normal phased implementation plan, and render that draft. This makes `/unpaged:visual-plan <feature>` work as the first command of a session. Mention in your reply that the board is a fresh draft for their review.
 - With no arguments, use the most recent plan in this conversation — plan-mode output you presented, approved or not.
 - With no arguments and no plan in the conversation, say so and stop. Never invent a plan the user didn't ask for just to have something to render.
 
 ## Preconditions
 
-The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_create`) are missing or return an authentication error, tell the user to run `/mcp`, authenticate the **unpaged** server (sign in with their UnPaged account — free tier works), and re-run `/visual-plan`. Do not fall back to ASCII art, Mermaid in chat, or a local file.
+The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_create`) are missing or return an authentication error, tell the user to run `/mcp`, authenticate the **unpaged** server (sign in with their UnPaged account — free tier works), and re-run `/unpaged:visual-plan`. Do not fall back to ASCII art, Mermaid in chat, or a local file.
 
 ## Build the board
 
@@ -25,7 +25,7 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
 
 2. **Lay out the root node as the overview.** Create elements with `batch_create_elements` (atomic). The root canvas is the picture of the whole plan:
    - A title `text` element at the top (Markdown heading, fontSize ~28).
-   - A status stamp: a `text` element near the top-right whose content is exactly `**Status:** 📋 PROPOSED` — the plan-approval hook looks for the `**Status:**` prefix later, so keep it verbatim.
+   - A status stamp: a `text` element near the top-right whose content is exactly `**Status:** 📋 PROPOSED` — the plan-approval hook looks for the `**Status:**` prefix later, so keep it verbatim. Exception: if the plan being rendered was already approved earlier in this session (approval happened before the board existed, so the hook had nothing to update), stamp `**Status:** 🚀 EXECUTING` instead.
    - One `rectangle` per phase/major step, laid out left-to-right or top-down in execution order, each labeled with the phase name, connected with `connector` elements (use anchors) to show sequence/dependencies.
    - A `uml-note` with the plan's goal and any key risks or open questions.
 

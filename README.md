@@ -13,4 +13,4 @@ Claude Code plugins by [UnPaged](https://unpaged.io) — the visual canvas where
 
 | Plugin | What it does |
 | --- | --- |
-| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual boards on UnPaged via `/visual-plan`. Review the plan on a canvas, comment on the pieces, and watch the board flip to *executing* when you approve. |
+| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual boards on UnPaged via `/unpaged:visual-plan`. Review the plan on a canvas, comment on the pieces, and watch the board flip to *executing* when you approve. |
