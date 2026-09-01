@@ -9,11 +9,12 @@
 // Reconnects with backoff on transient closes; stops on 4401 (key gone)
 // and 4409 (a newer listener took over). Plain Node ≥ 22, no dependencies.
 
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   KEY_FILE_RELATIVE,
+  PROTOCOL_PREAMBLE,
   backoffMs,
   closePolicy,
   frameLine,
@@ -34,6 +35,15 @@ function say(line) {
   process.stdout.write(`${line}\n`);
 }
 
+let preambleSent = false;
+function sayEvent(line) {
+  if (!preambleSent) {
+    preambleSent = true;
+    say(PROTOCOL_PREAMBLE);
+  }
+  say(line);
+}
+
 function connectOnce(config) {
   return new Promise((resolve) => {
     let socket;
@@ -49,7 +59,7 @@ function connectOnce(config) {
     });
     socket.addEventListener("message", (event) => {
       const line = frameLine(event.data);
-      if (line) say(line);
+      if (line) sayEvent(line);
     });
     socket.addEventListener("error", () => {
       // The close event follows; nothing to print for a transient error.
@@ -74,6 +84,9 @@ async function main() {
     const { code, opened } = await connectOnce(config);
     const policy = closePolicy(code);
     if (policy.action === "stop") {
+      if (policy.deleteKeyFile) {
+        await rm(keyFile, { force: true });
+      }
       say(policy.line);
       return;
     }

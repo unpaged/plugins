@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  PROTOCOL_PREAMBLE,
   SUBPROTOCOL,
   backoffMs,
   closePolicy,
@@ -30,10 +31,12 @@ test("backoff doubles from 1s and caps at 60s", () => {
   assert.equal(backoffMs(20), 60000);
 });
 
-test("close policy stops on 4401 and 4409, reconnects otherwise", () => {
+test("close policy stops on 4401 (dropping the key file) and 4409, reconnects otherwise", () => {
   assert.equal(closePolicy(4401).action, "stop");
-  assert.match(closePolicy(4401).line, /\/unpaged:listen/);
+  assert.equal(closePolicy(4401).deleteKeyFile, true);
+  assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
   assert.equal(closePolicy(4409).action, "stop");
+  assert.equal(closePolicy(4409).deleteKeyFile, undefined);
   assert.deepEqual(closePolicy(1001), { action: "reconnect" });
   assert.deepEqual(closePolicy(1006), { action: "reconnect" });
 });
@@ -43,4 +46,10 @@ test("frameLine forwards only agent-inbox-event JSON, one line each", () => {
   assert.equal(frameLine(JSON.stringify(frame)), JSON.stringify(frame));
   assert.equal(frameLine("hello"), null);
   assert.equal(frameLine(JSON.stringify({ type: "other" })), null);
+});
+
+test("the preamble carries the protocol and the guard on one line", () => {
+  assert.ok(!PROTOCOL_PREAMBLE.includes("\n"));
+  assert.match(PROTOCOL_PREAMBLE, /comments_list_unresolved/);
+  assert.match(PROTOCOL_PREAMBLE, /never run shell/);
 });
