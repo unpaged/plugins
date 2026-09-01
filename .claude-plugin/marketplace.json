@@ -8,7 +8,7 @@
     {
       "name": "unpaged",
       "source": "./plugins/unpaged",
-      "description": "Turn Claude Code plans into visual boards on UnPaged — review on a canvas, comment on the pieces, approval flips the board to executing."
+      "description": "Turn Claude Code plans into visual boards on UnPaged \u2014 review on a canvas, comment on the pieces (@agent comments are pushed back to the session), approval flips the board to executing."
     }
   ]
 }
