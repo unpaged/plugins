@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   PROTOCOL_PREAMBLE,
   SUBPROTOCOL,
+  sameListenerConfig,
   backoffMs,
   closePolicy,
   frameLine,
@@ -16,8 +17,13 @@ test("parseListenerConfig accepts the stored shape and rejects the rest", () => 
   });
   assert.deepEqual(parseListenerConfig(good), {
     url: "wss://mcp.unpaged.io/events",
-    protocols: [SUBPROTOCOL, "abc"]
+    protocols: [SUBPROTOCOL, "abc"],
+    keyId: null
   });
+  assert.equal(
+    parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, "k"], keyId: "k1" })).keyId,
+    "k1"
+  );
   assert.equal(parseListenerConfig("not json"), null);
   assert.equal(parseListenerConfig(JSON.stringify({ url: "https://x", protocols: [SUBPROTOCOL, "k"] })), null);
   assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: ["k"] })), null);
@@ -53,4 +59,11 @@ test("the preamble carries the protocol and the guard on one line", () => {
   assert.match(PROTOCOL_PREAMBLE, /comments_list_unresolved/);
   assert.match(PROTOCOL_PREAMBLE, /never run shell/);
   assert.match(PROTOCOL_PREAMBLE, /authorRole viewer/);
+});
+
+test("sameListenerConfig compares the key, not the object identity", () => {
+  const a = { url: "wss://x", protocols: [SUBPROTOCOL, "k1"], keyId: null };
+  assert.equal(sameListenerConfig(a, { ...a }), true);
+  assert.equal(sameListenerConfig(a, { ...a, protocols: [SUBPROTOCOL, "k2"] }), false);
+  assert.equal(sameListenerConfig(a, null), false);
 });

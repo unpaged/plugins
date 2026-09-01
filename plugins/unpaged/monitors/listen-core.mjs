@@ -13,6 +13,11 @@ export const BACKOFF_MAX_MS = 60000;
  * not `{ url, protocols: [SUBPROTOCOL, key] }` — the monitor then exits
  * silently, exactly as when the file is missing.
  */
+/** Two stored configs are the same listener when they carry the same key. */
+export function sameListenerConfig(a, b) {
+  return Boolean(a && b) && a.url === b.url && a.protocols[1] === b.protocols[1];
+}
+
 export function parseListenerConfig(raw) {
   let value;
   try {
@@ -28,7 +33,8 @@ export function parseListenerConfig(raw) {
     return null;
   }
   if (!protocols.includes(SUBPROTOCOL)) return null;
-  return { url, protocols };
+  const keyId = typeof value.keyId === "string" ? value.keyId : null;
+  return { url, protocols, keyId };
 }
 
 /** Exponential backoff, capped: 1s, 2s, 4s … 60s. */

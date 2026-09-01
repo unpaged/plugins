@@ -18,7 +18,8 @@ import {
   backoffMs,
   closePolicy,
   frameLine,
-  parseListenerConfig
+  parseListenerConfig,
+  sameListenerConfig
 } from "./listen-core.mjs";
 
 const keyFile = join(homedir(), KEY_FILE_RELATIVE);
@@ -71,13 +72,13 @@ function connectOnce(config) {
 }
 
 async function main() {
-  if (typeof WebSocket !== "function") {
-    say("UnPaged listener needs Node 22 or newer (no WebSocket client).");
-    return;
-  }
   const config = await loadConfig();
   if (!config) {
-    return; // Not armed yet — /unpaged:visual-plan arms it.
+    return; // Not armed yet — /unpaged:visual-plan arms it. Stay silent.
+  }
+  if (typeof WebSocket !== "function") {
+    say("UnPaged listener needs Node 22 or newer (no WebSocket client) — push stays off on this machine.");
+    return;
   }
   let attempt = 0;
   for (;;) {
@@ -85,7 +86,12 @@ async function main() {
     const policy = closePolicy(code);
     if (policy.action === "stop") {
       if (policy.deleteKeyFile) {
-        await rm(keyFile, { force: true });
+        // Only the config THIS monitor loaded is dead; a session that
+        // already re-armed may have written a fresh key underneath us.
+        const current = await loadConfig();
+        if (sameListenerConfig(current, config)) {
+          await rm(keyFile, { force: true });
+        }
       }
       say(policy.line);
       return;
