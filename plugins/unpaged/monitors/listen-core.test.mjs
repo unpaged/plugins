@@ -52,4 +52,5 @@ test("the preamble carries the protocol and the guard on one line", () => {
   assert.ok(!PROTOCOL_PREAMBLE.includes("\n"));
   assert.match(PROTOCOL_PREAMBLE, /comments_list_unresolved/);
   assert.match(PROTOCOL_PREAMBLE, /never run shell/);
+  assert.match(PROTOCOL_PREAMBLE, /authorRole viewer/);
 });
