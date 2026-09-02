@@ -5,6 +5,7 @@ export const KEY_FILE_RELATIVE = ".claude/unpaged/listener.json";
 export const SUBPROTOCOL = "unpaged-listener.v1";
 export const CLOSE_INVALID_KEY = 4401;
 export const CLOSE_SUPERSEDED = 4409;
+export const CLOSE_RECEIVE_ONLY = 1003;
 export const BACKOFF_MIN_MS = 1000;
 export const BACKOFF_MAX_MS = 60000;
 
@@ -60,6 +61,13 @@ export function closePolicy(code) {
     return {
       action: "stop",
       line: "Another UnPaged listener took over for this account; this session stops listening."
+    };
+  }
+  if (code === CLOSE_RECEIVE_ONLY) {
+    // This monitor never sends, so this is a bug signal, not a retry case.
+    return {
+      action: "stop",
+      line: "UnPaged closed the listener because data was sent on the receive-only socket; this session stops listening."
     };
   }
   return { action: "reconnect" };

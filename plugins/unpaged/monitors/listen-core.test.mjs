@@ -43,6 +43,7 @@ test("close policy stops on 4401 (dropping the key file) and 4409, reconnects ot
   assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
   assert.equal(closePolicy(4409).action, "stop");
   assert.equal(closePolicy(4409).deleteKeyFile, undefined);
+  assert.equal(closePolicy(1003).action, "stop");
   assert.deepEqual(closePolicy(1001), { action: "reconnect" });
   assert.deepEqual(closePolicy(1006), { action: "reconnect" });
 });
