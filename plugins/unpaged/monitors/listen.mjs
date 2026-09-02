@@ -14,6 +14,7 @@
 // this board). Plain Node ≥ 22, no dependencies.
 
 import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -57,14 +58,19 @@ async function reportStatus(state, reason) {
     } catch {
       existing = null;
     }
-    // A displaced listener (4409) must not paint "stopped" over the newer
-    // listener's "connected" for the same board.
+    // A displaced listener must not paint over the newer listener's
+    // "connected" for the same board (see shouldWriteStatus); the write is
+    // tmp + rename so a reader never sees a torn file. The remaining
+    // read-then-rename window only matters while two listeners share a
+    // board, and the displaced one never reports its 4409 at all.
     if (!shouldWriteStatus(existing, process.pid, state, isAlive)) return;
+    const tmp = `${statusFile}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
     await writeFile(
-      statusFile,
+      tmp,
       JSON.stringify(monitorStatus(state, reason, scriptPath, documentId)),
       { mode: 0o600 }
     );
+    await rename(tmp, statusFile);
   } catch {
     // Status is advisory; the socket does not depend on it.
   }
@@ -141,7 +147,11 @@ async function main() {
       if (policy.deleteKeyFile) {
         await retireKeyFile({ rename, readFile, rm, link }, keyFile, config);
       }
-      await reportStatus("stopped", `close-${code}`);
+      // Superseded (4409): the newer listener owns this board's status file
+      // from now on — this process writes nothing more to it.
+      if (!policy.superseded) {
+        await reportStatus("stopped", `close-${code}`);
+      }
       say(policy.line);
       return;
     }

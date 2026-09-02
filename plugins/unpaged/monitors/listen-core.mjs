@@ -84,6 +84,7 @@ export function closePolicy(code, documentId = "") {
   if (code === CLOSE_SUPERSEDED) {
     return {
       action: "stop",
+      superseded: true,
       line: `Another session took over the UnPaged listener${board}; this session stops listening to it.`
     };
   }

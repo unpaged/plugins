@@ -77,6 +77,8 @@ test("close policy stops on 4401 (dropping the key file) and 4409, reconnects ot
   assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
   assert.equal(closePolicy(4409, DOC).action, "stop");
   assert.equal(closePolicy(4409, DOC).deleteKeyFile, undefined);
+  assert.equal(closePolicy(4409, DOC).superseded, true);
+  assert.equal(closePolicy(4401, DOC).superseded, undefined);
   assert.match(closePolicy(4409, DOC).line, /took over/);
   assert.match(closePolicy(4409, DOC).line, new RegExp(DOC));
   assert.equal(closePolicy(1003).action, "stop");
