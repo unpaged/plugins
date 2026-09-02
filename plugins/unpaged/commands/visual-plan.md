@@ -21,7 +21,7 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
 
 ## Build the board
 
-1. **Create the document** with `document_create`. Title: `<project name>: <short plan title>` (project = repo directory name or the obvious subject). The document lands in the user's own UnPaged account — you are acting with their identity.
+1. **Create the document** with `document_create({ title, folderId: "visual-plans" })`. Title: `<project name>: <short plan title>` (project = repo directory name or the obvious subject). `folderId: "visual-plans"` files the board in the reserved *Visual plans* folder of the user's library — one folder for every plan from every repo, created on demand, race-free (the repo stays visible in the title prefix). Filing is best-effort and never blocks the render: if the call rejects the `folderId` argument (an older server), retry without it and mention that folders need the current server; if the result carries `folderWarning`, the board exists — mention the warning in your reply and carry on. The document lands in the user's own UnPaged account — you are acting with their identity.
 
 2. **Lay out the root node as the overview.** Create elements with `batch_create_elements` (atomic). The root canvas is the picture of the whole plan:
    - A title `text` element at the top (Markdown heading, fontSize ~28).
