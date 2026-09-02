@@ -145,6 +145,21 @@ export async function retireKeyFile(fs, keyFile, loadedConfig) {
   return "removed";
 }
 
+/**
+ * Whether this process may overwrite the board's status file. Two
+ * listeners can briefly share a board (the newer one connects before the
+ * displaced one has handled its 4409): a `connected` report always wins,
+ * but a non-connected report must never paint over another LIVE process's
+ * `connected` — that would make the board look silent while it is not.
+ */
+export function shouldWriteStatus(existing, myPid, state, isAlive) {
+  if (state === "connected") return true;
+  if (!existing || typeof existing !== "object") return true;
+  if (existing.pid === myPid) return true;
+  if (existing.state !== "connected") return true;
+  return !isAlive(existing.pid);
+}
+
 /** The monitor's self-report: `connected` while the socket is open, else why not. */
 export function monitorStatus(state, reason, script, documentId) {
   return {

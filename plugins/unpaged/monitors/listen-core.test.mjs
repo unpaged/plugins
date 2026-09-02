@@ -10,7 +10,8 @@ import {
   keyFileFor,
   parseListenerConfig,
   retireKeyFile,
-  sameListenerConfig
+  sameListenerConfig,
+  shouldWriteStatus
 } from "./listen-core.mjs";
 
 const DOC = "b0d8599c-93e6-4ebd-b63d-e0d0dfc3ce36";
@@ -157,4 +158,18 @@ test("retireKeyFile never clobbers a third key installed while the file was asid
   assert.equal(await retireKeyFile(fs, "/k", loaded), "superseded");
   assert.deepEqual(JSON.parse(fs.files["/k"]), c);
   assert.deepEqual(Object.keys(fs.files), ["/k"]);
+});
+
+test("a displaced listener never paints over a live newer listener's connected status", () => {
+  const alive = (pid) => pid === 200;
+  const live = { pid: 200, state: "connected" };
+  // The newer process (200) is connected; the displaced one (100) reports stopped.
+  assert.equal(shouldWriteStatus(live, 100, "stopped", alive), false);
+  assert.equal(shouldWriteStatus(live, 100, "reconnecting", alive), false);
+  // Its own file, a dead process, a non-connected file, or a connected report: write.
+  assert.equal(shouldWriteStatus(live, 200, "stopped", alive), true);
+  assert.equal(shouldWriteStatus({ pid: 300, state: "connected" }, 100, "stopped", alive), true);
+  assert.equal(shouldWriteStatus({ pid: 200, state: "reconnecting" }, 100, "stopped", alive), true);
+  assert.equal(shouldWriteStatus(live, 100, "connected", alive), true);
+  assert.equal(shouldWriteStatus(null, 100, "stopped", alive), true);
 });

@@ -28,7 +28,8 @@ import {
   keyFileFor,
   monitorStatus,
   parseListenerConfig,
-  retireKeyFile
+  retireKeyFile,
+  shouldWriteStatus
 } from "./listen-core.mjs";
 
 const documentId = process.argv[2];
@@ -37,10 +38,28 @@ const statusDir = join(homedir(), STATUS_DIR_RELATIVE);
 /** Recorded in the status file so a command can re-run this very script in the foreground. */
 const scriptPath = fileURLToPath(import.meta.url);
 
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function reportStatus(state, reason) {
   try {
     const statusFile = join(statusDir, `${documentId}.json`);
     await mkdir(dirname(statusFile), { recursive: true, mode: 0o700 });
+    let existing = null;
+    try {
+      existing = JSON.parse(await readFile(statusFile, "utf8"));
+    } catch {
+      existing = null;
+    }
+    // A displaced listener (4409) must not paint "stopped" over the newer
+    // listener's "connected" for the same board.
+    if (!shouldWriteStatus(existing, process.pid, state, isAlive)) return;
     await writeFile(
       statusFile,
       JSON.stringify(monitorStatus(state, reason, scriptPath, documentId)),
