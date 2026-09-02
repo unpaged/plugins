@@ -7,7 +7,7 @@ See the plan before the code. `/unpaged:visual-plan` renders the plan Claude jus
 ## What you get
 
 - **`/unpaged:visual-plan`** — turns the current plan into a board and hands you the edit link. Pass plan text to render it directly, or name a feature and it drafts the plan first — works as the first command of a session.
-- **Comments are pushed back** — leave a comment on any element, mention `@agent`, and the agent hears it within seconds and answers on the board. No polling, nothing to type: the first `/unpaged:visual-plan` arms a listener, and a background monitor reconnects in every later session.
+- **Comments are pushed back** — leave a comment on any element of that board, mention `@agent`, and the session that made the board hears it within seconds and answers on the canvas. No polling, nothing to type: `/unpaged:visual-plan` arms a listener for the board it just created. Each board has its own listener, so two sessions with two plans never answer each other's boards.
 - **Approval flips the board** — when you approve the plan in Claude Code, the board's status stamp changes to 🚀 EXECUTING.
 - **Bundled MCP server** — installing the plugin registers UnPaged's MCP server; no manual config.
 
@@ -30,8 +30,7 @@ First use: run `/mcp` and authenticate the **unpaged** server with your UnPaged 
 
 ## How push works
 
-- The first time a board is handed back, the agent mints a **listener key** through the UnPaged MCP server (receive-only, revocable, shown once) and stores it in `~/.claude/unpaged/listener.json` (mode 600). The key is never the OAuth token and never travels in a URL.
-- That session holds the `wss://mcp.unpaged.io/events` socket open with Claude Code's Monitor tool. Every later session, the plugin's background monitor (`monitors/listen.mjs`, plain Node ≥ 22) reconnects by itself and prints each event as one line the model reacts to.
-- Each event names the board, node and thread; the agent runs `comments_list_unresolved` on that board, acts with the board tools, replies, and leaves the thread open for you to resolve.
-- If you have Claude Code open on two machines, the newest connection answers (the older one is told it was superseded and stops).
-- `/unpaged:listen` reports the state, re-arms a missing key, or `revoke`s this machine's keys. Background monitors run in interactive sessions only.
+- When a board is handed back, the agent mints a **listener key for that board** through the UnPaged MCP server (receive-only, revocable, shown once, bound to one board) and stores it in `~/.claude/unpaged/listeners/<documentId>.json` (mode 600). The key is never the OAuth token and never travels in a URL.
+- That session holds the board's `wss://mcp.unpaged.io/events` socket open with Claude Code's Monitor tool, running the plugin's `monitors/listen.mjs <documentId>` (plain Node ≥ 22). Every event is printed as one line the model reacts to: it runs `comments_list_unresolved` on that board, acts with the board tools, replies, and leaves the thread open for you to resolve.
+- **A session listens only to boards it armed itself.** Nothing reconnects in the background between sessions — that would spend tokens sweeping old boards nobody asked about. In a later session, `/unpaged:listen` lists the boards armed from this project folder and arms the one you pick; `/unpaged:listen arm <documentId>` mints a key for a board created elsewhere; `status` and `revoke <documentId|all>` do what they say.
+- Two sessions on two boards listen side by side. Start a second session on the **same** board and it takes over (the older listener is told it was superseded and stops), so one plan is never answered twice.

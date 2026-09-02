@@ -1,8 +1,0 @@
-[
-  {
-    "name": "agent-comments",
-    "command": "node \"${CLAUDE_PLUGIN_ROOT}/monitors/listen.mjs\"",
-    "description": "UnPaged @agent comments",
-    "when": "always"
-  }
-]
