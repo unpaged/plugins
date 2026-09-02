@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   PROTOCOL_PREAMBLE,
   SUBPROTOCOL,
+  retireKeyFile,
   sameListenerConfig,
   backoffMs,
   closePolicy,
@@ -67,4 +68,36 @@ test("sameListenerConfig compares the key, not the object identity", () => {
   assert.equal(sameListenerConfig(a, { ...a }), true);
   assert.equal(sameListenerConfig(a, { ...a, protocols: [SUBPROTOCOL, "k2"] }), false);
   assert.equal(sameListenerConfig(a, null), false);
+});
+
+function memFs(files) {
+  return {
+    files,
+    async rename(from, to) {
+      if (!(from in files)) throw new Error("ENOENT");
+      files[to] = files[from];
+      delete files[from];
+    },
+    async readFile(path) {
+      if (!(path in files)) throw new Error("ENOENT");
+      return files[path];
+    },
+    async rm(path) {
+      delete files[path];
+    }
+  };
+}
+
+test("retireKeyFile removes the rejected config but restores a newer one", async () => {
+  const loaded = { url: "wss://x/events", protocols: [SUBPROTOCOL, "old"], keyId: "k1" };
+  const same = memFs({ "/k": JSON.stringify(loaded) });
+  assert.equal(await retireKeyFile(same, "/k", loaded), "removed");
+  assert.deepEqual(Object.keys(same.files), []);
+
+  const fresh = { url: "wss://x/events", protocols: [SUBPROTOCOL, "new"], keyId: "k2" };
+  const replaced = memFs({ "/k": JSON.stringify(fresh) });
+  assert.equal(await retireKeyFile(replaced, "/k", loaded), "kept-newer");
+  assert.deepEqual(JSON.parse(replaced.files["/k"]), fresh);
+
+  assert.equal(await retireKeyFile(memFs({}), "/k", loaded), "absent");
 });

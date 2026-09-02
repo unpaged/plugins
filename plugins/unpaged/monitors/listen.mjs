@@ -9,20 +9,32 @@
 // Reconnects with backoff on transient closes; stops on 4401 (key gone)
 // and 4409 (a newer listener took over). Plain Node ≥ 22, no dependencies.
 
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   KEY_FILE_RELATIVE,
   PROTOCOL_PREAMBLE,
+  STATUS_FILE_RELATIVE,
   backoffMs,
   closePolicy,
   frameLine,
+  monitorStatus,
   parseListenerConfig,
-  sameListenerConfig
+  retireKeyFile
 } from "./listen-core.mjs";
 
 const keyFile = join(homedir(), KEY_FILE_RELATIVE);
+const statusFile = join(homedir(), STATUS_FILE_RELATIVE);
+
+async function reportStatus(state, reason) {
+  try {
+    await mkdir(dirname(statusFile), { recursive: true, mode: 0o700 });
+    await writeFile(statusFile, JSON.stringify(monitorStatus(state, reason)), { mode: 0o600 });
+  } catch {
+    // Status is advisory; the socket does not depend on it.
+  }
+}
 
 async function loadConfig() {
   try {
@@ -57,6 +69,7 @@ function connectOnce(config) {
     let opened = false;
     socket.addEventListener("open", () => {
       opened = true;
+      void reportStatus("connected");
     });
     socket.addEventListener("message", (event) => {
       const line = frameLine(event.data);
@@ -77,6 +90,7 @@ async function main() {
     return; // Not armed yet — /unpaged:visual-plan arms it. Stay silent.
   }
   if (typeof WebSocket !== "function") {
+    await reportStatus("stopped", "no-websocket");
     say("UnPaged listener needs Node 22 or newer (no WebSocket client) — push stays off on this machine.");
     return;
   }
@@ -86,16 +100,13 @@ async function main() {
     const policy = closePolicy(code);
     if (policy.action === "stop") {
       if (policy.deleteKeyFile) {
-        // Only the config THIS monitor loaded is dead; a session that
-        // already re-armed may have written a fresh key underneath us.
-        const current = await loadConfig();
-        if (sameListenerConfig(current, config)) {
-          await rm(keyFile, { force: true });
-        }
+        await retireKeyFile({ rename, readFile, rm }, keyFile, config);
       }
+      await reportStatus("stopped", `close-${code}`);
       say(policy.line);
       return;
     }
+    await reportStatus("reconnecting", `close-${code}`);
     attempt = opened ? 0 : attempt + 1;
     await new Promise((wake) => setTimeout(wake, backoffMs(attempt)));
   }
