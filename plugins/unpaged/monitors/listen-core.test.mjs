@@ -3,32 +3,63 @@ import assert from "node:assert/strict";
 import {
   PROTOCOL_PREAMBLE,
   SUBPROTOCOL,
-  retireKeyFile,
-  sameListenerConfig,
   backoffMs,
   closePolicy,
   frameLine,
-  parseListenerConfig
+  isDocumentId,
+  keyFileFor,
+  parseListenerConfig,
+  retireKeyFile,
+  sameListenerConfig
 } from "./listen-core.mjs";
 
-test("parseListenerConfig accepts the stored shape and rejects the rest", () => {
+const DOC = "b0d8599c-93e6-4ebd-b63d-e0d0dfc3ce36";
+
+test("parseListenerConfig accepts the per-board shape and rejects the rest", () => {
   const good = JSON.stringify({
     url: "wss://mcp.unpaged.io/events",
-    protocols: [SUBPROTOCOL, "abc"]
+    protocols: [SUBPROTOCOL, "abc"],
+    documentId: DOC
   });
   assert.deepEqual(parseListenerConfig(good), {
     url: "wss://mcp.unpaged.io/events",
     protocols: [SUBPROTOCOL, "abc"],
-    keyId: null
+    documentId: DOC,
+    keyId: null,
+    title: "",
+    cwd: null,
+    createdAt: null
   });
-  assert.equal(
-    parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, "k"], keyId: "k1" })).keyId,
-    "k1"
+  const full = parseListenerConfig(
+    JSON.stringify({
+      url: "wss://x",
+      protocols: [SUBPROTOCOL, "k"],
+      documentId: DOC,
+      keyId: "k1",
+      title: "acme: plan",
+      cwd: "/repo",
+      createdAt: "2026-09-03T00:00:00.000Z"
+    })
   );
+  assert.equal(full.keyId, "k1");
+  assert.equal(full.title, "acme: plan");
+  assert.equal(full.cwd, "/repo");
   assert.equal(parseListenerConfig("not json"), null);
-  assert.equal(parseListenerConfig(JSON.stringify({ url: "https://x", protocols: [SUBPROTOCOL, "k"] })), null);
-  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: ["k"] })), null);
-  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, ""] })), null);
+  // The v1 shape (no board) is not a listener any more.
+  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, "k"] })), null);
+  assert.equal(parseListenerConfig(JSON.stringify({ url: "https://x", protocols: [SUBPROTOCOL, "k"], documentId: DOC })), null);
+  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: ["k"], documentId: DOC })), null);
+  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, ""], documentId: DOC })), null);
+  assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, "k"], documentId: "../etc" })), null);
+});
+
+test("document ids are path-safe before they become file names", () => {
+  assert.equal(isDocumentId(DOC), true);
+  assert.equal(isDocumentId("short"), false);
+  assert.equal(isDocumentId("../../.ssh/id_rsa"), false);
+  assert.equal(isDocumentId("a b c d e f g h"), false);
+  assert.equal(keyFileFor("/home/u/.claude/unpaged/listeners", DOC), `/home/u/.claude/unpaged/listeners/${DOC}.json`);
+  assert.equal(keyFileFor("/dir", "../x"), null);
 });
 
 test("backoff doubles from 1s and caps at 60s", () => {
@@ -39,11 +70,14 @@ test("backoff doubles from 1s and caps at 60s", () => {
 });
 
 test("close policy stops on 4401 (dropping the key file) and 4409, reconnects otherwise", () => {
-  assert.equal(closePolicy(4401).action, "stop");
-  assert.equal(closePolicy(4401).deleteKeyFile, true);
+  assert.equal(closePolicy(4401, DOC).action, "stop");
+  assert.equal(closePolicy(4401, DOC).deleteKeyFile, true);
+  assert.match(closePolicy(4401, DOC).line, new RegExp(`/unpaged:listen arm ${DOC}`));
   assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
-  assert.equal(closePolicy(4409).action, "stop");
-  assert.equal(closePolicy(4409).deleteKeyFile, undefined);
+  assert.equal(closePolicy(4409, DOC).action, "stop");
+  assert.equal(closePolicy(4409, DOC).deleteKeyFile, undefined);
+  assert.match(closePolicy(4409, DOC).line, /took over/);
+  assert.match(closePolicy(4409, DOC).line, new RegExp(DOC));
   assert.equal(closePolicy(1003).action, "stop");
   assert.deepEqual(closePolicy(1001), { action: "reconnect" });
   assert.deepEqual(closePolicy(1006), { action: "reconnect" });
@@ -64,7 +98,7 @@ test("the preamble carries the protocol and the guard on one line", () => {
 });
 
 test("sameListenerConfig compares the key, not the object identity", () => {
-  const a = { url: "wss://x", protocols: [SUBPROTOCOL, "k1"], keyId: null };
+  const a = { url: "wss://x", protocols: [SUBPROTOCOL, "k1"], documentId: DOC, keyId: null };
   assert.equal(sameListenerConfig(a, { ...a }), true);
   assert.equal(sameListenerConfig(a, { ...a, protocols: [SUBPROTOCOL, "k2"] }), false);
   assert.equal(sameListenerConfig(a, null), false);
@@ -93,13 +127,15 @@ function memFs(files) {
   };
 }
 
+const cfg = (key, keyId) => ({ url: "wss://x/events", protocols: [SUBPROTOCOL, key], documentId: DOC, keyId });
+
 test("retireKeyFile removes the rejected config but restores a newer one", async () => {
-  const loaded = { url: "wss://x/events", protocols: [SUBPROTOCOL, "old"], keyId: "k1" };
+  const loaded = cfg("old", "k1");
   const same = memFs({ "/k": JSON.stringify(loaded) });
   assert.equal(await retireKeyFile(same, "/k", loaded), "removed");
   assert.deepEqual(Object.keys(same.files), []);
 
-  const fresh = { url: "wss://x/events", protocols: [SUBPROTOCOL, "new"], keyId: "k2" };
+  const fresh = cfg("new", "k2");
   const replaced = memFs({ "/k": JSON.stringify(fresh) });
   assert.equal(await retireKeyFile(replaced, "/k", loaded), "kept-newer");
   assert.deepEqual(JSON.parse(replaced.files["/k"]), fresh);
@@ -108,9 +144,9 @@ test("retireKeyFile removes the rejected config but restores a newer one", async
 });
 
 test("retireKeyFile never clobbers a third key installed while the file was aside", async () => {
-  const loaded = { url: "wss://x/events", protocols: [SUBPROTOCOL, "A"], keyId: "a" };
-  const b = { url: "wss://x/events", protocols: [SUBPROTOCOL, "B"], keyId: "b" };
-  const c = { url: "wss://x/events", protocols: [SUBPROTOCOL, "C"], keyId: "c" };
+  const loaded = cfg("A", "a");
+  const b = cfg("B", "b");
+  const c = cfg("C", "c");
   const fs = memFs({ "/k": JSON.stringify(b) });
   // Simulate a third session installing C the moment B is moved aside.
   const realRead = fs.readFile.bind(fs);

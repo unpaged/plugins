@@ -1,9 +1,12 @@
 // Pure helpers for the listener monitor — kept apart from the runner so
 // they can be tested with node:test and no network.
 
-export const KEY_FILE_RELATIVE = ".claude/unpaged/listener.json";
-/** Where the running monitor reports itself, so commands can tell "armed" from "listening". */
-export const STATUS_FILE_RELATIVE = ".claude/unpaged/monitor.json";
+/** One key file per board: `<dir>/<documentId>.json`. */
+export const KEY_DIR_RELATIVE = ".claude/unpaged/listeners";
+/** The v1 single-key file; retired (moved aside, never deleted) on first v2 run. */
+export const LEGACY_KEY_FILE_RELATIVE = ".claude/unpaged/listener.json";
+/** Where a running monitor reports itself, one file per board, so commands can tell "armed" from "listening". */
+export const STATUS_DIR_RELATIVE = ".claude/unpaged/monitors";
 export const SUBPROTOCOL = "unpaged-listener.v1";
 export const CLOSE_INVALID_KEY = 4401;
 export const CLOSE_SUPERSEDED = 4409;
@@ -11,16 +14,30 @@ export const CLOSE_RECEIVE_ONLY = 1003;
 export const BACKOFF_MIN_MS = 1000;
 export const BACKOFF_MAX_MS = 60000;
 
-/**
- * Parses the stored listener config. Returns null for anything that is
- * not `{ url, protocols: [SUBPROTOCOL, key] }` — the monitor then exits
- * silently, exactly as when the file is missing.
- */
+/** Document ids are UUID-shaped; anything else is refused before it becomes a path segment. */
+const DOCUMENT_ID_SHAPE = /^[A-Za-z0-9_-]{8,128}$/;
+
+export function isDocumentId(value) {
+  return typeof value === "string" && DOCUMENT_ID_SHAPE.test(value);
+}
+
+/** `<keyDir>/<documentId>.json` — refuses anything that is not a document id. */
+export function keyFileFor(keyDir, documentId) {
+  if (!isDocumentId(documentId)) return null;
+  return `${keyDir}/${documentId}.json`;
+}
+
 /** Two stored configs are the same listener when they carry the same key. */
 export function sameListenerConfig(a, b) {
   return Boolean(a && b) && a.url === b.url && a.protocols[1] === b.protocols[1];
 }
 
+/**
+ * Parses a stored per-board listener config. Returns null for anything
+ * that is not `{ url, protocols: [SUBPROTOCOL, key], documentId }` — the
+ * monitor then exits silently, exactly as when the file is missing.
+ * `title`, `cwd`, `keyId` and `createdAt` are optional bookkeeping.
+ */
 export function parseListenerConfig(raw) {
   let value;
   try {
@@ -29,15 +46,19 @@ export function parseListenerConfig(raw) {
     return null;
   }
   if (typeof value !== "object" || value === null) return null;
-  const { url, protocols } = value;
+  const { url, protocols, documentId } = value;
   if (typeof url !== "string" || !/^wss?:\/\//.test(url)) return null;
   if (!Array.isArray(protocols) || protocols.length < 2) return null;
   if (!protocols.every((entry) => typeof entry === "string" && entry.length > 0)) {
     return null;
   }
   if (!protocols.includes(SUBPROTOCOL)) return null;
+  if (!isDocumentId(documentId)) return null;
   const keyId = typeof value.keyId === "string" ? value.keyId : null;
-  return { url, protocols, keyId };
+  const title = typeof value.title === "string" ? value.title : "";
+  const cwd = typeof value.cwd === "string" ? value.cwd : null;
+  const createdAt = typeof value.createdAt === "string" ? value.createdAt : null;
+  return { url, protocols, documentId, keyId, title, cwd, createdAt };
 }
 
 /** Exponential backoff, capped: 1s, 2s, 4s … 60s. */
@@ -48,28 +69,29 @@ export function backoffMs(attempt) {
 /**
  * What to do after a close: `stop` with a line for the model, or
  * `reconnect` (silently). 4401 = the key is gone (re-arm via the command);
- * 4409 = a newer listener of this user took over — reconnecting would only
- * fight it, so this session stops listening.
+ * 4409 = a newer listener took over THIS board — reconnecting would only
+ * fight it, so this session stops listening to it.
  */
-export function closePolicy(code) {
+export function closePolicy(code, documentId = "") {
+  const board = documentId ? ` for board ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
     return {
       action: "stop",
       deleteKeyFile: true,
-      line: "UnPaged listener key rejected; the stored key was removed — the next /unpaged:visual-plan (or /unpaged:listen) mints a new one."
+      line: `UnPaged listener key rejected${board}; the stored key was removed — /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan) mints a new one.`
     };
   }
   if (code === CLOSE_SUPERSEDED) {
     return {
       action: "stop",
-      line: "Another UnPaged listener took over for this account; this session stops listening."
+      line: `Another session took over the UnPaged listener${board}; this session stops listening to it.`
     };
   }
   if (code === CLOSE_RECEIVE_ONLY) {
     // This monitor never sends, so this is a bug signal, not a retry case.
     return {
       action: "stop",
-      line: "UnPaged closed the listener because data was sent on the receive-only socket; this session stops listening."
+      line: `UnPaged closed the listener${board} because data was sent on the receive-only socket; this session stops listening to it.`
     };
   }
   return { action: "reconnect" };
@@ -124,12 +146,13 @@ export async function retireKeyFile(fs, keyFile, loadedConfig) {
 }
 
 /** The monitor's self-report: `connected` while the socket is open, else why not. */
-export function monitorStatus(state, reason, script) {
+export function monitorStatus(state, reason, script, documentId) {
   return {
     pid: process.pid,
     state,
     reason: reason ?? null,
     script: script ?? null,
+    documentId: documentId ?? null,
     updatedAt: new Date().toISOString()
   };
 }
