@@ -107,16 +107,31 @@ export async function retireKeyFile(fs, keyFile, loadedConfig) {
     current = null;
   }
   if (current && !sameListenerConfig(current, loadedConfig)) {
-    await fs.rename(aside, keyFile);
-    return "kept-newer";
+    // Put the newer config back WITHOUT clobbering: a hard link fails with
+    // EEXIST if a third session installed yet another key meanwhile — that
+    // one is newer still, so the moved-aside copy is simply dropped.
+    try {
+      await fs.link(aside, keyFile);
+      await fs.rm(aside, { force: true });
+      return "kept-newer";
+    } catch {
+      await fs.rm(aside, { force: true });
+      return "superseded";
+    }
   }
   await fs.rm(aside, { force: true });
   return "removed";
 }
 
 /** The monitor's self-report: `connected` while the socket is open, else why not. */
-export function monitorStatus(state, reason) {
-  return { pid: process.pid, state, reason: reason ?? null, updatedAt: new Date().toISOString() };
+export function monitorStatus(state, reason, script) {
+  return {
+    pid: process.pid,
+    state,
+    reason: reason ?? null,
+    script: script ?? null,
+    updatedAt: new Date().toISOString()
+  };
 }
 
 /** One event per stdout line: a frame that is not JSON is dropped. */

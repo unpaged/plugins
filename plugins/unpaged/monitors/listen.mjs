@@ -9,7 +9,8 @@
 // Reconnects with backoff on transient closes; stops on 4401 (key gone)
 // and 4409 (a newer listener took over). Plain Node ≥ 22, no dependencies.
 
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -26,11 +27,15 @@ import {
 
 const keyFile = join(homedir(), KEY_FILE_RELATIVE);
 const statusFile = join(homedir(), STATUS_FILE_RELATIVE);
+/** Recorded in the status file so a command can re-run this very script in the foreground. */
+const scriptPath = fileURLToPath(import.meta.url);
 
 async function reportStatus(state, reason) {
   try {
     await mkdir(dirname(statusFile), { recursive: true, mode: 0o700 });
-    await writeFile(statusFile, JSON.stringify(monitorStatus(state, reason)), { mode: 0o600 });
+    await writeFile(statusFile, JSON.stringify(monitorStatus(state, reason, scriptPath)), {
+      mode: 0o600
+    });
   } catch {
     // Status is advisory; the socket does not depend on it.
   }
@@ -100,7 +105,7 @@ async function main() {
     const policy = closePolicy(code);
     if (policy.action === "stop") {
       if (policy.deleteKeyFile) {
-        await retireKeyFile({ rename, readFile, rm }, keyFile, config);
+        await retireKeyFile({ rename, readFile, rm, link }, keyFile, config);
       }
       await reportStatus("stopped", `close-${code}`);
       say(policy.line);

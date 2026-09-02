@@ -84,6 +84,11 @@ function memFs(files) {
     },
     async rm(path) {
       delete files[path];
+    },
+    async link(from, to) {
+      if (!(from in files)) throw new Error("ENOENT");
+      if (to in files) throw new Error("EEXIST");
+      files[to] = files[from];
     }
   };
 }
@@ -100,4 +105,20 @@ test("retireKeyFile removes the rejected config but restores a newer one", async
   assert.deepEqual(JSON.parse(replaced.files["/k"]), fresh);
 
   assert.equal(await retireKeyFile(memFs({}), "/k", loaded), "absent");
+});
+
+test("retireKeyFile never clobbers a third key installed while the file was aside", async () => {
+  const loaded = { url: "wss://x/events", protocols: [SUBPROTOCOL, "A"], keyId: "a" };
+  const b = { url: "wss://x/events", protocols: [SUBPROTOCOL, "B"], keyId: "b" };
+  const c = { url: "wss://x/events", protocols: [SUBPROTOCOL, "C"], keyId: "c" };
+  const fs = memFs({ "/k": JSON.stringify(b) });
+  // Simulate a third session installing C the moment B is moved aside.
+  const realRead = fs.readFile.bind(fs);
+  fs.readFile = async (path) => {
+    fs.files["/k"] = JSON.stringify(c);
+    return realRead(path);
+  };
+  assert.equal(await retireKeyFile(fs, "/k", loaded), "superseded");
+  assert.deepEqual(JSON.parse(fs.files["/k"]), c);
+  assert.deepEqual(Object.keys(fs.files), ["/k"]);
 });
