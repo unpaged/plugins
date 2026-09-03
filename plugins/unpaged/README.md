@@ -10,6 +10,7 @@ See the plan before the code. `/unpaged:visual-plan` renders the plan Claude jus
 - **Comments are pushed back** — leave a comment on any element of that board, mention `@agent`, and the session that made the board hears it within seconds and answers on the canvas. No polling, nothing to type: `/unpaged:visual-plan` arms a listener for the board it just created. Each board has its own listener, so two sessions with two plans never answer each other's boards.
 - **Approval flips the board** — when you approve the plan in Claude Code, the board's status stamp changes to 🚀 EXECUTING.
 - **Bundled MCP server** — installing the plugin registers UnPaged's MCP server; no manual config.
+- **Filed automatically** — every plan board lands in the *Visual plans* folder of your UnPaged library (created the first time a plan is rendered), so plans from every repo sit together and never clutter the rest of your documents. Rename or delete the folder freely; the next plan recreates it.
 
 ## Install
 
