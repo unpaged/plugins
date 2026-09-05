@@ -1,10 +1,10 @@
 {
   "name": "unpaged",
-  "displayName": "UnPaged",
-  "description": "Renders Claude Code plans as visual boards on UnPaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies and listens to that board's @agent comments (pushed to the session, no polling); approving the plan stamps the board EXECUTING. Every plan board is filed in the Visual plans folder of your UnPaged library.",
+  "displayName": "Unpaged",
+  "description": "Renders Claude Code plans as whiteboards on Unpaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies and listens to its @agent comments (pushed to the session, no polling); approving the plan stamps the canvas EXECUTING. Every plan is filed in the Visual plans folder of your Unpaged library.",
   "version": "0.5.0",
   "author": {
-    "name": "UnPaged",
+    "name": "Unpaged",
     "url": "https://unpaged.io"
   }
 }
