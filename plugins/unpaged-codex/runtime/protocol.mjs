@@ -1,8 +1,9 @@
+import { isAbsolute } from "node:path";
+
 export const EVENTS_URL = "wss://mcp.unpaged.io/events";
-export const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
 export const SUBPROTOCOL = "unpaged-listener.v1";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN = /^[!#$%&'*+\-.^_`|~A-Za-z0-9]+$/;
 
 export function requireId(value) {
@@ -74,6 +75,15 @@ export function validateRoutingEvent(event, documentId) {
     .map((key) => [key, event[key]]));
 }
 export function acceptancePhrase(digest) { return `I accept plan version ${requireDigest(digest).slice(0, 12)}`; }
+export function acceptsPlan(text, digest) {
+  const versioned = acceptancePhrase(digest).toLowerCase();
+  if (typeof text !== "string" || text.length > 1000 || text.includes("\0")) return false;
+  // Only standalone explicit acceptance is normalized. Quotes, questions,
+  // conditions, negation and additional clauses remain ambiguous feedback.
+  const normalized = text.trim().replace(/\s+/g, " ").toLowerCase()
+    .replace(/^@agent(?:\s*:\s*|\s+)/, "").replace(/[.!]+$/, "").trim();
+  return normalized === "i accept this plan" || normalized === versioned;
+}
 export function validateEvidence(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_evidence");
   if (value.skippedReason !== undefined) {
@@ -83,4 +93,3 @@ export function validateEvidence(value) {
   if (Object.keys(value).sort().join(",") !== "planDigest,replyId") throw new Error("invalid_evidence");
   return { replyId: requireId(value.replyId), planDigest: requireDigest(value.planDigest) };
 }
-import { isAbsolute } from "node:path";

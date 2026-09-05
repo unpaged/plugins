@@ -3,13 +3,16 @@ import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, open
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  acceptancePhrase, boundedText, requireDigest, requireId, requireUuid,
+  acceptsPlan, boundedText, requireDigest, requireId, requireUuid,
   validTime, validateBinding, validateEvidence, validateRoutingEvent
 } from "./protocol.mjs";
+import { processIdentity, workerIsAlive } from "./process-identity.mjs";
 
 const now = () => new Date().toISOString();
 const EVENT_STATES = ["received", "dispatching", "queued", "processing", "completed", "queue_uncertain", "effect_uncertain"];
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; } };
+// Server-authored comment timestamps and local version timestamps can differ
+// slightly. Older feedback remains stale beyond this explicit bounded allowance.
+export const ACCEPTANCE_CLOCK_SKEW_MS = 5000;
 const fail = (reason) => { const error = new Error(reason); error.code = reason === "worker_fenced" ? "OWNERSHIP_LOST" : reason.toUpperCase(); throw error; };
 
 export class Store {
@@ -29,7 +32,7 @@ export class Store {
         url TEXT, protocols TEXT, codex_path TEXT NOT NULL, plan_digest TEXT NOT NULL, plan_version_at TEXT NOT NULL, status_element_ids TEXT NOT NULL DEFAULT '[]',
         state TEXT NOT NULL DEFAULT 'active', connection TEXT NOT NULL DEFAULT 'stopped', connection_reason TEXT,
         reconciliation_required INTEGER NOT NULL DEFAULT 0, reconciliation_evidence TEXT,
-        worker_pid INTEGER, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
+        worker_pid INTEGER, worker_identity TEXT, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
         accepted_event_id TEXT, accepted_digest TEXT, accepted_at TEXT,
         revoke_pending INTEGER NOT NULL DEFAULT 0, revocation_evidence TEXT, updated_at TEXT NOT NULL
       );
@@ -46,6 +49,9 @@ export class Store {
       if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "plan_version_at")) {
         this.db.exec("ALTER TABLE bindings ADD COLUMN plan_version_at TEXT NOT NULL DEFAULT ''");
         this._run("UPDATE bindings SET plan_version_at=?", now());
+      }
+      if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "worker_identity")) {
+        this.db.exec("ALTER TABLE bindings ADD COLUMN worker_identity TEXT");
       }
     });
   }
@@ -120,7 +126,7 @@ export class Store {
     if (!["connecting", "connected", "reconnecting", "stopped"].includes(b.connection)) fail("unknown_connection_state");
     const result = { documentId: id, threadId: b.thread_id, keyId: b.key_id, codexPath: b.codex_path,
       planDigest: b.plan_digest, planVersionAt: b.plan_version_at, statusElementIds: JSON.parse(b.status_element_ids), status: b.state, connectionState: b.connection, connectionReason: b.connection_reason,
-      reconciliationRequired: Boolean(b.reconciliation_required), workerPid: b.worker_pid,
+      reconciliationRequired: Boolean(b.reconciliation_required), workerPid: b.worker_pid, workerIdentity: b.worker_identity,
       acceptedEventId: b.accepted_event_id, acceptedDigest: b.accepted_digest, acceptedAt: b.accepted_at,
       cleanupRequired: Boolean(b.revoke_pending), credentialsPresent: b.protocols !== null, eventCounts: counts, updatedAt: b.updated_at };
     if (includeSecrets) Object.assign(result, { url: b.url, protocols: b.protocols ? JSON.parse(b.protocols) : null, workerToken: b.worker_token });
@@ -128,23 +134,25 @@ export class Store {
   }
   listBindings() { return this._all("SELECT document_id FROM bindings ORDER BY document_id").map((row) => this.getBinding(row.document_id)); }
   listEvents(id) { this._binding(id); return this._all("SELECT * FROM events WHERE document_id=? ORDER BY rowid", id).map((row) => this._eventView(row)); }
-  claimWorker(id, { pid, isAlive: alive = isAlive }) {
+  claimWorker(id, { pid, identity = processIdentity(pid), isAlive: alive } = {}) {
     if (!Number.isSafeInteger(pid) || pid <= 0) fail("invalid_pid");
+    if (identity !== null && identity !== undefined && (typeof identity !== "string" || !identity || identity.length > 1000)) fail("invalid_worker_identity");
+    if (!alive && !identity) fail("worker_identity_unavailable");
     return this._tx(() => {
       const b = this._binding(id); this._active(b);
       if (!b.protocols) fail("credentials_missing");
-      if (b.worker_pid && alive(b.worker_pid)) fail("worker_alive");
+      if (b.worker_pid && (alive ? alive(b.worker_pid, b.worker_identity) : workerIsAlive(b.worker_pid, b.worker_identity))) fail("worker_alive");
       const recovered = Boolean(b.worker_started);
       if (recovered) {
         this._run("UPDATE events SET state='queue_uncertain',updated_at=? WHERE document_id=? AND state='dispatching'", now(), id);
         this._run("UPDATE events SET state='effect_uncertain',updated_at=? WHERE document_id=? AND state='processing'", now(), id);
       }
       const token = randomUUID();
-      this._run("UPDATE bindings SET worker_pid=?,worker_token=?,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, token, now(), id);
+      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, now(), id);
       return { token, recovered };
     });
   }
-  releaseWorker(id, token) { return this._tx(() => { this._fence(id, token); this._run("UPDATE bindings SET worker_pid=NULL,worker_token=NULL,connection='stopped',updated_at=? WHERE document_id=?", now(), id); }); }
+  releaseWorker(id, token) { return this._tx(() => { this._fence(id, token); this._run("UPDATE bindings SET worker_pid=NULL,worker_identity=NULL,worker_token=NULL,connection='stopped',updated_at=? WHERE document_id=?", now(), id); }); }
   setConnection(id, token, state, reason = null) {
     if (!["connecting", "connected", "reconnecting", "stopped"].includes(state)) fail("invalid_connection_state");
     if (reason !== null) boundedText(reason, 200);
@@ -238,11 +246,14 @@ export class Store {
       const event = this._processing(id, eventId, operationToken);
       const routing = JSON.parse(event.routing);
       if (routing.authorRole !== "owner") fail("owner_acceptance_required");
-      if (!validTime(b.plan_version_at) || Date.parse(routing.createdAt) < Date.parse(b.plan_version_at)) fail("acceptance_predates_plan_version");
+      // Receipt and version timestamps share this local clock. A later plan
+      // change invalidates queued acceptance without any server-skew allowance.
+      if (!validTime(b.plan_version_at) || !validTime(event.received_at) ||
+        Date.parse(event.received_at) < Date.parse(b.plan_version_at) ||
+        Date.parse(routing.createdAt) < Date.parse(b.plan_version_at) - ACCEPTANCE_CLOCK_SKEW_MS) fail("acceptance_predates_plan_version");
       if (this._get("SELECT event_id FROM events WHERE document_id=? AND event_id<>? AND state<>'completed' LIMIT 1", id, eventId)) fail("outstanding_events");
       if (currentDigest !== submittedPlanDigest || currentDigest !== b.plan_digest) fail("digest_mismatch");
-      const phrase = acceptancePhrase(currentDigest);
-      if (humanText !== phrase && humanText !== `@agent ${phrase}`) fail("explicit_acceptance_required");
+      if (!acceptsPlan(humanText, currentDigest)) fail("explicit_acceptance_required");
       this._run("UPDATE bindings SET state='accepted',accepted_event_id=?,accepted_digest=?,accepted_at=?,revoke_pending=1,updated_at=? WHERE document_id=?", eventId, currentDigest, now(), now(), id);
       return this.getBinding(id);
     });

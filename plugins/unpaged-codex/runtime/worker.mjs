@@ -1,11 +1,10 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Store } from "./store.mjs";
-import { parseEvent } from "./protocol.mjs";
+import { EVENTS_URL, UUID, parseEvent } from "./protocol.mjs";
 
-export const EVENTS_URL = "wss://mcp.unpaged.io/events";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TERMINAL_CLOSES = new Set([4401, 4409, 1003]);
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -13,13 +12,23 @@ function absolutePath(value) {
   return typeof value === "string" && isAbsolute(value) && !value.includes("\0");
 }
 
-// Both identifiers must match the CLI's complete success receipt. Exit status
-// alone is insufficient: failure, truncation and unexpected stdout are ambiguous.
+// execFile must report exit 0, and stdout must identify exactly one bound task
+// and one distinct queue item. Prose and whitespace may change between releases;
+// missing, foreign-task or additional UUIDs remain ambiguous.
 export function parseQueueReceipt(stdout, threadId) {
   if (typeof stdout !== "string" || !UUID.test(threadId)) return null;
-  const match = /^Queued message ([0-9a-f-]{36}) for thread ([0-9a-f-]{36})\.\r?\n?$/i.exec(stdout);
-  if (!match || !UUID.test(match[1]) || match[2].toLowerCase() !== threadId.toLowerCase()) return null;
-  return match[1].toLowerCase();
+  const ids = [...new Set((stdout.match(/[A-Za-z0-9_-]+/g) ?? []).filter((part) => UUID.test(part)).map((part) => part.toLowerCase()))];
+  const expected = threadId.toLowerCase();
+  if (ids.length !== 2 || !ids.includes(expected)) return null;
+  const queueId = ids.find((id) => id !== expected);
+  // When roles are labeled, their meaning takes precedence over mere UUID
+  // presence. Otherwise a queue ID equal to the expected task could hide a
+  // receipt that explicitly says delivery went to another task.
+  const labeled = (pattern) => [...stdout.matchAll(pattern)].map((match) => match[1]).filter((id) => UUID.test(id)).map((id) => id.toLowerCase());
+  const tasks = labeled(/\b(?:thread|task|session)(?:\s*id)?[\s:#="']*([A-Za-z0-9_-]+)/gi);
+  const messages = labeled(/\b(?:message|queue(?:\s+(?:message|item))?)(?:\s*id)?[\s:#="']*([A-Za-z0-9_-]+)/gi);
+  if (tasks.some((id) => id !== expected) || messages.some((id) => id !== queueId)) return null;
+  return queueId;
 }
 
 export function routingMessage(binding, event, { dataDir, cliPath = CLI_PATH } = {}) {
@@ -65,10 +74,6 @@ export function enqueue(binding, event, options = {}) {
       resolveReceipt(queueId);
     });
   });
-}
-
-function processIsAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
 }
 
 // The worker owns transport only. Store transitions are synchronous SQLite
@@ -223,7 +228,7 @@ export async function runWorker(documentId, options = {}) {
   try {
     const claim = store.claimWorker(documentId, {
       pid: options.pid ?? process.pid,
-      isAlive: options.isAlive ?? processIsAlive
+      ...(options.isAlive ? { isAlive: options.isAlive } : {})
     });
     token = claim.token;
     if (options.signal?.aborted) {
@@ -249,7 +254,7 @@ export function parseWorkerArguments(args) {
   return { documentId: args[0], dataDir: resolve(args[2]) };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once("SIGTERM", stop);

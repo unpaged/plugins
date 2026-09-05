@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Store } from "./store.mjs";
-import { CODEX_PATH, EVENTS_URL, acceptancePhrase, parseEvent } from "./protocol.mjs";
+import { EVENTS_URL, acceptancePhrase, parseEvent } from "./protocol.mjs";
 import { enqueue, parseQueueReceipt, parseWorkerArguments, routingMessage, runWorker } from "./worker.mjs";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
@@ -12,6 +12,7 @@ const THREAD = "22222222-2222-4222-8222-222222222222";
 const QUEUE = "33333333-3333-4333-8333-333333333333";
 const DIGEST = "a".repeat(64);
 const SECRET = "never-log-this-test-credential";
+const CODEX_PATH = process.execPath;
 const binding = () => ({
   documentId: DOCUMENT,
   threadId: THREAD,
@@ -85,10 +86,14 @@ function fixture(t, options = {}) {
   return { dataDir, store, sockets, calls, controller, start, Socket, execFile, get done() { return run; } };
 }
 
-test("queue receipt requires exact syntax, a UUID and the bound task", () => {
+test("queue receipt tolerates prose changes but requires only the queue UUID and bound task UUID", () => {
   assert.equal(parseQueueReceipt(receipt(), THREAD), QUEUE);
   assert.equal(parseQueueReceipt(receipt().trimEnd(), THREAD), QUEUE);
-  for (const stdout of ["", "OK", `${receipt()}extra`, `warning\n${receipt()}`, receipt("-".repeat(36)), receipt(QUEUE, DOCUMENT)]) {
+  for (const stdout of [`${receipt()}extra`, `warning\n${receipt()}`, `Task ${THREAD}\nMessage: ${QUEUE}`, `queued ${QUEUE.toUpperCase()} => ${THREAD}`]) {
+    assert.equal(parseQueueReceipt(stdout, THREAD), QUEUE);
+  }
+  for (const stdout of ["", "OK", `${receipt()} ${DOCUMENT}`, receipt("-".repeat(36)), receipt(QUEUE, DOCUMENT), receipt(THREAD), `queued ${QUEUE}`,
+    receipt(THREAD, DOCUMENT), `Message: ${THREAD}\nTask: ${DOCUMENT}`, JSON.stringify({ queueId: THREAD, threadId: DOCUMENT })]) {
     assert.equal(parseQueueReceipt(stdout, THREAD), null);
   }
 });

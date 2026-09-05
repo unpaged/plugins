@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Store } from "./store.mjs";
-import { acceptancePhrase, CODEX_PATH, EVENTS_URL } from "./protocol.mjs";
+import { ACCEPTANCE_CLOCK_SKEW_MS, Store } from "./store.mjs";
+import { acceptancePhrase, EVENTS_URL } from "./protocol.mjs";
+import { processIdentity } from "./process-identity.mjs";
 
 const doc = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const digest = "a".repeat(64), changedDigest = "b".repeat(64), queueId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const binding = { documentId: doc, threadId: task, keyId: "key-1", url: EVENTS_URL,
-  protocols: ["unpaged-listener.v1", "TEST_SECRET_CREDENTIAL"], codexPath: CODEX_PATH, planDigest: digest };
+  protocols: ["unpaged-listener.v1", "TEST_SECRET_CREDENTIAL"], codexPath: "/test/bin/codex", planDigest: digest };
 const event = (id = "event-1", role = "owner") => ({ id, documentId: doc, nodeId: "root", threadId: `thread-${id}`,
   commentId: `comment-${id}`, reason: "mention", authorRole: role, resolved: false, createdAt: new Date().toISOString() });
 function fixture(t) {
@@ -65,6 +66,45 @@ test("worker ownership is atomic across connections, only dead owner transfers, 
   assert.throws(() => store.setConnection(doc, token, "connected"), { code: "OWNERSHIP_LOST" });
   assert.equal(second.getBinding(doc).reconciliationRequired, true);
 });
+test("worker claims persist process identity and recover a reused PID while fencing the prior token", (t) => {
+  const { store, token } = fixture(t);
+  store.releaseWorker(doc, token);
+  const identity = processIdentity(process.pid);
+  assert.equal(typeof identity, "string", "the current process must have a verifiable identity");
+  const first = store.claimWorker(doc, { pid: process.pid });
+  assert.equal(store.getBinding(doc).workerIdentity, identity);
+  assert.throws(() => store.claimWorker(doc, { pid: process.pid }), /worker_alive/);
+
+  // Simulate a persisted claim from an earlier process with the same PID.
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("earlier-boot-and-start", doc);
+  const replacement = store.claimWorker(doc, { pid: process.pid });
+  assert.notEqual(replacement.token, first.token);
+  assert.equal(store.getBinding(doc).workerIdentity, identity);
+  assert.equal(store.getBinding(doc).reconciliationRequired, true);
+  assert.throws(() => store.setConnection(doc, first.token, "connected"), { code: "OWNERSHIP_LOST" });
+  store.releaseWorker(doc, replacement.token);
+  assert.equal(store.getBinding(doc).workerPid, null);
+  assert.equal(store.getBinding(doc).workerIdentity, null);
+});
+test("legacy databases gain a nullable identity without taking over a live unverified worker", (t) => {
+  const { store, token, path } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_pid=? WHERE document_id=?").run(process.pid, doc);
+  store.db.exec("ALTER TABLE bindings DROP COLUMN worker_identity");
+  store.close();
+  const migrated = new Store(path); t.after(() => migrated.close());
+  assert.equal(migrated.getBinding(doc).workerIdentity, null);
+  assert.equal(migrated.getBinding(doc, { includeSecrets: true }).workerToken, token);
+  assert.equal(migrated.getBinding(doc).planDigest, digest);
+  assert.throws(() => migrated.claimWorker(doc, { pid: process.pid }), /worker_alive/);
+  assert.equal(migrated.getBinding(doc, { includeSecrets: true }).workerToken, token);
+});
+test("production worker claims require a verified own identity before changing the binding", (t) => {
+  const { store, token } = fixture(t);
+  store.releaseWorker(doc, token);
+  assert.throws(() => store.claimWorker(doc, { pid: process.pid, identity: null }), /worker_identity_unavailable/);
+  assert.throws(() => store.claimWorker(doc, { pid: process.pid, identity: "" }), /invalid_worker_identity/);
+  assert.equal(store.getBinding(doc).workerPid, null);
+});
 test("wakeup can begin before queue commit but duplicate begin cannot replay board effects", (t) => {
   const { store, token } = fixture(t);
   const first = processing(store, token);
@@ -108,9 +148,9 @@ test("explicit retry requires queue uncertainty and keeps journal identity", (t)
   assert.equal(store.receive(doc, event(), token).inserted, false);
   assert.equal(store.listEvents(doc).length, 1);
 });
-test("acceptance requires owner, exact full phrase, unchanged digest, current operation and no gap", (t) => {
+test("acceptance requires standalone owner approval, unchanged digest, current operation and no gap", (t) => {
   const { store, token } = fixture(t); const started = processing(store, token);
-  for (const humanText of ["Looks good", "I accept", acceptancePhrase(digest) + "\n", acceptancePhrase(digest).toLowerCase()]) {
+  for (const humanText of ["Looks good", "I accept", "I accept this plan if tests pass", '"I accept this plan"']) {
     assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken, { humanText })), /explicit_acceptance_required/);
   }
   assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken, { currentDigest: changedDigest })), /digest_mismatch/);
@@ -118,7 +158,7 @@ test("acceptance requires owner, exact full phrase, unchanged digest, current op
   assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken)), /reconciliation_required/);
   assert.throws(() => store.reconcile(doc, { evidence: "" }), /invalid_evidence/);
   store.reconcile(doc, { evidence: "MCP thread sweep checked current owner comments; no unhandled gap remains." });
-  const accepted = store.accept(doc, "event-1", acceptArgs(started.operationToken, { humanText: `@agent ${acceptancePhrase(digest)}` }));
+  const accepted = store.accept(doc, "event-1", acceptArgs(started.operationToken, { humanText: "\n@agent: I accept this plan.\n" }));
   assert.equal(accepted.status, "accepted"); assert.equal(accepted.acceptedDigest, digest); assert.equal(accepted.cleanupRequired, true);
   assert.equal(store.nextEvent(doc, token), null);
   assert.throws(() => store.complete(doc, "event-1", { operationToken: started.operationToken, evidence: { replyId: "reply", planDigest: changedDigest } }), /accepted_plan_changed/);
@@ -196,12 +236,56 @@ test("digest status-element exclusions persist and cannot silently change on reb
   store.bind({ ...binding, documentId: queueId, statusElementIds: [doc] });
   assert.deepEqual(store.getBinding(queueId).statusElementIds, [doc]);
 });
-test("owner acceptance created before this plan version cannot accept even an identical hash", (t) => {
+test("owner acceptance older than the clock allowance cannot accept even an identical hash", (t) => {
   const { store, token } = fixture(t);
-  const old = { ...event(), createdAt: new Date(Date.parse(store.getBinding(doc).planVersionAt) - 1).toISOString() };
+  const old = { ...event(), createdAt: new Date(Date.parse(store.getBinding(doc).planVersionAt) - ACCEPTANCE_CLOCK_SKEW_MS - 1).toISOString() };
   store.receive(doc, old, token); store.markDispatching(doc, old.id, token);
   const started = store.begin(doc, old.id, { expectedThreadId: task });
   assert.throws(() => store.accept(doc, old.id, acceptArgs(started.operationToken)), /acceptance_predates_plan_version/);
+});
+test("owner acceptance tolerates bounded server clock skew without relaxing version checks", (t) => {
+  assert.equal(ACCEPTANCE_CLOCK_SKEW_MS, 5000);
+  for (const millisecondsBefore of [0, 1, 4999, 5000]) {
+    const { store, token } = fixture(t);
+    const feedback = { ...event(), createdAt: new Date(Date.parse(store.getBinding(doc).planVersionAt) - millisecondsBefore).toISOString() };
+    store.receive(doc, feedback, token); store.markDispatching(doc, feedback.id, token);
+    const started = store.begin(doc, feedback.id, { expectedThreadId: task });
+    assert.throws(() => store.accept(doc, feedback.id, acceptArgs(started.operationToken, { currentDigest: changedDigest })), /digest_mismatch/);
+    const result = store.accept(doc, feedback.id, acceptArgs(started.operationToken, { humanText: ` @agent: ${acceptancePhrase(digest)}.\n` }));
+    assert.equal(result.status, "accepted");
+    assert.equal(result.acceptedDigest, digest);
+  }
+});
+test("acceptance received before a later revision cannot approve that revision inside the server clock allowance", (t) => {
+  const baseline = Date.parse("2026-09-05T12:00:00.000Z");
+  t.mock.timers.enable({ apis: ["Date"], now: baseline });
+  const { store, token } = fixture(t);
+  const revision = processing(store, token, "revision");
+  t.mock.timers.setTime(baseline + 1000);
+  store.receive(doc, event("acceptance"), token);
+  t.mock.timers.setTime(baseline + 2000);
+  store.complete(doc, "revision", { operationToken: revision.operationToken, evidence: { replyId: "revision-reply", planDigest: changedDigest } });
+  store.markDispatching(doc, "acceptance", token);
+  const approval = store.begin(doc, "acceptance", { expectedThreadId: task });
+  assert.equal(Date.parse(store.getBinding(doc).planVersionAt) - Date.parse(approval.event.createdAt), 1000);
+  assert.throws(() => store.accept(doc, "acceptance", acceptArgs(approval.operationToken, {
+    humanText: "I accept this plan.", currentDigest: changedDigest, submittedPlanDigest: changedDigest
+  })), /acceptance_predates_plan_version/);
+  assert.equal(store.getBinding(doc).status, "active");
+});
+test("a prior reply without a digest change does not invalidate already received acceptance", (t) => {
+  const baseline = Date.parse("2026-09-05T12:00:00.000Z");
+  t.mock.timers.enable({ apis: ["Date"], now: baseline });
+  const { store, token } = fixture(t);
+  const reply = processing(store, token, "clarification");
+  t.mock.timers.setTime(baseline + 1000);
+  store.receive(doc, event("acceptance"), token);
+  t.mock.timers.setTime(baseline + 2000);
+  store.complete(doc, "clarification", { operationToken: reply.operationToken, evidence: { replyId: "clarification-reply", planDigest: digest } });
+  store.markDispatching(doc, "acceptance", token);
+  const approval = store.begin(doc, "acceptance", { expectedThreadId: task });
+  assert.equal(Date.parse(store.getBinding(doc).planVersionAt), baseline);
+  assert.equal(store.accept(doc, "acceptance", acceptArgs(approval.operationToken, { humanText: "I accept this plan." })).status, "accepted");
 });
 test("plan-version timestamp advances only when completion changes the digest", async (t) => {
   const { store, token } = fixture(t); const initial = store.getBinding(doc).planVersionAt;

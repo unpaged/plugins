@@ -4,14 +4,15 @@ import { constants, existsSync, openSync, closeSync, realpathSync } from "node:f
 import { access, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { delimiter, isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { Store } from "./store.mjs";
+import { retainRuntime } from "./snapshot.mjs";
+import { UUID } from "./protocol.mjs";
+import { processIdentity, workerIsAlive } from "./process-identity.mjs";
 
 const run = promisify(execFile);
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const scriptDir = dirname(fileURLToPath(import.meta.url));
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const fail = (code) => { throw new Error(code); };
 
@@ -49,6 +50,13 @@ function canonical(value) {
   return value;
 }
 
+// Public GraphNode / GraphElement content fields from Unpaged's domain contract.
+// Plugin-defined content remains in the complete properties bag. New transport
+// metadata does not change acceptance; new domain content needs an explicit update.
+const NODE_CONTENT = ["id", "title", "content", "parentNodeId", "canvasWidth", "canvasHeight", "backgroundColor", "level"];
+const ELEMENT_CONTENT = ["id", "elementType", "schemaVersion", "properties", "isLink", "linkTarget", "linkOrder", "locked", "zOrder", "x", "y", "width", "height", "rotation"];
+const contentFields = (value, fields) => Object.fromEntries(fields.filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]]));
+
 // Hash semantic content read with document_get. Explicit status elements are
 // excluded so displaying the digest/acceptance phrase does not change itself.
 export function planDigest({ document, statusElementIds = [] }) {
@@ -71,12 +79,8 @@ export function planDigest({ document, statusElementIds = [] }) {
         return false;
       }
       return true;
-    }).map((element) => {
-      const { revision, createdAt, updatedAt, ...content } = element;
-      return content;
-    });
-    const { revision, createdAt, updatedAt, owner, elementWriters, ...content } = node;
-    return { ...content, elements };
+    }).map((element) => contentFields(element, ELEMENT_CONTENT));
+    return { ...contentFields(node, NODE_CONTENT), elements };
   }).sort((a, b) => a.id.localeCompare(b.id));
   if (!seen.has(document.rootNodeId) || foundExcluded.size !== excluded.size) fail("invalid_document_snapshot");
   if (Number.isInteger(document.nodeCount) && document.nodeCount !== nodes.length) fail("partial_document_snapshot");
@@ -110,20 +114,20 @@ export async function findCodex(explicit, env = process.env, execute = run) {
   fail("supported_codex_queue_not_found");
 }
 
-function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
-}
-
 export async function ensureWorker(store, documentId, directory, options = {}) {
   let binding = store.getBinding(documentId);
   if (!binding || binding.status !== "active") return binding;
-  if (alive(binding.workerPid)) return binding;
+  const identity = processIdentity(binding.workerPid);
+  if (workerIsAlive(binding.workerPid, binding.workerIdentity, () => identity)) {
+    if (typeof identity !== "string" || typeof binding.workerIdentity !== "string") fail("worker_identity_unverifiable");
+    return binding;
+  }
+  const workerPath = await retainRuntime(directory);
   const logPath = join(directory, "worker.log");
   const fd = openSync(logPath, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   try {
     const child = (options.spawn ?? spawn)(process.execPath,
-      [join(scriptDir, "worker.mjs"), documentId, "--data", directory],
+      [workerPath, documentId, "--data", directory],
       { detached: true, stdio: ["ignore", fd, fd], cwd: directory, shell: false });
     await new Promise((done, reject) => { child.once("spawn", done); child.once("error", reject); });
     child.unref();

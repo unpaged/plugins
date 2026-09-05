@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { dataDirectory, executeCli, findCodex, parseArgs, planDigest } from "./cli.mjs";
 import { Store } from "./store.mjs";
-import { CODEX_PATH, EVENTS_URL, SUBPROTOCOL } from "./protocol.mjs";
+import { EVENTS_URL, SUBPROTOCOL } from "./protocol.mjs";
 
 const DOC = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -19,7 +19,7 @@ const OTHER = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const DIGEST = "a".repeat(64);
 const SECRET = "test-private-listener-credential";
 const binding = { documentId: DOC, threadId: TASK, keyId: "key1", url: EVENTS_URL,
-  protocols: [SUBPROTOCOL, SECRET], codexPath: CODEX_PATH, planDigest: DIGEST, statusElementIds: [STATUS] };
+  protocols: [SUBPROTOCOL, SECRET], codexPath: process.execPath, planDigest: DIGEST, statusElementIds: [STATUS] };
 const event = { id: "event1", documentId: DOC, nodeId: NODE, threadId: "comment-thread", commentId: "comment1",
   reason: "mention", authorRole: "owner", resolved: false, createdAt: new Date().toISOString() };
 const input = (value) => Readable.from([JSON.stringify(value)]);
@@ -73,6 +73,26 @@ test("digest ignores only volatile metadata and declared status, rejects incompl
   assert.throws(() => planDigest({ ...baseline, statusElementIds: [OTHER] }), /invalid_document/);
   baseline.document.nodeCount = 2;
   assert.throws(() => planDigest(baseline), /partial_document/);
+});
+
+test("digest ignores new envelope metadata but preserves all domain content and arbitrary plugin properties", () => {
+  const baseline = snapshot();
+  const same = structuredClone(baseline);
+  same.document.transportVersion = 2;
+  same.document.nodes[0].serverReadAt = "later";
+  same.document.nodes[0].elements[0].collaborationMetadata = { users: 2 };
+  assert.equal(planDigest(same), planDigest(baseline));
+  for (const change of [
+    (x) => { x.document.nodes[0].content = "Changed goal"; },
+    (x) => { x.document.nodes[0].backgroundColor = "#111111"; },
+    (x) => { x.document.nodes[0].elements[0].linkTarget = OTHER; },
+    (x) => { x.document.nodes[0].elements[0].locked = true; },
+    (x) => { x.document.nodes[0].elements[0].zOrder = 2; },
+    (x) => { x.document.nodes[0].elements[0].properties.futurePluginPayload = { text: "Meaningful content" }; }
+  ]) {
+    const modified = structuredClone(baseline); change(modified);
+    assert.notEqual(planDigest(modified), planDigest(baseline));
+  }
 });
 
 test("binary capability check uses absolute argv, enforces version, and exposes no command output", async () => {
