@@ -9,7 +9,7 @@ Create a board the user can review by commenting on its specific parts. This is
 the creation entry point for this plugin's own
 [review-plan skill](../review-plan/SKILL.md), not an external planning framework.
 Read that skill before board operations. It owns connection discovery, the
-document/task binding, versioned status, listener, feedback, and acceptance.
+document/task binding, submitted status, listener, feedback, and acceptance.
 Apply the instructions below to its creation flow; create the document once.
 
 ## Resolve the plan
@@ -56,7 +56,8 @@ Use the root node as the overview:
   Use anchored connectors for actual dependencies; do not invent dependencies.
 - Notes for stated risks, assumptions, and open decisions.
 - One dedicated status element, kept separate from plan content. Let review-plan
-  set its version and acceptance phrase; approval must not stamp it EXECUTING.
+  set PROPOSED and the phrase `@agent I accept this plan`. Only verified explicit
+  owner acceptance changes it to ACCEPTED; implementation needs a separate request.
 
 For a small plan, keep its task checklist and verification criteria on the root.
 For a larger plan, use `node_create_with_elements` for phase child nodes with
@@ -73,7 +74,7 @@ Use current revisions for subsequent edits, as required by review-plan.
 
 ## Hand over the review
 
-Continue the same review-plan creation flow for the digest, versioned status,
+Continue the same review-plan creation flow for the internal digest, status,
 board-bound listener, and verified connection state. Respect any explicit request
 to render only or not listen: prepare the board without arming a listener and
 state that mode. For an existing binding, use its status and recovery flow;

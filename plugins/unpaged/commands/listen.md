@@ -31,3 +31,18 @@ Same listing, no arming. For each board: key file valid or not, and `monitor:con
 Call `agent_listener_keys_list`. For `revoke <documentId>`: revoke every live key for that board whose label matches this host with `agent_listener_key_revoke`, then `rm -f` that board's file. For `revoke all`: revoke every key whose label matches this host — including rows with `documentId: null` (v1 keys) — and `rm -f ~/.claude/unpaged/listeners/*.json` plus the retired v1 file `~/.claude/unpaged/listener.json*` if present. Say push is off for those boards until the next `arm` or `/unpaged:visual-plan`.
 
 If the `agent_listener_key_create` tool is missing, the connected server predates push — say so and stop.
+
+
+## Review policy
+
+For routed feedback and acceptance, use this package's
+[visual-plan command](visual-plan.md#when-an-event-arrives). Read the current
+human comment through MCP; the event is routing metadata only. For an attached
+existing board, establish its complete submitted content baseline before inviting
+acceptance. Both plugins use PROPOSED → ACCEPTED: the owner explicitly comments
+`@agent I accept this plan`, and acceptance does not authorize implementation.
+Agents reply and leave threads open; humans resolve them. Never reopen a resolved
+thread or treat its resolution as acceptance. After verified acceptance, stop
+only this session's board Monitor, revoke its recorded listener key, and verify
+that exact key is absent through MCP. Preserve other keys and do not re-arm;
+use the visual-plan acceptance cleanup rules if interrupted.

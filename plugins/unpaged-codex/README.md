@@ -6,7 +6,12 @@ It is an experimental integration, with the recovery boundaries below.
 
 ## Requirements
 
-- Node.js 24 or newer, available to Codex and its hooks. No npm dependencies.
+- macOS or Linux. Worker process identity is supported on those platforms;
+  Windows is not a supported pilot host.
+- Node.js 24 or newer, available to Codex and its hooks. Node 24 is the tested
+  LTS support floor for this pilot; it is deliberate, not a claim that
+  `node:sqlite` first became unflagged there (that happened in Node 22.13).
+  No npm dependencies.
 - Codex 0.153.1 or newer with the public `queue` command. The adapter checks
   the actual binary before arming; it does not assume the terminal and desktop
   use the same version.
@@ -57,20 +62,26 @@ Official references: [plugin packaging](https://developers.openai.com/plugins/bu
 
 ## Updating an existing pilot
 
-Keep the plugin name, review data directory, `review-plan` skill path and startup
-hook identity stable. Generate the new registered package and validate it.
-The Codex 0.153.1 native reinstall removed the previous cache directory in the
-personal pilot. A live receiver and already queued messages can still reference
-that cache's runtime and skill paths. Do not run an unattended update over an
-active review: the development pilot required a verified backup and restoration
-of its exact old cache after reinstall. This is a pilot workaround, not a
-customer update procedure. Safe runtime lifetime across native cache replacement
-is a release gate; do not claim upgrade recovery is automatic.
+Keep the plugin name, review data directory and startup-hook identity stable.
+Generate and validate the registered package, then use the native update flow.
+New receivers copy their executable files and bundled skills to a private,
+content-addressed `${CODEX_HOME:-~/.codex}/unpaged/runtimes/<hash>/` directory before
+launching. Queued messages reference that retained copy. Replacing the plugin
+cache cannot delete the code needed by those receivers or messages. Snapshots
+are retained; do not remove them while a review or queued event might use them.
 
-Do not uninstall the old plugin as an update mechanism. An existing live receiver remains
-on its original code until deliberately migrated; a newer package being installed
-does not prove that receiver has upgraded. This release changes no binding or
-database schema and requires no replacement listener key.
+A receiver already running from an older cache path is **not migrated by
+installation**. Keep its original code available until its pending work has been
+reconciled and it is deliberately stopped or migrated. Do not uninstall to update,
+replace its listener key, or start a competing receiver. Local cache-deletion tests
+cover retained runtime behavior; a native installed-package update with pending
+feedback remains a release trial.
+
+Stored worker ownership includes the operating-system boot and process start
+identity, so reusing a PID does not make an unrelated process the review owner.
+An unknown identity, including a live legacy PID with no stored identity, raises
+`worker_identity_unverifiable`. Preserve that process and report the blocker;
+installation does not silently migrate it or treat it as a new receiver.
 
 ## Use
 
@@ -92,13 +103,23 @@ change, and replies in the same thread. **Agents leave threads open; humans
 resolve them.** A viewer's feedback is a proposal for an owner/editor to confirm.
 If a human already resolved the thread, the agent respects that decision.
 
-Each submitted plan has a content digest and a short version label, displayed
-in a separate status element. To accept an exact version, the owner comments
-`@agent` followed by the displayed `I accept plan version <version>` phrase.
-The agent checks the current board
-digest and records an acceptance receipt. Acceptance stops this review; it does
-not authorize code implementation. Pending feedback or a reconciliation gap
-blocks acceptance until addressed.
+Both host plugins show **PROPOSED → ACCEPTED**. To accept, the owner comments
+`@agent I accept this plan`. Whitespace, a trailing period or exclamation mark,
+and `@agent:` are accepted; questions, quoted phrases and conditional approval
+are not. A displayed legacy `I accept plan version <version>` phrase remains
+supported for existing boards. Users do not need to type a hash for new reviews.
+
+The Codex adapter retains the full digest internally and verifies that current
+content still matches the submitted baseline. It records an owner acceptance
+receipt and stops that review. Pending feedback or a reconciliation gap blocks
+acceptance. Acceptance does not authorize implementation.
+
+The server comment timestamp allows up to five seconds of clock skew. The local
+event-receipt timestamp must be at or after the local submitted-baseline timestamp,
+with no tolerance, so feedback already received before a revision cannot accept
+that revision. Larger server/client discrepancies still defer acceptance for
+verification. Neither timestamp check replaces current-content, owner-role or
+outstanding-feedback checks.
 
 The listener stays running between comments. After Codex closes, it can retain
 received events and queue them for the assigned task. **Codex only automatically
@@ -141,8 +162,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for contracts and release gates.
 ## Data and stopping
 
 Local data is in `${CODEX_HOME:-~/.codex}/unpaged/reviews.sqlite`. The directory
-is private (0700) and the database is private (0600). The receive-only listener
-credential is stored there to allow reconnection; it is not an OAuth token.
+is private (0700) and the database is private (0600). Retained runtime snapshots live alongside it under `runtimes/`. The receive-only listener
+credential is stored in the database to allow reconnection; it is not an OAuth token.
 Treat database backups as credentials. Never print or attach the database.
 Status and queued prompts contain routing metadata, not comment text or keys.
 An explicit `--data /absolute/path` overrides the directory for tests; the
@@ -174,11 +195,13 @@ node --test scripts/build-codex-plugin.test.mjs
 The automated tests use temporary databases and fake sockets/queue commands.
 They do not spend model tokens or write to a live board. The earlier live spike
 proved one actual board comment waking the same idle desktop task and producing
-a revision-checked edit and open-thread reply; that spike is not installed-build
-or restart evidence for this package.
+a revision-checked edit and open-thread reply. An earlier installed package also
+delivered native SessionStart context for its existing binding. Neither establishes
+hook pickup or a live comment for this revised build.
 
 The package test builds a real artifact with a synthetic connection ID and
-executes its CLI, including a symlink-path invocation. It also verifies no direct
+executes its CLI, including a symlink-path invocation. Runtime tests cover cache removal, PID
+reuse, acceptance text normalization and bounded clock skew. It also verifies no direct
 MCP configuration remains in the registered artifact, both skill paths exist,
 source files remain unchanged, existing outputs are protected, and source symlinks
 cannot pull external files into the package. CI is configured to run these checks with the

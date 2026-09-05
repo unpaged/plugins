@@ -2,7 +2,9 @@
 
 Base: `b680a00a440866af268c9f6fb35d5c05416ff3d9` in the Unpaged plugin repository.
 The implementation lives in a separate `plugins/unpaged-codex` package.
-The existing Claude implementation and remote Unpaged server are unchanged.
+The remote Unpaged server is unchanged. Both host packages use the same review
+policy: PROPOSED → ACCEPTED, owner acceptance, human thread resolution, and
+separate authorization to implement.
 
 ## Ownership and data flow
 
@@ -24,8 +26,13 @@ review, not a command interface exposed to collaborators.
 
 SQLite transactions serialize event claims across local processes; WAL and FULL
 synchronization save work before queue side effects. Each board has one immutable
-task binding and one worker owner token. Dead-worker recovery never overwrites a
-live owner's lease. A displaced worker cannot report a result for its successor.
+task binding and one worker owner token. The worker identity includes the host
+boot and process start identity as well as its PID. Recovery can distinguish PID
+reuse from a still-running owner on supported macOS and Linux hosts. Windows
+identity is unsupported. An unavailable identity, including a live legacy PID
+without a stored identity, raises `worker_identity_unverifiable`; preserve that
+process and make an explicit recovery decision. Dead-worker recovery never overwrites a live owner's lease. A displaced
+worker cannot report a result for its successor.
 Local fencing does not claim global ownership across machines.
 
 Event state separates transport and board effects:
@@ -44,13 +51,35 @@ recovery carry evidence; they do not erase history or silently retry effects.
 
 ## Acceptance
 
-The full content hash is the baseline; the short label is for human recognition.
-The digest includes document title and all node content/elements except named
-status elements and volatile transport metadata. Accepted versions store the
-owner event and full digest. Unknown pending work or source drift blocks
-acceptance. The exact acceptance phrase is intentionally explicit until Unpaged
-has a first-class versioned acceptance UI. Acceptance grants no implementation
-permission and no authority to resolve human threads.
+The full content hash is the internal baseline. The visible status is PROPOSED
+or ACCEPTED in both plugins, and the owner comments `@agent I accept this plan`.
+The parser allows whitespace, line breaks, an optional `@agent:` prefix, and
+trailing periods/exclamation marks. It recognizes a standalone statement, not a
+substring: quotation, questions, negation and conditions are not acceptance.
+The old version-hash phrase remains valid only for its matching current digest.
+
+The digest includes documented document/node/element content fields and the
+complete plugin-owned `properties` payload; only the designated status elements
+are excluded. Unknown top-level server metadata is ignored. Adding a new domain
+content field requires updating this allowlist and its regression tests. A
+persisted baseline from an older digest algorithm may differ: defer acceptance
+and explicitly rebaseline after a human review rather than silently accepting it.
+
+Acceptance records the owner event and full digest after a fresh board read.
+Unknown pending work, source drift or an unresolved reconciliation gap blocks it.
+The comment timestamp may precede the local baseline timestamp by at most five
+seconds to tolerate small server/client clock differences. Larger skew still
+requires verification; this is not a server-timestamp guarantee. The content
+and ownership checks remain mandatory within that tolerance. Independently,
+`event.received_at` must be at or after local `plan_version_at`, without a
+tolerance. Both timestamps use the local clock, so an event already received
+before a revision cannot become acceptance of the newer baseline.
+
+The Claude command retains its submitted content baseline and acceptance evidence
+in session context; it does not claim Codex's durable acceptance receipt. Its
+ExitPlanMode hook only projects a previously verified explicit acceptance onto
+an unchanged board. Plan-mode exit alone neither accepts the plan nor authorizes
+implementation. Neither plugin resolves or reopens human comment threads.
 
 ## Runtime contracts and limits
 
@@ -69,8 +98,10 @@ remote revocation. Zero stale wakeups during a remote-revocation race is not a
 provided guarantee.
 
 Codex enqueue is not idempotent: each invocation gets a new queue UUID. A timeout
-can follow a successful enqueue. Queue listing alone cannot prove non-delivery
-because a consumed item disappears. Ambiguous sends stay blocked pending proof.
+can follow a successful enqueue. A successful receipt requires exit code zero
+and exactly two distinct UUIDs: the expected task and the queue ID. Surrounding
+stdout prose is not a contract; wrong or ambiguous IDs remain uncertain.
+Queue listing alone cannot prove non-delivery because a consumed item disappears. Ambiguous sends stay blocked pending proof.
 
 Unpaged currently marks socket delivery separately from agent completion, offers
 limited replay, and can lose event creation on an upstream trigger failure.
@@ -83,21 +114,37 @@ That is an explicit release gate, not an implicit expansion of this plugin patch
 
 ## Verification gates
 
-Plugin updates are also a runtime lifetime boundary. In the personal pilot,
-Codex 0.153.1 removed the previous plugin cache during native reinstall, while
-the existing detached receiver still held that version's CLI and skill paths.
-Restoring the exact cache from a verified backup preserved the active binding.
-That manual workaround does not establish customer upgrade safety. Before
-release, protect code referenced by live receivers and queued events from cache
-replacement, then test an update with pending feedback and a running receiver.
+New receivers run from a retained, content-addressed copy under
+`<data-directory>/runtimes/<hash>/`, containing the runtime dependency closure
+and both skills. Queue prompts reference its CLI and review skill. Copies are
+published atomically, checked before reuse, and never automatically removed;
+plugin cache replacement cannot invalidate a retained queued operation. Tests
+remove the source cache and continue from the retained copy.
+
+This does not retroactively move an older live cache-based receiver or repair an
+already queued legacy path. Those reviews need explicit reconciliation and a
+controlled stop/migration with their old files preserved. This patch does not
+change an installed binding or run that migration. A native package update with
+pending feedback still needs an installed-package trial.
 
 Automated tests must cover duplicate frames, fixed task routing, write-before-send,
-worker ownership, two review rounds, reconstructed database state, uncertain
-enqueue/effects, late queue receipts, owner-only version acceptance, pending/gap
-acceptance rejection, revocation/takeover, and secret-free status/prompts.
+worker identity/PID reuse, cache deletion, two review rounds, reconstructed
+database state, uncertain enqueue/effects, late queue receipts, owner-only version acceptance, pending/gap
+acceptance rejection, acceptance text and clock skew, revocation/takeover, and
+secret-free status/prompts.
 
-Installed-package evidence still requires trusted hook loading, a live comment
-after turn completion, another later comment, a receiver restart, a Codex restart
+Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
+`${PLUGIN_ROOT}` and the SessionStart `session_id`/`source` fields. Official
+[plugin packaging](https://developers.openai.com/plugins/build/plugins) documents
+`.app.json`, `apps` and `interface`. The pilot task's shell exposed the expected
+`CODEX_THREAD_ID`, and the earlier installed package delivered native SessionStart
+binding context. These observations validate those pilot host assumptions, not
+the complete revised package.
+
+Keep this PR in draft until the Claude package is public and tagged and this
+revised build has a fresh native installation, trusted hook pickup and a live
+comment waking the assigned idle task. Public release also requires the remaining
+installed lifecycle trials. Those trials include a live comment after turn completion, another later comment, a receiver restart, a Codex restart
 and task reopen, and explicit acceptance stopping only the assigned review.
 Tests with synthetic clocks establish state behavior across time, not actual
 hours of wall-clock uptime or operating-system sleep recovery.

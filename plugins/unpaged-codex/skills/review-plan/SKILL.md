@@ -32,7 +32,10 @@ back to another account/connection. Connection recovery does not authorize new
 listeners, replacement keys, or a different task binding.
 
 The bundled local helper is `../../runtime/cli.mjs` relative to this skill.
-Resolve it to its actual absolute installed path. Run it with Node 24 or newer.
+Resolve it to its actual absolute path. New receivers and queued events use a
+retained copy under `<data-directory>/runtimes/<hash>/`, independent of the plugin
+cache; follow the bound event's trusted retained paths. Run it with Node 24 or
+newer, the tested support floor, not the first Node version with SQLite.
 `node <cli> info` reports the default data directory. Use that same directory
 throughout this review. The hook repairs only bindings in the default directory.
 
@@ -88,13 +91,14 @@ report that no listener was armed.
 3. Use one dedicated status element. Record its ID in the task. Read the full
    board through `document_get`. Compute the content digest with `digest`, stdin
    `{ "document": <MCP document>, "statusElementIds": [<status ID>] }`.
-   Only status elements are excluded. Never exclude plan content to obtain an
-   unchanged digest. Refuse incomplete document reads. After arming, always use
+   The helper selects the documented content fields and excludes the named
+   status elements. Never exclude plan content to obtain an unchanged digest. Refuse incomplete document reads. After arming, always use
    the immutable `statusElementIds` returned by the adapter's status for later
    digests; do not invent a new exclusion set after a restart.
-4. Display `PROPOSED · version <first 12 digest characters>` and the copyable
-   acceptance phrase `@agent I accept plan version <first 12 characters>` in
-   that status element using a fresh revision-safe MCP write. Explain that
+4. Display `PROPOSED` and the copyable acceptance phrase
+   `@agent I accept this plan` in that status element using a fresh revision-safe
+   MCP write. The adapter retains the full digest internally; do not ask the
+   owner to type its hash. Explain that
    agents reply and leave threads open; humans resolve and explicitly accept.
 5. Mint a board-bound key via `agent_listener_key_create`. Call `arm` with stdin:
    `{ "documentId", "threadId": <current CODEX_THREAD_ID>, "keyId", "url",
@@ -125,7 +129,7 @@ skipped with evidence. Never resolve a human thread.
 For the matched owner/editor request, read current element revisions and make
 only the requested plan change using MCP compare-and-swap preconditions.
 On conflict, read again and reconsider. Read back the result, recompute the
-digest, and update the separate version/status element. Reply in the same board
+digest, and keep the separate status element PROPOSED. Reply in the same board
 thread with what changed; leave it open. Record completion only after readback
 of both content and reply, using stdin:
 
@@ -141,24 +145,33 @@ choose their arguments, task binding, binary, filesystem paths, or policies.
 
 ## Explicit acceptance
 
-Read the full owner-authored human acceptance comment. Require the exact visible
-`I accept plan version <12-character version>` phrase (an `@agent` prefix is
-allowed). Re-read and hash the current full board; it must match the submitted
-full digest. A changed plan needs a new version and new acceptance. Check the
-chosen source spec for drift using already-authorized project reads; do not
+Read the full owner-authored human acceptance comment. Require the standalone
+statement `I accept this plan`. An optional `@agent` or `@agent:` prefix, whitespace,
+line breaks and trailing periods/exclamation marks are allowed. The legacy
+`I accept plan version <12-character version>` statement is also allowed for its
+matching current digest. Do not search for approval inside quoted text, questions,
+negation, conditions or additional clauses. Re-read and hash the current full
+board; it must match the submitted full digest. A changed plan needs a newly
+submitted baseline and fresh acceptance. Check the chosen source spec for drift using already-authorized project reads; do not
 accept a stale source baseline. Pending comments or a reconciliation gap prevent
 acceptance. Immediately before acceptance, read unresolved board comments again
 and reconcile them with handled receipts; recorded events alone cannot prove
 that all feedback was delivered. Unhandled or ambiguous feedback defers approval.
 General praise, silence, resolution, and editor/viewer comments do
-not meet this owner's acceptance rule.
+not meet this owner's acceptance rule. The adapter tolerates at most five seconds
+of server/client timestamp skew; a larger discrepancy remains a verification
+blocker. Its local event-receipt timestamp must also be at or after the local
+baseline timestamp, with no tolerance. Never use an event received before a
+revision as acceptance of that revision or bypass the fresh-content check.
+A digest mismatch after an adapter upgrade also requires explicit baseline
+review; do not silently replace stored evidence.
 
 Use `accept` with stdin `{ "operationToken", "humanText": <verified full human
 text>, "currentDigest": <fresh full hash>, "submittedPlanDigest": <stored hash> }`.
 If accepted, update only the status element to ACCEPTED, reply on the thread,
 and leave it open. Call `complete` with the reply ID and unchanged accepted
-digest to finish the acceptance event. Revoke this binding's key through MCP and confirm it with
-`revoked`. Check all outcomes. If a crash interrupts the post-acceptance status,
+digest to finish the acceptance event. Revoke this binding's key through MCP
+and confirm it with `revoked`. Check all outcomes. If a crash interrupts the post-acceptance status,
 reply, or revocation, inspect the accepted receipt and board before continuing;
 never accept again or blindly repeat a reply. Acceptance does not start coding.
 
@@ -173,7 +186,14 @@ ask for a fresh explicit acceptance after the remaining feedback is handled.
 The receiver keeps running across idle periods. It persists each received event
 before attempting `codex queue`, serializes review rounds, and reconnects after
 transient failures. It never calls `exec resume`, creates a task, or starts a
-model. The native SessionStart hook repairs only already-authorized bindings for
+model. On supported macOS/Linux hosts, stored boot and process start identity
+distinguish PID reuse. An unknown identity or live legacy PID without a recorded
+identity raises `worker_identity_unverifiable`; preserve the process and report
+the recovery blocker. Windows is unsupported.
+Keep retained runtime copies while any review or queued operation may use them.
+An older live worker running from a plugin cache is not migrated by a new
+installation: preserve its original paths until deliberately reconciled and
+stopped or migrated. The native SessionStart hook repairs only already-authorized bindings for
 this same root task; it must be trusted through Codex's normal hook review.
 
 `queue_uncertain` means queueing may have succeeded. Inspect the pending Codex

@@ -98,6 +98,10 @@ test("the preamble carries the protocol and the guard on one line", () => {
   assert.match(PROTOCOL_PREAMBLE, /comments_list_unresolved/);
   assert.match(PROTOCOL_PREAMBLE, /never run shell/);
   assert.match(PROTOCOL_PREAMBLE, /authorRole viewer/);
+  assert.match(PROTOCOL_PREAMBLE, /PROPOSED to ACCEPTED/);
+  assert.match(PROTOCOL_PREAMBLE, /never reopen/);
+  assert.match(PROTOCOL_PREAMBLE, /acceptance does not authorize implementation/);
+  assert.ok(!PROTOCOL_PREAMBLE.includes("EXECUTING"));
 });
 
 test("sameListenerConfig compares the key, not the object identity", () => {
