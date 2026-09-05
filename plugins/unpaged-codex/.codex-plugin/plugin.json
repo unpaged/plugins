@@ -1,7 +1,7 @@
 {
   "name": "unpaged-codex",
-  "version": "0.1.0",
-  "description": "Review Unpaged plans from the same Codex task with durable comment routing and explicit human acceptance.",
+  "version": "0.2.0",
+  "description": "Create visual Unpaged plans and review anchored feedback in the same Codex task with explicit human acceptance.",
   "author": {
     "name": "UnPaged",
     "url": "https://unpaged.io"
@@ -9,12 +9,12 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "UnPaged for Codex",
-    "shortDescription": "Review visual plans in your Codex task.",
+    "shortDescription": "Create and review visual plans in Codex.",
     "longDescription": "Create a visual plan, receive board comments in its assigned Codex task, and revise until the owner explicitly accepts the current plan. Includes durable local delivery state and visible recovery limits.",
     "developerName": "UnPaged",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "defaultPrompt": ["Create an Unpaged plan and listen for its review comments."],
+    "defaultPrompt": ["Turn our plan into an Unpaged visual plan and listen for review comments.", "Review the new feedback on our Unpaged plan."],
     "websiteURL": "https://unpaged.io"
   },
   "mcpServers": "./.mcp.json"

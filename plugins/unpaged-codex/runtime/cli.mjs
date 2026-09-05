@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
-import { constants, existsSync, openSync, closeSync } from "node:fs";
+import { constants, existsSync, openSync, closeSync, realpathSync } from "node:fs";
 import { access, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { Store } from "./store.mjs";
@@ -201,7 +201,7 @@ export async function executeCli(argv, options = {}) {
   } finally { store.close(); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   process.umask(0o077);
   try {
     const result = await executeCli(process.argv.slice(2));

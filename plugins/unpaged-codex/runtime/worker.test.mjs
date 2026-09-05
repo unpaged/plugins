@@ -370,7 +370,9 @@ test("stop closes the socket promptly and preserves an in-flight queue outcome",
 test("explicit plan acceptance stops the worker without resolving comments or dispatching again", async (t) => {
   const f = fixture(t);
   f.start();
-  f.sockets[0].message(frame());
+  // Acceptance follows this fixture's submitted version, not the generic frame's fixed date.
+  const createdAt = new Date(Date.parse(f.store.getBinding(DOCUMENT).planVersionAt) + 1).toISOString();
+  f.sockets[0].message(frame("event-1", { createdAt }));
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   const { operationToken } = f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD });
   f.store.accept(DOCUMENT, "event-1", {

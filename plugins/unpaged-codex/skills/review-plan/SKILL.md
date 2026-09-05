@@ -12,12 +12,24 @@ Keep listening between review rounds until explicit acceptance or a user stop.
 
 ## Runtime and tools
 
-Use the direct Unpaged MCP for semantic reads and **every board mutation**.
-Browser use is read-only rendered QA. Discover the tools actually exposed in
-this session: document and element reads, `element_update.expectedRevision`,
+Use Unpaged MCP for semantic reads and **every board mutation**, preferring the
+existing registered Unpaged plugin connection exposed in this task. Honor an
+explicit user choice of an already configured direct connection. Browser use is
+read-only rendered QA. Discover the tools and schemas actually exposed in this
+session: document and element reads, `element_update.expectedRevision`,
 `comments_list_unresolved`, `comment_reply`, and the three listener-key tools.
-If a call fails authentication, diagnose the current connection separately from
-the server's capabilities. Do not assume a missing tool means an old server.
+Use the discovered tool names; registered and direct connections can have
+different prefixes. Never automatically add a duplicate direct MCP connection.
+
+Missing tools and failed authentication are separate problems. Inspect the
+current connection/catalog before attributing missing tools to the server.
+For authentication failures, use the host's native Unpaged plugin connection
+or sign-in prompt when supported. If no prompt is available, report the exact
+blocked operation and the required connection action; do not claim sign-in
+appeared or succeeded. Pause dependent board actions until the connection works.
+Do not repeatedly ask for authentication after every operation or silently fall
+back to another account/connection. Connection recovery does not authorize new
+listeners, replacement keys, or a different task binding.
 
 The bundled local helper is `../../runtime/cli.mjs` relative to this skill.
 Resolve it to its actual absolute installed path. Run it with Node 24 or newer.
@@ -51,13 +63,24 @@ Do not override it or use a subagent to own a review.
 
 ## Create or attach
 
+For a new board, use the input, folder, and rendering guidance in the bundled
+[visual-plan skill](../visual-plan/SKILL.md) alongside the steps below. Execute
+this creation flow once. For a board already bound to this task, inspect local
+status and pending work and use its recovery flow instead of repeating creation,
+arming, or status-element initialization. Preserve its task/key identity and
+immutable status-element IDs. An explicit render-only request ends after step 4;
+report that no listener was armed.
+
 1. Ground a requested plan in the conversation and relevant project facts.
    Preserve the user's phases, requirements, and scope. If the team uses a repo
    spec, record its path, revision, and stable requirement IDs; identify which
    source is authoritative. Board comments do not authorize repository edits.
-2. Create via `document_create` with `folderId: "visual-plans"`. Use a legible
-   overview with phases, dependencies, acceptance criteria and review rules.
-   Batch-create elements, verify bounds/readback, and inspect the rendered board.
+2. Create via `document_create`, honoring the user's folder choice and defaulting
+   to `folderId: "visual-plans"` as specified by visual-plan. Read back the actual
+   filing and report `folderWarning` without recreating the document. Use a
+   legible overview with phases, dependencies, acceptance criteria and review
+   rules, with phase child nodes when useful. Batch-create elements, verify
+   bounds/readback, and inspect the rendered board.
    A supplied existing board must be explicitly assigned to this task. Before
    attaching it, read its unresolved comments and identify existing unhandled
    feedback; the socket's retained events are not a complete history. Record

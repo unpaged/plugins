@@ -83,6 +83,14 @@ That is an explicit release gate, not an implicit expansion of this plugin patch
 
 ## Verification gates
 
+Plugin updates are also a runtime lifetime boundary. In the personal pilot,
+Codex 0.153.1 removed the previous plugin cache during native reinstall, while
+the existing detached receiver still held that version's CLI and skill paths.
+Restoring the exact cache from a verified backup preserved the active binding.
+That manual workaround does not establish customer upgrade safety. Before
+release, protect code referenced by live receivers and queued events from cache
+replacement, then test an update with pending feedback and a running receiver.
+
 Automated tests must cover duplicate frames, fixed task routing, write-before-send,
 worker ownership, two review rounds, reconstructed database state, uncertain
 enqueue/effects, late queue receipts, owner-only version acceptance, pending/gap

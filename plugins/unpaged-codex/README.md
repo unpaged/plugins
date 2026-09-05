@@ -16,12 +16,70 @@ It is an experimental integration, with the recovery boundaries below.
 
 The package is under `plugins/unpaged-codex`; its manifest is
 `.codex-plugin/plugin.json`. It is separate from the existing Claude package.
-Distribution and installation are not performed by this repository change.
+Both live in the same plugin repository. The app monorepo contains neither.
+
+## Build for the registered connection
+
+From this repository's root, supply the actual registered Unpaged connection ID
+and a new output directory outside every Git worktree. Its parent must already exist:
+
+```sh
+node scripts/build-codex-plugin.mjs --connection-id REGISTERED_PLUGIN_ID --output /absolute/new/unpaged-codex
+```
+
+Replace `REGISTERED_PLUGIN_ID` with the ID obtained from the native registration
+flow. It has the `plugin_asdk_app_` prefix. Do not commit a personal ID or reuse
+one as a public listing. The builder writes `.app.json`, connects the manifest's
+`apps` field to it, and excludes the source package's direct `.mcp.json` connection.
+The output has one registered connection, both skills, the startup hook and the
+runtime. It never reads or copies the adapter database or OAuth credentials.
+Existing output is refused rather than overwritten; the result prints its
+canonical output path without the registration ID.
+
+For a local pilot, point the personal Codex marketplace at that generated
+package with the native plugin-creator flow, then install `unpaged-codex` from
+that marketplace. Authenticate the registered Unpaged connection when prompted;
+there is no separate manual MCP setup. Review the startup hook through Codex's
+normal trust flow. A fresh task can then invoke the `visual-plan` skill.
+
+The checked-in source `.mcp.json` remains a direct remote-MCP configuration for
+hosts or distributions that explicitly choose that route. The registered build
+does not ship it. Do not enable both connections for the same workflow by default.
+
+Public distribution needs a reviewed registration accessible to the intended
+customers and the complete installation/recovery trials. A working personal
+registration does not establish that availability. This build step does not
+publish the plugin or register a new server.
+
+Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
+[installation](https://learn.chatgpt.com/docs/plugins), and
+[hook trust](https://learn.chatgpt.com/docs/hooks).
+
+## Updating an existing pilot
+
+Keep the plugin name, review data directory, `review-plan` skill path and startup
+hook identity stable. Generate the new registered package and validate it.
+The Codex 0.153.1 native reinstall removed the previous cache directory in the
+personal pilot. A live receiver and already queued messages can still reference
+that cache's runtime and skill paths. Do not run an unattended update over an
+active review: the development pilot required a verified backup and restoration
+of its exact old cache after reinstall. This is a pilot workaround, not a
+customer update procedure. Safe runtime lifetime across native cache replacement
+is a release gate; do not claim upgrade recovery is automatic.
+
+Do not uninstall the old plugin as an update mechanism. An existing live receiver remains
+on its original code until deliberately migrated; a newer package being installed
+does not prove that receiver has upgraded. This release changes no binding or
+database schema and requires no replacement listener key.
 
 ## Use
 
-Invoke the bundled **review-plan** skill to create a plan or attach this task to
-an existing board. New plans go in **Visual plans**. The agent arms the board
+Invoke the bundled **visual-plan** skill to render a supplied plan, the current
+task's plan, or a draft for the feature you name. It preserves phases, tasks and
+requirements, lays out the overview and useful phase detail, then delegates
+review lifecycle to **review-plan**. Use review-plan directly for an existing
+review, incoming events, status, recovery or stopping. New plans default to
+**Visual plans** and honor an explicit folder choice. The agent arms the board
 using the remote MCP listener key and the local adapter. It must report the
 actual connection state before asking you to comment.
 
@@ -110,6 +168,7 @@ From the repository root, with Node 24 or newer:
 ```sh
 node --test plugins/unpaged-codex/runtime/*.test.mjs
 node --test plugins/unpaged/monitors/listen-core.test.mjs
+node --test scripts/build-codex-plugin.test.mjs
 ```
 
 The automated tests use temporary databases and fake sockets/queue commands.
@@ -118,9 +177,15 @@ proved one actual board comment waking the same idle desktop task and producing
 a revision-checked edit and open-thread reply; that spike is not installed-build
 or restart evidence for this package.
 
-Verified on 2026-09-05 with Node 24.15.0: the adapter and existing Claude tests
-pass, including actual abrupt process termination at the received, dispatching,
-and processing boundaries. Plugin and skill validators pass. The runtime
-preflight selected the desktop's installed Codex 0.153.1 and verified its queue
-options. Installed hooks, long-interval live operation, and app restart/task
-reopen still require the installed-package trial described in the architecture.
+The package test builds a real artifact with a synthetic connection ID and
+executes its CLI, including a symlink-path invocation. It also verifies no direct
+MCP configuration remains in the registered artifact, both skill paths exist,
+source files remain unchanged, existing outputs are protected, and source symlinks
+cannot pull external files into the package. CI is configured to run these checks with the
+existing listener and adapter tests on Linux and macOS.
+
+Plugin and skill schema validation uses the installed OpenAI plugin-creator and
+skill-creator validators during local authoring; those external tools are not
+repository dependencies. Live visual fidelity, native hook pickup, comment
+wakeup and recovery still need the installed-package trials described in the
+architecture. A read-only connection check alone does not pass those gates.
