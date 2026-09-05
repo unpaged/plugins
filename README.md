@@ -1,6 +1,8 @@
 # Unpaged plugins for Claude Code
 
-Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
+Render plans as visual boards on [Unpaged](https://unpaged.io), review specific
+parts with `@agent` comments, and receive replies in the session that made them.
+Agents reply and leave threads open; humans resolve them and accept plans.
 
 ## Install
 
@@ -9,8 +11,19 @@ Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where hu
 /plugin install unpaged@unpaged
 ```
 
-## Plugins
+Use `/unpaged:visual-plan` to create a board. See the
+[Claude Code package](plugins/unpaged) for authentication, commands and listeners.
 
-| Plugin | What it does |
-| --- | --- |
-| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are pushed straight back to the session that made it), and watch the canvas flip to *executing* when you approve. |
+Experimental: [Unpaged for Codex](plugins/unpaged-codex) is a development pilot,
+not a public release.
+
+## Test
+
+With Node 24 or newer, no npm installation is needed:
+
+```sh
+node --test plugins/unpaged/monitors/*.test.mjs plugins/unpaged-codex/runtime/*.test.mjs scripts/*.test.mjs
+```
+
+CI runs these local tests on Linux and macOS; it does not write to Unpaged or
+start a model task.

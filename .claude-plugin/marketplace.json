@@ -8,7 +8,7 @@
     {
       "name": "unpaged",
       "source": "./plugins/unpaged",
-      "description": "Turn Claude Code plans into whiteboards on Unpaged — review on the canvas, comment on the pieces (@agent comments are pushed back to the session), approval flips the canvas to executing; every plan is filed in a Visual plans folder."
+      "description": "Render Claude Code plans as Unpaged boards and receive anchored @agent feedback in the same session. Agents reply; humans resolve threads and explicitly accept plans. Acceptance does not authorize implementation."
     }
   ]
 }
