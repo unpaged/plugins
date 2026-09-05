@@ -1,24 +1,24 @@
-# UnPaged Agent Plugins
+# Unpaged plugins for Claude Code and Codex
 
-Claude Code and Codex plugins by [UnPaged](https://unpaged.io) — the visual canvas where humans and agents work on the same board.
+Claude Code and Codex plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
 
 ## Install for Claude Code
 
 ```
-/plugin marketplace add iliedanila/unpaged-claude-plugins
+/plugin marketplace add unpaged/plugins
 /plugin install unpaged@unpaged
 ```
 
 ## Plugins
 
-An experimental [UnPaged for Codex](plugins/unpaged-codex) package adds durable
+An experimental [Unpaged for Codex](plugins/unpaged-codex) package adds durable
 comment routing to the same Codex task, explicit version acceptance, and recovery
 status. It requires no external review skill. Read its requirements and current
 server/runtime limits before use; the install commands above are for Claude Code.
 
 | Plugin | What it does |
 | --- | --- |
-| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual boards on UnPaged via `/unpaged:visual-plan`. Review the plan on a canvas, comment on the pieces (`@agent` comments on a board are pushed straight back to the session that made it), and watch the board flip to *executing* when you approve. |
+| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are pushed straight back to the session that made it), and watch the canvas flip to *executing* when you approve. |
 | [unpaged-codex](plugins/unpaged-codex) | Creates visual plans and routes anchored feedback to the same Codex task. Agents reply; humans resolve threads and explicitly accept the current version. Acceptance does not start implementation. |
 
 ## Codex pilot

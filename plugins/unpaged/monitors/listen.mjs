@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// UnPaged @agent comment listener for ONE board — run as a session Monitor.
+// Unpaged @agent comment listener for ONE board — run as a session Monitor.
 //
 //   node listen.mjs <documentId>
 //
@@ -136,7 +136,7 @@ async function main() {
   }
   if (typeof WebSocket !== "function") {
     await reportStatus("stopped", "no-websocket");
-    say("UnPaged listener needs Node 22 or newer (no WebSocket client) — push stays off on this machine.");
+    say("Unpaged listener needs Node 22 or newer (no WebSocket client) — push stays off on this machine.");
     return;
   }
   let attempt = 0;

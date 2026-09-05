@@ -1,4 +1,4 @@
-# UnPaged for Codex
+# Unpaged for Codex
 
 Review a visual plan on Unpaged while its assigned Codex task handles feedback.
 This package belongs to Unpaged and requires no external review framework.
