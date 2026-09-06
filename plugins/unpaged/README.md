@@ -4,9 +4,9 @@ See the plan before the code. `/unpaged:visual-plan` renders the plan Claude jus
 
 ![A plan rendered as a canvas: four phase boxes joined by arrows, a goal note and a risks note](../../docs/images/visual-plan-overview.png)
 
-![Demo: the plan opens as a canvas, a phase box opens its checklist, an @agent comment on the risks note gets an answer on the canvas, and the status stamp flips to EXECUTING](https://github.com/unpaged/plugins/releases/download/v0.5.1/visual-plan-demo.gif)
+![Demo: on the plan canvas, a right-click on the open-question note adds an @agent comment; seconds later the reply lands in the thread, a new task appears in the checklist beside it, and the status stamp flips to EXECUTING](https://github.com/unpaged/plugins/releases/download/v0.5.1/visual-plan-demo.gif)
 
-[Watch the clip as MP4 (39 s)](https://github.com/unpaged/plugins/releases/download/v0.5.1/visual-plan-demo.mp4)
+[Watch the clip as MP4 (32 s)](https://github.com/unpaged/plugins/releases/download/v0.5.1/visual-plan-demo.mp4)
 
 ## What you get
 
