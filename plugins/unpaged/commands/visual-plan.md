@@ -33,7 +33,7 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
    - A `checklist` element with that phase's tasks as items (unchecked).
    - A `uml-note` for that phase's verification/exit criteria when the plan states them.
 
-4. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown.
+4. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible.
 
 5. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels.
 

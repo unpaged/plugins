@@ -4,6 +4,9 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+- README screenshots and a live example canvas.
+- `/unpaged:visual-plan` prompt: `fillColor` on a text element is the text colour — the render used to come out white-on-white when the model read it as a background.
+
 ## [0.5.1] - 2026-09-06
 
 ### Changed

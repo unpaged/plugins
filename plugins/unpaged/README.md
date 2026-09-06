@@ -2,6 +2,8 @@
 
 See the plan before the code. `/unpaged:visual-plan` renders the plan Claude just made as a whiteboard on [Unpaged](https://unpaged.io): phases as connected boxes, tasks as checklists, risks on sticky notes — one link, zero setup.
 
+![A plan rendered as a canvas: four phase boxes joined by arrows, a goal note and a risks note](../../docs/images/visual-plan-overview.png)
+
 <!-- TODO: demo clip -->
 
 ## What you get
@@ -11,6 +13,12 @@ See the plan before the code. `/unpaged:visual-plan` renders the plan Claude jus
 - **Approval flips the status** — when you approve the plan in Claude Code, the canvas's status stamp changes to 🚀 EXECUTING.
 - **Bundled MCP server** — installing the plugin registers Unpaged's MCP server; no manual config.
 - **Filed automatically** — every plan lands in the *Visual plans* folder of your Unpaged library (created the first time a plan is rendered), so plans from every repo sit together and never clutter the rest of your documents. Rename or delete the folder freely; the next plan recreates it.
+
+Each phase box opens into its own canvas: the checklist, the task detail, and the exit criteria.
+
+![A phase canvas: a task checklist, numbered task detail, and an exit-criteria note](../../docs/images/visual-plan-phase.png)
+
+Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/cd1119ad-1b06-46fa-8a62-62f9b4a83fd4) — a sample plan rendered by the plugin, open to anyone.
 
 ## Requirements
 

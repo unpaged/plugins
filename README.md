@@ -2,6 +2,8 @@
 
 Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
 
+![A Claude Code plan rendered as a canvas on Unpaged](docs/images/visual-plan-overview.png)
+
 ## Install
 
 ```
