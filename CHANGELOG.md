@@ -4,6 +4,10 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-06
+
+### Changed
+
 - Repository moved to `unpaged/plugins`; install with `/plugin marketplace add unpaged/plugins` then `/plugin install unpaged@unpaged` ([#6](https://github.com/unpaged/plugins/pull/6)).
 - User-facing copy spells the product **Unpaged** and says canvas or whiteboard throughout ([#6](https://github.com/unpaged/plugins/pull/6)).
 - MIT license, this changelog, and a CI workflow (`node --test` + manifest checks).
@@ -42,7 +46,8 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/unpaged/plugins/releases/tag/v0.5.1
 [0.5.0]: https://github.com/unpaged/plugins/pull/4
 [0.4.0]: https://github.com/unpaged/plugins/pull/3
 [0.3.0]: https://github.com/unpaged/plugins/pull/2
