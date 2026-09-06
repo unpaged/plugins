@@ -14,3 +14,13 @@ Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where hu
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are pushed straight back to the session that made it), and watch the canvas flip to *executing* when you approve. |
+
+## Support
+
+- Bugs and ideas: [GitHub issues](https://github.com/unpaged/plugins/issues)
+- Chat: [Unpaged on Discord](https://discord.gg/K8TR7cUGX)
+- Versions: [CHANGELOG](CHANGELOG.md)
+
+## License
+
+[MIT](LICENSE) © Graph Knowledge SRL

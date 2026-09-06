@@ -1,5 +1,5 @@
 ---
-description: Pick a board and listen for its @agent comments in this session — status, arm, or revoke per board; /unpaged:visual-plan arms the board it creates
+description: Pick a canvas and listen for its @agent comments in this session — status, arm, or revoke per canvas; /unpaged:visual-plan arms the canvas it creates
 argument-hint: [status | arm <documentId> | revoke <documentId|all>]
 ---
 

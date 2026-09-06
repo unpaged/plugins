@@ -73,7 +73,7 @@ export function backoffMs(attempt) {
  * fight it, so this session stops listening to it.
  */
 export function closePolicy(code, documentId = "") {
-  const board = documentId ? ` for board ${documentId}` : "";
+  const board = documentId ? ` for canvas ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
     return {
       action: "stop",
