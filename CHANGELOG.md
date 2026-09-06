@@ -7,6 +7,7 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 - Repository moved to `unpaged/plugins`; install with `/plugin marketplace add unpaged/plugins` then `/plugin install unpaged@unpaged` ([#6](https://github.com/unpaged/plugins/pull/6)).
 - User-facing copy spells the product **Unpaged** and says canvas or whiteboard throughout ([#6](https://github.com/unpaged/plugins/pull/6)).
 - MIT license, this changelog, and a CI workflow (`node --test` + manifest checks).
+- README: requirements (Claude Code Monitor tool, Node ≥ 22), a command table, troubleshooting, privacy and support sections; slash-command descriptions and the listener's stop lines say canvas.
 
 ## [0.5.0] - 2026-09-03
 
