@@ -4,7 +4,20 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-- README screenshots and a live example canvas.
+## [0.5.2] - 2026-09-07
+
+Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold install, OAuth, first-command render, folder filing, push, approval stamp, takeover, key rejection and the stale-cache check all passed; these are the fixes that fell out.
+
+### Fixed
+
+- Auto mode: its classifier refuses the listener-key mint and the key-file writes, so push could never arm there and the session only said "Push isn't armed". Both commands now stop on that refusal and tell the user the one-time manual-mode route (`/unpaged:listen arm <documentId>`) or the allow rules to add; the README has a troubleshooting row for it.
+- The 4401 exit line names the real causes (the key was revoked in another session or in Unpaged) instead of leaving the model to guess at server behaviour.
+- `/unpaged:visual-plan` retries a single create call that a classifier refused while its siblings succeeded, instead of reporting a half-built canvas.
+
+### Changed
+
+- The spoken lines say canvas, not board: the render reply calls the link a canvas, "approving the plan will stamp the canvas EXECUTING", "Another session was listening to this canvas".
+- README: demo clip (release assets), screenshots, and a new live example canvas.
 - `/unpaged:visual-plan` prompt: `fillColor` on a text element is the text colour — the render used to come out white-on-white when the model read it as a background.
 
 ## [0.5.1] - 2026-09-06

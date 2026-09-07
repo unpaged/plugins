@@ -78,7 +78,7 @@ export function closePolicy(code, documentId = "") {
     return {
       action: "stop",
       deleteKeyFile: true,
-      line: `Unpaged listener key rejected${board}; the stored key was removed — /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan) mints a new one.`
+      line: `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Re-arm with /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan mints a new key); nothing on the server retires keys on its own.`
     };
   }
   if (code === CLOSE_SUPERSEDED) {

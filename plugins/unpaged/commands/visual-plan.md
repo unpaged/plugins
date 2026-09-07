@@ -29,6 +29,8 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
    - One `rectangle` per phase/major step, laid out left-to-right or top-down in execution order, each labeled with the phase name, connected with `connector` elements (use anchors) to show sequence/dependencies.
    - A `uml-note` with the plan's goal and any key risks or open questions.
 
+   If a permission classifier refuses one of several parallel create calls while its siblings succeed, retry that one call once before reporting anything.
+
 3. **One child node per phase** when the plan has distinct phases (use `node_create_with_elements`); skip child nodes for small single-phase plans and put the task list on the root instead. Each phase node carries:
    - A `checklist` element with that phase's tasks as items (unchecked).
    - A `uml-note` for that phase's verification/exit criteria when the plan states them.
@@ -40,8 +42,8 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
 ## Finish
 
 Reply to the user with:
-- The edit link: `https://unpaged.io/document/<documentId>/edit`
-- One sentence: approving the plan will stamp the board EXECUTING.
+- The edit link: `https://unpaged.io/document/<documentId>/edit` — call it a canvas (or whiteboard) in your reply, never a board.
+- One sentence: approving the plan will stamp the canvas EXECUTING.
 
 Remember the document ID — if the plan is approved later in this session, you will be asked to update this board's status stamp.
 
@@ -57,7 +59,9 @@ Right after the link, make sure the user's `@agent` comments **on this board** a
 4. **Arm this session on that board** by running the plugin's own script as a session Monitor with the board id as its argument (it reads the key file itself, never prints the key, and handles 4401/4409 on its own): locate the CURRENT copy of the plugin's script (an upgraded install can hold older cached copies whose script ignores the board argument, so the highest plugin version that supports per-board keys wins) — `node -e 'const fs=require("fs"),p=require("path");const hits=[];(function walk(d,n){if(n>7)return;let es=[];try{es=fs.readdirSync(d,{withFileTypes:true})}catch{return}for(const e of es){const f=p.join(d,e.name);if(e.isDirectory())walk(f,n+1);else if(f.endsWith("/plugins/unpaged/monitors/listen.mjs")){try{if(fs.readFileSync(f,"utf8").includes("KEY_DIR_RELATIVE"))hits.push(f)}catch{}}}})(process.env.HOME+"/.claude/plugins",0);const ver=f=>{try{return JSON.parse(fs.readFileSync(p.join(f,"..","..",".claude-plugin","plugin.json"),"utf8")).version||"0"}catch{return"0"}};const num=v=>v.split(".").map(x=>parseInt(x,10)||0);hits.sort((a,b)=>{const x=num(ver(a)),y=num(ver(b));for(let i=0;i<3;i++)if(x[i]!==y[i])return y[i]-x[i];return fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs});console.log(hits[0]||"")'` — and arm `Monitor({ command: 'node "<that path>" <documentId>', persistent: true, description: "Unpaged @agent comments — <board title>" })`. Only if that prints nothing (plugin installed from a path outside `~/.claude/plugins`), fall back to `Monitor({ ws: { url, protocols }, persistent: true, description: "Unpaged @agent comments — <board title>" })` with the values from the tool result (already in this session's context; still never repeat them in your reply). If the Monitor tool is unavailable in this session, skip this step.
 5. Say what is actually true: if a session Monitor was armed in step 4, tell the user *"I'm listening on this canvas — comment @agent there and I reply on it."* If nothing could be armed (Monitor tool unavailable, or the script could not be located), say instead *"Push isn't armed in this session — comment @agent on the canvas and I'll sweep it when you ask, or run /unpaged:listen arm <documentId> in a session that can hold a Monitor."* Never claim to be listening without an armed Monitor. Listening ends with this session; a later session re-arms with `/unpaged:listen`.
 
-If the `agent_listener_key_create` tool is missing, the connected server predates push: say the board is ready and that comments can be swept with `comments_list_unresolved`, and skip arming.
+**If a permission classifier refuses a step** (auto mode prints *Denied by auto mode classifier*) — the `agent_listener_key_create` call, the key check, or the key-file write: stop the arming sequence, do not retry the refused step, and say in place of the step-5 line: *"Push isn't armed: auto mode refused the listener key. Once, in manual mode (Shift+Tab), run `/unpaged:listen arm <documentId>` — later sessions reuse the stored key — or allow `mcp__plugin_unpaged_unpaged__agent_listener_key_create` and the plugin's shell steps in your permission settings. Until then, comment @agent on the canvas and I'll sweep it when you ask."* One exception: if the key was minted but writing its file was refused, still arm this session with the `ws` fallback of step 4 and add that the key was not persisted, so a later session mints a new one.
+
+If the `agent_listener_key_create` tool is missing, the connected server predates push: say the canvas is ready and that comments can be swept with `comments_list_unresolved`, and skip arming.
 
 ## When an event arrives
 

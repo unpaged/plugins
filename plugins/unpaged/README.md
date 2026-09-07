@@ -20,7 +20,7 @@ Each phase box opens into its own canvas: the checklist, the task detail, and th
 
 ![A phase canvas: a task checklist, numbered task detail, and an exit-criteria note](../../docs/images/visual-plan-phase.png)
 
-Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/cd1119ad-1b06-46fa-8a62-62f9b4a83fd4) — a sample plan rendered by the plugin, open to anyone.
+Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/f93886b9-50cc-4815-9577-271501f816d6) — a sample plan rendered by the plugin, open to anyone.
 
 ## Requirements
 
@@ -68,7 +68,8 @@ First use: run `/mcp` and authenticate the **unpaged** server with your Unpaged 
 | --- | --- | --- |
 | The `unpaged` tools are missing, or return an authentication error | The MCP server is not authenticated in this Claude Code profile | Run `/mcp`, sign in to **unpaged**, re-run the command |
 | *"Push isn't armed in this session"* | This Claude Code build has no `Monitor` tool, or the plugin is installed from a path outside `~/.claude/plugins` | Comment `@agent` on the canvas and ask the session to sweep it, or run `/unpaged:listen arm <documentId>` in a session that can hold a Monitor |
-| *"Unpaged listener key rejected … the stored key was removed"* | The key was revoked (in Unpaged, or by `/unpaged:listen revoke`) | `/unpaged:listen arm <documentId>` — the next `/unpaged:visual-plan` also mints a fresh key |
+| *"Push isn't armed: auto mode refused the listener key"*, or the transcript shows *Denied by auto mode classifier* | Auto mode's classifier refuses the listener-key mint and the key-file writes; the plugin and the account are fine | Once, in manual mode (Shift+Tab), run `/unpaged:listen arm <documentId>`; later sessions reuse the stored key. Or add allow rules for `mcp__plugin_unpaged_unpaged__agent_listener_key_create` and the plugin's shell steps |
+| *"Unpaged listener key rejected … the stored key file was retired"* | The key was revoked (in Unpaged, or by `/unpaged:listen revoke`) | `/unpaged:listen arm <documentId>` — the next `/unpaged:visual-plan` also mints a fresh key |
 | *"Another session took over the Unpaged listener"* | You armed the same canvas from a newer session | Nothing — the newer session answers; re-arm here with `/unpaged:listen arm <documentId>` to take it back |
 | *"needs Node 22 or newer"* | The `node` on your `PATH` has no built-in WebSocket client | Upgrade Node.js; rendering still works, only push is off |
 | The reply mentions a `folderWarning` | The canvas was created but the server could not file it in *Visual plans* | The canvas is in your library, unfiled; move it from the library if you like |
