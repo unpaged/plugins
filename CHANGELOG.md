@@ -11,7 +11,7 @@ Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold ins
 ### Fixed
 
 - Auto mode: its classifier refuses the listener-key mint and the key-file writes, so push could never arm there and the session only said "Push isn't armed". Both commands now stop on that refusal and tell the user the one-time manual-mode route (`/unpaged:listen arm <documentId>`) or the allow rules to add; the README has a troubleshooting row for it.
-- The 4401 exit line names the real causes (the key was revoked in another session or in Unpaged) instead of leaving the model to guess at server behaviour, and it now says what happened to the key file: when a newer session's key was kept, it tells the model not to re-arm, where before a re-arm would have minted a key over that session's file.
+- The 4401 exit line names the real causes (the key was revoked in another session or in Unpaged) instead of leaving the model to guess at server behaviour, and it now says what happened to the key file. A session never mints a new key because of a 4401 any more (every cause is a deliberate revoke — in this session, another session on the machine, or in Unpaged): it says push is off for that canvas and offers `/unpaged:listen arm <documentId>`. Before, a revoke was undone by a re-mint seconds later, and a re-arm could mint over another session's newer key file.
 - `/unpaged:visual-plan` retries a single create call that a classifier refused while its siblings succeeded, instead of reporting a half-built canvas.
 
 ### Changed
