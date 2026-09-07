@@ -17,7 +17,7 @@ Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold ins
 ### Changed
 
 - The spoken lines say canvas, not board: the render reply calls the link a canvas and a fresh draft canvas, "approving the plan will stamp the canvas EXECUTING", "Another session was listening to this canvas", "push is off for those canvases".
-- A key minted right before a refused file write is revoked on the spot, so auto mode cannot accumulate keys without files toward the 20-key cap.
+- A key minted right before a refused file write is revoked on the spot, so auto mode cannot accumulate keys without files toward the 20-key cap; a half-written `<documentId>.json.tmp` is removed too, and `/unpaged:listen revoke all` now sweeps `~/.claude/unpaged/listeners/*.json*` (tmp and retiring leftovers included) rather than `*.json`.
 - README: demo clip (release assets), screenshots, and a new live example canvas.
 - `/unpaged:visual-plan` prompt: `fillColor` on a text element is the text colour — the render used to come out white-on-white when the model read it as a background.
 
