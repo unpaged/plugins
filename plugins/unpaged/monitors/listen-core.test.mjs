@@ -9,6 +9,7 @@ import {
   isDocumentId,
   keyFileFor,
   parseListenerConfig,
+  rejectedKeyLine,
   retireKeyFile,
   sameListenerConfig,
   shouldWriteStatus
@@ -131,6 +132,22 @@ function memFs(files) {
 }
 
 const cfg = (key, keyId) => ({ url: "wss://x/events", protocols: [SUBPROTOCOL, key], documentId: DOC, keyId });
+
+test("rejected-key line follows the retire outcome: re-arm only when this session's file is gone", () => {
+  for (const outcome of ["removed", "absent"]) {
+    const line = rejectedKeyLine(outcome, DOC);
+    assert.match(line, /the stored key file was retired/);
+    assert.match(line, new RegExp(`/unpaged:listen arm ${DOC}`));
+    assert.match(line, /\/unpaged:visual-plan/);
+  }
+  for (const outcome of ["kept-newer", "superseded"]) {
+    const line = rejectedKeyLine(outcome, DOC);
+    assert.match(line, /newer key for this canvas is already stored/);
+    assert.doesNotMatch(line, /\/unpaged:listen arm/);
+    assert.doesNotMatch(line, /was retired/);
+  }
+  assert.equal(closePolicy(4401, DOC).line, rejectedKeyLine("removed", DOC));
+});
 
 test("retireKeyFile removes the rejected config but restores a newer one", async () => {
   const loaded = cfg("old", "k1");

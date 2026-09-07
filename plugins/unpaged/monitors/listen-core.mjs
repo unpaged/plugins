@@ -67,6 +67,22 @@ export function backoffMs(attempt) {
 }
 
 /**
+ * The line printed after a 4401, chosen by what retireKeyFile did with the
+ * key file. `removed`/`absent`: this session's key is gone, re-arming is
+ * the remedy. `kept-newer`/`superseded`: the file now holds ANOTHER
+ * session's valid key, so the line must not send the model back to steps
+ * 3–4 — a re-arm from here would mint a key over that session's file.
+ */
+export function rejectedKeyLine(outcome, documentId = "") {
+  const board = documentId ? ` for canvas ${documentId}` : "";
+  const id = documentId || "<documentId>";
+  if (outcome === "kept-newer" || outcome === "superseded") {
+    return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
+  }
+  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Re-arm with /unpaged:listen arm ${id} (or the next /unpaged:visual-plan mints a new key).`;
+}
+
+/**
  * What to do after a close: `stop` with a line for the model, or
  * `reconnect` (silently). 4401 = the key is gone (re-arm via the command);
  * 4409 = a newer listener took over THIS board — reconnecting would only
@@ -78,7 +94,7 @@ export function closePolicy(code, documentId = "") {
     return {
       action: "stop",
       deleteKeyFile: true,
-      line: `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Re-arm with /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan mints a new key); nothing on the server retires keys on its own.`
+      line: rejectedKeyLine("removed", documentId)
     };
   }
   if (code === CLOSE_SUPERSEDED) {

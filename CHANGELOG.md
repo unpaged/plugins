@@ -11,12 +11,13 @@ Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold ins
 ### Fixed
 
 - Auto mode: its classifier refuses the listener-key mint and the key-file writes, so push could never arm there and the session only said "Push isn't armed". Both commands now stop on that refusal and tell the user the one-time manual-mode route (`/unpaged:listen arm <documentId>`) or the allow rules to add; the README has a troubleshooting row for it.
-- The 4401 exit line names the real causes (the key was revoked in another session or in Unpaged) instead of leaving the model to guess at server behaviour.
+- The 4401 exit line names the real causes (the key was revoked in another session or in Unpaged) instead of leaving the model to guess at server behaviour, and it now says what happened to the key file: when a newer session's key was kept, it tells the model not to re-arm, where before a re-arm would have minted a key over that session's file.
 - `/unpaged:visual-plan` retries a single create call that a classifier refused while its siblings succeeded, instead of reporting a half-built canvas.
 
 ### Changed
 
-- The spoken lines say canvas, not board: the render reply calls the link a canvas, "approving the plan will stamp the canvas EXECUTING", "Another session was listening to this canvas".
+- The spoken lines say canvas, not board: the render reply calls the link a canvas and a fresh draft canvas, "approving the plan will stamp the canvas EXECUTING", "Another session was listening to this canvas", "push is off for those canvases".
+- A key minted right before a refused file write is revoked on the spot, so auto mode cannot accumulate keys without files toward the 20-key cap.
 - README: demo clip (release assets), screenshots, and a new live example canvas.
 - `/unpaged:visual-plan` prompt: `fillColor` on a text element is the text colour — the render used to come out white-on-white when the model read it as a background.
 
