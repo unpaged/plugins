@@ -53,7 +53,7 @@ First use: run `/mcp` and authenticate the **unpaged** server with your Unpaged 
 | `/unpaged:listen` | List the canvases armed from this project folder and arm the one you pick. |
 | `/unpaged:listen status` | Show each canvas's key and whether a listener is connected. |
 | `/unpaged:listen arm <documentId>` | Listen to a canvas this session did not create. |
-| `/unpaged:listen revoke <documentId\|all>` | Revoke listener keys on the server and delete the local key files. |
+| `/unpaged:listen revoke <documentId\|all>` | Revoke this machine's listener keys on the server (label match, or a key named by a local key file); a key file is deleted only once the server confirms its key is gone, and a refused or failed revoke is reported as still live — only the server-side revoke stops a running listener |
 
 ## How push works
 
