@@ -91,11 +91,10 @@ export function rejectedKeyLine(outcome, documentId = "") {
 export function closePolicy(code, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
-    return {
-      action: "stop",
-      deleteKeyFile: true,
-      line: rejectedKeyLine("removed", documentId)
-    };
+    // No `line` here on purpose: only the caller knows what retireKeyFile
+    // did with the file, and rejectedKeyLine(outcome) words it. A caller that
+    // prints policy.line for 4401 prints nothing rather than a wrong claim.
+    return { action: "stop", deleteKeyFile: true };
   }
   if (code === CLOSE_SUPERSEDED) {
     return {

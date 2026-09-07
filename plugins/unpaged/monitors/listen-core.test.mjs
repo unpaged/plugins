@@ -74,8 +74,9 @@ test("backoff doubles from 1s and caps at 60s", () => {
 test("close policy stops on 4401 (dropping the key file) and 4409, reconnects otherwise", () => {
   assert.equal(closePolicy(4401, DOC).action, "stop");
   assert.equal(closePolicy(4401, DOC).deleteKeyFile, true);
-  assert.match(closePolicy(4401, DOC).line, new RegExp(`/unpaged:listen arm ${DOC}`));
-  assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
+  assert.equal(closePolicy(4401, DOC).line, undefined); // worded by rejectedKeyLine(outcome) only
+  assert.match(rejectedKeyLine("removed", DOC), new RegExp(`/unpaged:listen arm ${DOC}`));
+  assert.match(rejectedKeyLine("absent"), /\/unpaged:visual-plan/);
   assert.equal(closePolicy(4409, DOC).action, "stop");
   assert.equal(closePolicy(4409, DOC).deleteKeyFile, undefined);
   assert.equal(closePolicy(4409, DOC).superseded, true);
@@ -146,7 +147,6 @@ test("rejected-key line follows the retire outcome: re-arm only when this sessio
     assert.doesNotMatch(line, /\/unpaged:listen arm/);
     assert.doesNotMatch(line, /was retired/);
   }
-  assert.equal(closePolicy(4401, DOC).line, rejectedKeyLine("removed", DOC));
 });
 
 test("retireKeyFile removes the rejected config but restores a newer one", async () => {

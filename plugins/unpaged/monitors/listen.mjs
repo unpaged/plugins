@@ -145,7 +145,7 @@ async function main() {
     const { code, opened } = await connectOnce(config);
     const policy = closePolicy(code, documentId);
     if (policy.action === "stop") {
-      let line = policy.line;
+      let line = policy.line ?? "";
       if (policy.deleteKeyFile) {
         // The line must say what actually happened to the file: a newer
         // session's key may have been kept, and then re-arming is wrong.
