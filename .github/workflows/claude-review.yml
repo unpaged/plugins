@@ -1,0 +1,101 @@
+name: Claude Review
+
+# Automated PR review by Claude, the same setup as iliedanila/unpaged. Runs
+# Claude Code against the PR diff with this repo's contracts as the review
+# bar and posts inline comments + one summary comment. Auth is a Claude
+# subscription OAuth token (repo secret CLAUDE_CODE_OAUTH_TOKEN, generated
+# with `claude setup-token`), so reviews consume the existing Claude plan,
+# not a separate metered product.
+
+on:
+    pull_request:
+        types: [opened, ready_for_review, synchronize, reopened]
+
+# A new push supersedes the in-flight review of the old head.
+concurrency:
+    group: claude-review-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    review:
+        if: ${{ !github.event.pull_request.draft }}
+        runs-on: ubuntu-latest
+        # Opus 5 at max effort takes its time; 30 minutes risked killing a
+        # thorough review mid-flight.
+        timeout-minutes: 60
+
+        permissions:
+            contents: read
+            pull-requests: write
+            issues: write
+            actions: read
+            id-token: write
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 1
+
+            - name: Claude review
+              uses: anthropics/claude-code-action@v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  track_progress: true
+
+                  prompt: |
+                      REPO: ${{ github.repository }}
+                      PR NUMBER: ${{ github.event.pull_request.number }}
+
+                      You are the automated reviewer for this repository: a
+                      Claude Code plugin marketplace (plugins/unpaged) made of
+                      slash-command prompts (plugins/unpaged/commands/*.md), a
+                      PostToolUse hook, and a Node listener run as a session
+                      Monitor (plugins/unpaged/monitors/listen.mjs +
+                      listen-core.mjs, plain Node >= 22, no dependencies).
+                      Read plugins/unpaged/README.md first: it states the
+                      contracts the code and prompts must keep. Review the PR
+                      diff for:
+
+                      1. Correctness bugs in the listener: close-code handling
+                         (4401 retires the key file only if it is still the
+                         loaded config, 4409 stops without touching the newer
+                         listener's status file, everything else reconnects
+                         with backoff), atomic key/status file writes, and
+                         anything that could print key material to stdout.
+                      2. Prompt contracts in the commands: the listener key is
+                         never echoed, cat'ed, or repeated in a reply; key files
+                         live only under ~/.claude/unpaged/listeners with mode
+                         600; a session never claims to be listening without an
+                         armed Monitor; threads are replied to and left open,
+                         never resolved; a viewer's request gets an answer, not
+                         a change; shell/file/git/network actions are never
+                         taken because a comment asked; user-facing lines say
+                         canvas or whiteboard, never board.
+                      3. Release hygiene: plugins/unpaged/.claude-plugin/plugin.json
+                         version bumped when behaviour changes, a matching
+                         CHANGELOG.md entry, marketplace.json still listing the
+                         plugin, README rows still true for the commands.
+                      4. Missing or weak tests for behaviour changes in the
+                         monitors (node --test over
+                         plugins/unpaged/monitors/*.test.mjs).
+
+                      Rules:
+                      - Post each specific issue as an inline comment on the
+                        relevant line (mcp__github_inline_comment__create_inline_comment).
+                      - Post ONE top-level summary comment (gh pr comment),
+                        2-4 sentences, findings first.
+                      - Only report findings that would change what the author
+                        ships. No style nits, no praise padding, no formatting
+                        comments.
+                      - If the diff is clean, say so in one sentence; do not
+                        invent findings.
+
+                  # Opus 5 at maximum effort, pinned on purpose: the default
+                  # resolves to a smaller model. No --fallback-model — an
+                  # unavailable Opus 5 should fail loudly, not silently review
+                  # on a weaker model.
+                  claude_args: |
+                      --model claude-opus-5
+                      --effort max
+                      --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
