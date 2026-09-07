@@ -81,7 +81,7 @@ export function rejectedKeyLine(outcome, documentId = "") {
   if (outcome === "kept-newer" || outcome === "superseded") {
     return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
   }
-  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (their next /unpaged:visual-plan also mints a fresh key).`;
+  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (a later /unpaged:visual-plan arms only the canvas it creates, not this one).`;
 }
 
 /**
