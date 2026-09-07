@@ -68,10 +68,12 @@ export function backoffMs(attempt) {
 
 /**
  * The line printed after a 4401, chosen by what retireKeyFile did with the
- * key file. `removed`/`absent`: this session's key is gone, re-arming is
- * the remedy. `kept-newer`/`superseded`: the file now holds ANOTHER
- * session's valid key, so the line must not send the model back to steps
- * 3–4 — a re-arm from here would mint a key over that session's file.
+ * key file. Neither branch asks the model to mint: every 4401 is a
+ * deliberate revoke (this session, another session on the machine, or
+ * Unpaged itself), so the user turns push back on. `removed`/`absent`:
+ * this session's key is gone — say push is off and name the arm command.
+ * `kept-newer`/`superseded`: the file now holds ANOTHER session's valid
+ * key, which is listening — say nothing that could lead to a write over it.
  */
 export function rejectedKeyLine(outcome, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
@@ -79,7 +81,7 @@ export function rejectedKeyLine(outcome, documentId = "") {
   if (outcome === "kept-newer" || outcome === "superseded") {
     return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
   }
-  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Re-arm with /unpaged:listen arm ${id} (or the next /unpaged:visual-plan mints a new key).`;
+  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (their next /unpaged:visual-plan also mints a fresh key).`;
 }
 
 /**

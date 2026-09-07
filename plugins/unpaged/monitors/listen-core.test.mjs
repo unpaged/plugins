@@ -138,6 +138,7 @@ test("rejected-key line follows the retire outcome: re-arm only when this sessio
   for (const outcome of ["removed", "absent"]) {
     const line = rejectedKeyLine(outcome, DOC);
     assert.match(line, /the stored key file was retired/);
+    assert.match(line, /do not mint a key here/);
     assert.match(line, new RegExp(`/unpaged:listen arm ${DOC}`));
     assert.match(line, /\/unpaged:visual-plan/);
   }
