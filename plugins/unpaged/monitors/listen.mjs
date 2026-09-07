@@ -29,6 +29,7 @@ import {
   keyFileFor,
   monitorStatus,
   parseListenerConfig,
+  rejectedKeyLine,
   retireKeyFile,
   shouldWriteStatus
 } from "./listen-core.mjs";
@@ -144,15 +145,19 @@ async function main() {
     const { code, opened } = await connectOnce(config);
     const policy = closePolicy(code, documentId);
     if (policy.action === "stop") {
+      let line = policy.line ?? "";
       if (policy.deleteKeyFile) {
-        await retireKeyFile({ rename, readFile, rm, link }, keyFile, config);
+        // The line must say what actually happened to the file: a newer
+        // session's key may have been kept, and then re-arming is wrong.
+        const outcome = await retireKeyFile({ rename, readFile, rm, link }, keyFile, config);
+        line = rejectedKeyLine(outcome, documentId);
       }
       // Superseded (4409): the newer listener owns this board's status file
       // from now on — this process writes nothing more to it.
       if (!policy.superseded) {
         await reportStatus("stopped", `close-${code}`);
       }
-      say(policy.line);
+      say(line);
       return;
     }
     await reportStatus("reconnecting", `close-${code}`);

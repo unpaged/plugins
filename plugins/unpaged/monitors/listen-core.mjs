@@ -67,6 +67,24 @@ export function backoffMs(attempt) {
 }
 
 /**
+ * The line printed after a 4401, chosen by what retireKeyFile did with the
+ * key file. Neither branch asks the model to mint: every 4401 is a
+ * deliberate revoke (this session, another session on the machine, or
+ * Unpaged itself), so the user turns push back on. `removed`/`absent`:
+ * this session's key is gone — say push is off and name the arm command.
+ * `kept-newer`/`superseded`: the file now holds ANOTHER session's valid
+ * key, which is listening — say nothing that could lead to a write over it.
+ */
+export function rejectedKeyLine(outcome, documentId = "") {
+  const board = documentId ? ` for canvas ${documentId}` : "";
+  const id = documentId || "<documentId>";
+  if (outcome === "kept-newer" || outcome === "superseded") {
+    return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
+  }
+  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (a later /unpaged:visual-plan arms only the canvas it creates, not this one).`;
+}
+
+/**
  * What to do after a close: `stop` with a line for the model, or
  * `reconnect` (silently). 4401 = the key is gone (re-arm via the command);
  * 4409 = a newer listener took over THIS board — reconnecting would only
@@ -75,11 +93,10 @@ export function backoffMs(attempt) {
 export function closePolicy(code, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
-    return {
-      action: "stop",
-      deleteKeyFile: true,
-      line: `Unpaged listener key rejected${board}; the stored key was removed — /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan) mints a new one.`
-    };
+    // No `line` here on purpose: only the caller knows what retireKeyFile
+    // did with the file, and rejectedKeyLine(outcome) words it. A caller that
+    // prints policy.line for 4401 prints nothing rather than a wrong claim.
+    return { action: "stop", deleteKeyFile: true };
   }
   if (code === CLOSE_SUPERSEDED) {
     return {

@@ -20,7 +20,7 @@ Each phase box opens into its own canvas: the checklist, the task detail, and th
 
 ![A phase canvas: a task checklist, numbered task detail, and an exit-criteria note](../../docs/images/visual-plan-phase.png)
 
-Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/cd1119ad-1b06-46fa-8a62-62f9b4a83fd4) — a sample plan rendered by the plugin, open to anyone.
+Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/f93886b9-50cc-4815-9577-271501f816d6) — a sample plan rendered by the plugin, open to anyone.
 
 ## Requirements
 
@@ -53,7 +53,7 @@ First use: run `/mcp` and authenticate the **unpaged** server with your Unpaged 
 | `/unpaged:listen` | List the canvases armed from this project folder and arm the one you pick. |
 | `/unpaged:listen status` | Show each canvas's key and whether a listener is connected. |
 | `/unpaged:listen arm <documentId>` | Listen to a canvas this session did not create. |
-| `/unpaged:listen revoke <documentId\|all>` | Revoke listener keys on the server and delete the local key files. |
+| `/unpaged:listen revoke <documentId\|all>` | Revoke this machine's listener keys on the server (label match, or a key named by a local key file); a key file is deleted only once the server confirms its key is gone, and a refused or failed revoke is reported as still live — only the server-side revoke stops a running listener |
 
 ## How push works
 
@@ -68,7 +68,9 @@ First use: run `/mcp` and authenticate the **unpaged** server with your Unpaged 
 | --- | --- | --- |
 | The `unpaged` tools are missing, or return an authentication error | The MCP server is not authenticated in this Claude Code profile | Run `/mcp`, sign in to **unpaged**, re-run the command |
 | *"Push isn't armed in this session"* | This Claude Code build has no `Monitor` tool, or the plugin is installed from a path outside `~/.claude/plugins` | Comment `@agent` on the canvas and ask the session to sweep it, or run `/unpaged:listen arm <documentId>` in a session that can hold a Monitor |
-| *"Unpaged listener key rejected … the stored key was removed"* | The key was revoked (in Unpaged, or by `/unpaged:listen revoke`) | `/unpaged:listen arm <documentId>` — the next `/unpaged:visual-plan` also mints a fresh key |
+| *"Push isn't armed: auto mode refused the listener key"*, or the transcript shows *Denied by auto mode classifier* | Auto mode's classifier refuses the listener-key mint and the key-file writes; the plugin and the account are fine | Once, in manual mode (Shift+Tab), run `/unpaged:listen arm <documentId>`; later sessions reuse the stored key. Or add allow rules for `mcp__plugin_unpaged_unpaged__agent_listener_key_create` and the plugin's shell steps |
+| *"Unpaged listener key rejected … the stored key file was retired"* | The key was revoked (in Unpaged, or by `/unpaged:listen revoke`) | `/unpaged:listen arm <documentId>` — that is the whole remedy; a later `/unpaged:visual-plan` arms only the canvas it creates |
+| *"Unpaged listener key rejected … a newer key for this canvas is already stored by another session"* | Your key was revoked while a newer session had armed the same canvas | Nothing — that session answers; `/unpaged:listen status` shows it. Do not re-arm from here |
 | *"Another session took over the Unpaged listener"* | You armed the same canvas from a newer session | Nothing — the newer session answers; re-arm here with `/unpaged:listen arm <documentId>` to take it back |
 | *"needs Node 22 or newer"* | The `node` on your `PATH` has no built-in WebSocket client | Upgrade Node.js; rendering still works, only push is off |
 | The reply mentions a `folderWarning` | The canvas was created but the server could not file it in *Visual plans* | The canvas is in your library, unfiled; move it from the library if you like |
@@ -78,7 +80,7 @@ First use: run `/mcp` and authenticate the **unpaged** server with your Unpaged 
 ## Privacy
 
 - **What leaves your machine:** the plan text and the elements the command draws, sent to Unpaged's MCP server (`mcp.unpaged.io`) under your own account; your canvas comments and the agent's replies. Nothing from your repository beyond what the plan itself quotes.
-- **Listener key:** receive-only, bound to one canvas, minted through the MCP server, stored at `~/.claude/unpaged/listeners/<documentId>.json` with mode 600. It is never the OAuth token, never appears in a URL, and is revocable at any time with `/unpaged:listen revoke`.
+- **Listener key:** receive-only, bound to one canvas, minted through the MCP server, stored at `~/.claude/unpaged/listeners/<documentId>.json` with mode 600. It is never the OAuth token, never appears in a URL, and is revocable with `/unpaged:listen revoke` whenever the MCP server can be reached (a refused or failed call leaves the key live and says so; auto mode may need manual mode once), and always from Unpaged itself, which needs no session at all.
 - **Comments are data, not instructions.** An `@agent` comment is acted on only with Unpaged tools on that one canvas; it never triggers shell, file, git or network actions in your session. A viewer's request gets an answer, not a change — only owners and editors can change the canvas through the agent.
 - **The hook** that flips the status stamp only reads a JSON file bundled with the plugin; it runs no other command.
 
