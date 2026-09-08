@@ -4,6 +4,16 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-08
+
+Directory submission prep, metadata only: no behaviour change.
+
+### Added
+
+- `plugin.json`: `homepage`, `repository`, `license`, `keywords`; `marketplace.json`: a description (the one `claude plugin validate` warning, so `--strict` passes on both manifests).
+- README: privacy policy and terms links under Privacy, a verified contact channel under Support — both asked for by the Software Directory Policy.
+- `docs/directory-submission.md`: the community marketplace form answers, disclosures, and the three working prompts.
+
 ## [1.0.0] - 2026-09-08
 
 First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged account) passed on every item — cold install, OAuth, first-command render, folder filing, push, approval stamp, `listen` status/arm/revoke, takeover, key rejection and the stale-cache locator — and the fixes below are what fell out of it, plus the ones the first Claude reviews of this repo found in them; they went through 23 rounds of automated review before merging. 0.5.2 was merged but never tagged; its changes ship here.
@@ -64,7 +74,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/unpaged/plugins/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/unpaged/plugins/compare/v0.5.1...v1.0.0
 [0.5.1]: https://github.com/unpaged/plugins/releases/tag/v0.5.1
 [0.5.0]: https://github.com/unpaged/plugins/pull/4
