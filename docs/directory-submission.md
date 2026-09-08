@@ -9,8 +9,8 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 | Plugin name | `unpaged` |
 | Display name | Unpaged |
 | Repository | https://github.com/unpaged/plugins |
-| Plugin path in the repo | `plugins/unpaged` (monorepo; the catalog uses `source: git-subdir`) |
-| Release / ref | `v1.0.0` |
+| Plugin path in the repo | `plugins/unpaged` — this repo's own `marketplace.json` lists it as the relative path `./plugins/unpaged`; the community catalog records monorepo entries as `{ source: "git-subdir", url, path, ref, sha }`, so give the form the repo URL plus this path |
+| Release / ref | `v1.0.1` — the first tag whose tree carries the manifest fields and README links added for the submission; never submit an older ref |
 | Homepage | https://unpaged.io |
 | Privacy policy | https://unpaged.io/privacy |
 | Terms | https://unpaged.io/terms |
@@ -50,5 +50,5 @@ A free Unpaged account with a sample canvas is created for the submission and ha
 
 - [ ] `claude plugin validate --strict plugins/unpaged` and `--strict .claude-plugin/marketplace.json` pass
 - [ ] every URL in the READMEs resolves
-- [ ] release tag matches `plugin.json` version
+- [ ] the submitted tag's tree contains the `plugin.json` version, `homepage`/`repository`/`license`/`keywords`, and the marketplace description (`git show <tag>:plugins/unpaged/.claude-plugin/plugin.json`)
 - [ ] reviewer account created, sample canvas shared with it, three prompts re-run on it
