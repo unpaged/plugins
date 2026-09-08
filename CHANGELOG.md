@@ -4,9 +4,9 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-## [0.5.2] - 2026-09-07
+## [1.0.0] - 2026-09-08
 
-Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold install, OAuth, first-command render, folder filing, push, approval stamp, takeover, key rejection and the stale-cache check all passed; these are the fixes that fell out, plus the ones the first Claude reviews of this repo found in them.
+First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged account) passed on every item — cold install, OAuth, first-command render, folder filing, push, approval stamp, `listen` status/arm/revoke, takeover, key rejection and the stale-cache locator — and the fixes below are what fell out of it, plus the ones the first Claude reviews of this repo found in them; they went through 23 rounds of automated review before merging. 0.5.2 was merged but never tagged; its changes ship here.
 
 ### Fixed
 
@@ -64,8 +64,8 @@ Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold ins
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v0.5.2...HEAD
-[0.5.2]: https://github.com/unpaged/plugins/compare/v0.5.1...v0.5.2
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/unpaged/plugins/compare/v0.5.1...v1.0.0
 [0.5.1]: https://github.com/unpaged/plugins/releases/tag/v0.5.1
 [0.5.0]: https://github.com/unpaged/plugins/pull/4
 [0.4.0]: https://github.com/unpaged/plugins/pull/3
