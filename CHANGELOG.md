@@ -6,9 +6,7 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [1.0.0] - 2026-09-08
 
-First stable release: the fresh-machine test on a clean Ubuntu VM with a free Unpaged account passed on every item (cold install, OAuth, first-command render, folder filing, push, approval stamp, listen status/arm/revoke, takeover, key rejection, stale-cache locator), and the fixes below went through 23 rounds of automated review before merging. 0.5.2 was merged but never tagged; its changes ship here.
-
-Findings from the fresh-machine test (Ubuntu VM, free Unpaged account): cold install, OAuth, first-command render, folder filing, push, approval stamp, takeover, key rejection and the stale-cache check all passed; these are the fixes that fell out, plus the ones the first Claude reviews of this repo found in them.
+First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged account) passed on every item — cold install, OAuth, first-command render, folder filing, push, approval stamp, `listen` status/arm/revoke, takeover, key rejection and the stale-cache locator — and the fixes below are what fell out of it, plus the ones the first Claude reviews of this repo found in them; they went through 23 rounds of automated review before merging. 0.5.2 was merged but never tagged; its changes ship here.
 
 ### Fixed
 
