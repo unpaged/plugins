@@ -6,5 +6,16 @@
   "author": {
     "name": "Unpaged",
     "url": "https://unpaged.io"
-  }
+  },
+  "homepage": "https://unpaged.io",
+  "repository": "https://github.com/unpaged/plugins",
+  "license": "MIT",
+  "keywords": [
+    "plans",
+    "whiteboard",
+    "canvas",
+    "review",
+    "comments",
+    "mcp"
+  ]
 }

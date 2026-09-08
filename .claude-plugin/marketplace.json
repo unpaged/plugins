@@ -4,6 +4,7 @@
     "name": "Unpaged",
     "url": "https://unpaged.io"
   },
+  "description": "Unpaged plugins for Claude Code: the plan Claude just made, rendered as a whiteboard your team can navigate and comment on, with @agent comments pushed straight back to the session.",
   "plugins": [
     {
       "name": "unpaged",
