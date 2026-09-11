@@ -4,6 +4,23 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-11
+
+The why, kept while the code is written, and the record of what shipped.
+
+### Added
+
+- **Decision log on every plan canvas.** `/unpaged:visual-plan` adds a `📝 Decision log` node (a five-column table with only its header row — When, Decision, Why, Alternative rejected, Plan item — a rule note, and a link box on the root). While the plan is implemented, the session appends one row per deviation from the plan, dropped or added task, or choice a reviewer would later ask "why" about, at the moment of the choice, naming the alternative it rejected. Rows are never rewritten; at 20 rows a second table continues beneath.
+- **`/unpaged:as-built`** compiles the as-built record of an implemented plan as a dated, frozen canvas nested under the plan canvas: a plan delta (every task ✅ done / 🔀 changed / ⛔ dropped with its stated reason / ⏳ open, plus ➕ added work, each with its why; a task an earlier record carries as done keeps that outcome, so a later round is judged only on what was still open), the decisions with their provenance, a Reviewer guide canvas (reading order, seams and risks, test map) and — only when a runtime flow changed — a Data flow canvas with a before/after Mermaid diagram. Every why says where it comes from: `📝 recorded` (a Decision log row), `🔍 reconstructed` (inferred from the diff and labelled so) or `not recorded`; a reconstructed reason is never presented as a recorded one. Inputs: the session's plan canvas or a `documentId`, and the current branch's range since the default branch or an explicit `base..head`; the pull request goes on the stamp when `gh` finds one. Only read-only git and `gh` commands run.
+- **The plan is stamped when it is built:** the root's status becomes `✅ BUILT`, phase boxes get ✅ / 🔀 / ⛔, done tasks are ticked. A run with open plan tasks writes a *(partial)* record, ticks what is done and leaves the stamp alone — BUILT is stamped once, when nothing of the plan is left. Records are never edited; a re-run adds `📐 As built · <date> (2)`.
+- CI: every `commands/*.md` must open with frontmatter that carries a `description`.
+
+### Changed
+
+- The plan-approved hook context, after stamping EXECUTING, tells the session to keep the Decision log for as long as it implements the plan (and to skip logging on a canvas rendered by an older plugin, which has no log node). The render prompt says what to do when the plan is approved in chat rather than in plan mode, where no hook fires: stamp EXECUTING and keep the log itself.
+- README: the as-built record (what it holds, recorded vs reconstructed, immutability, partial records), a Use step 4, two command rows, two troubleshooting rows, and Privacy: what `/unpaged:as-built` sends — file paths, commit subjects, diff summaries and the agent's description of the change, never file contents beyond a quoted identifier.
+- Descriptions in `plugin.json` and `marketplace.json` mention the Decision log and the as-built record.
+
 ## [1.0.1] - 2026-09-08
 
 Directory submission prep, metadata only: no behaviour change.
@@ -74,7 +91,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/unpaged/plugins/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/unpaged/plugins/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/unpaged/plugins/compare/v0.5.1...v1.0.0
 [0.5.1]: https://github.com/unpaged/plugins/releases/tag/v0.5.1

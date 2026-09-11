@@ -1,8 +1,8 @@
 {
   "name": "unpaged",
   "displayName": "Unpaged",
-  "description": "Renders Claude Code plans as whiteboards on Unpaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies and listens to its @agent comments (pushed to the session, no polling); approving the plan stamps the canvas EXECUTING. Every plan is filed in the Visual plans folder of your Unpaged library.",
-  "version": "1.0.1",
+  "description": "Renders Claude Code plans as whiteboards on Unpaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies and listens to its @agent comments (pushed to the session, no polling); approving the plan stamps the canvas EXECUTING. While the plan is implemented the session keeps a Decision log on the canvas; /unpaged:as-built then compiles the as-built record — what shipped vs the plan, every decision and its why, the data flow, a reviewer's guide — as a frozen canvas nested under the plan. Every plan is filed in the Visual plans folder of your Unpaged library.",
+  "version": "1.1.0",
   "author": {
     "name": "Unpaged",
     "url": "https://unpaged.io"
@@ -16,6 +16,8 @@
     "canvas",
     "review",
     "comments",
-    "mcp"
+    "mcp",
+    "as-built",
+    "decision-log"
   ]
 }
