@@ -9,7 +9,7 @@ An as-built record is the reviewer's map of what actually shipped: each plan ite
 
 ## Input
 
-- **The plan canvas.** If `$ARGUMENTS` starts with a document id (`[A-Za-z0-9_-]{8,128}`), that is the plan canvas. Otherwise use the plan canvas this session created or updated with `/unpaged:visual-plan`. With neither, say *"No plan canvas in this session — pass its id: `/unpaged:as-built <documentId>`"* and stop.
+- **The plan canvas.** If the first token of `$ARGUMENTS` is a document id — the **whole** token matches `[A-Za-z0-9_-]{8,128}` and holds no `..` — that is the plan canvas. A token carrying `..` is a git range, never an id: `/unpaged:as-built production..HEAD` records this session's plan canvas over that range. A bare ref that would also pass as an id is read as the id, so pass it as a range instead — `mybranch..HEAD`, not `mybranch`. Otherwise use the plan canvas this session created or updated with `/unpaged:visual-plan`. With neither, say *"No plan canvas in this session — pass its id: `/unpaged:as-built <documentId>`"* and stop.
 - **The change.** If `$ARGUMENTS` carries a git range (`base..head`, or a single ref meaning `ref..HEAD`), that is the change. Otherwise it is `merge-base(<default branch>, HEAD)..HEAD`, where the default branch is what `git symbolic-ref refs/remotes/origin/HEAD` names, falling back to `main`. If the range holds no commits, say *"Nothing to record: the range is empty"* and stop.
 - **The pull request**, when `gh` is on the `PATH` and `gh pr view --json number,url,title,body,baseRefName` succeeds for the current branch: its number and URL go on the stamp, its title and body are input for the summary. No PR is fine.
 
