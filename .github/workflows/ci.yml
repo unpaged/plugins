@@ -43,6 +43,21 @@ jobs:
             }
           '
 
+      - name: Commands have frontmatter
+        run: |
+          node -e '
+            const fs = require("fs");
+            const dir = "plugins/unpaged/commands";
+            const files = fs.readdirSync(dir).filter(f => f.endsWith(".md"));
+            if (!files.length) { console.error("no command files in", dir); process.exit(1); }
+            for (const f of files) {
+              const s = fs.readFileSync(dir + "/" + f, "utf8");
+              const m = s.match(/^---\n([\s\S]*?)\n---\n/);
+              if (!m || !/^description: \S/m.test(m[1])) { console.error("missing frontmatter description:", f); process.exit(1); }
+              console.log("ok", f);
+            }
+          '
+
       - name: Listener syntax
         run: node --check plugins/unpaged/monitors/listen.mjs
 
