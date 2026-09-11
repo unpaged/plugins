@@ -71,7 +71,7 @@ If a permission classifier refuses one of several create calls while its sibling
 Reply to the user with:
 - The link: `https://unpaged.io/document/<documentId>/edit?nodeId=<asBuiltNodeId>` — call it a canvas (or whiteboard), never a board.
 - One line of counts: plan items done / changed / dropped / open / added, and whys recorded / reconstructed / not recorded.
-- One line on the plan: *"The plan canvas is stamped BUILT"*, or for a partial record *"The plan stays EXECUTING — <k> tasks are still open"*.
+- One line on the plan: *"The plan canvas is stamped BUILT"*, or for a partial record *"The plan canvas keeps its status, <status> — <k> tasks are still open"*, where `<status>` is the stamp you read in step 1 and never an assumption: a canvas rendered in another session may still read 📋 PROPOSED, and one an earlier record completed reads ✅ BUILT.
 - If a Data flow node was created: *"Open the Data flow canvas once in edit mode so viewers see the diagram rather than its source."*
 - Listener status, said truthfully: if this session holds a Monitor on the plan canvas (armed by `/unpaged:visual-plan` or `/unpaged:listen`), *"I'm listening on this canvas — comment @agent on the record and I reply there."* Otherwise *"Push isn't armed for this canvas in this session — run `/unpaged:listen arm <documentId>`."* Never claim to be listening without an armed Monitor.
 
