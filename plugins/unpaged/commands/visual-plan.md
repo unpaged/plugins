@@ -35,17 +35,24 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
    - A `checklist` element with that phase's tasks as items (unchecked).
    - A `uml-note` for that phase's verification/exit criteria when the plan states them.
 
-4. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible.
+4. **One "📝 Decision log" node on every canvas** (`node_create_with_elements`, parent = root), whatever the plan's size. This is where the agent records, while it implements, every choice a reviewer would later ask "why" about — the as-built record compiles it. The node carries:
+   - A `table` with ONE header row and five columns, exactly: `**When**` | `**Decision**` | `**Why**` | `**Alternative rejected**` | `**Plan item**`. Rows are appended later with `table_append_row`; pre-fill nothing.
+   - A `uml-note` with the rule: *One row per deviation from the plan, dropped or added task, or choice a reviewer would ask "why" about — appended at the moment of the choice, naming the alternative rejected. Never backfill, never rewrite earlier rows.*
+   - On the root, a small `rectangle` labelled `📝 Decision log` that links to this node (`isLink`, `linkTarget`), placed below the phase row and apart from it, so it never reads as a phase.
 
-5. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels.
+   The node is plugin scaffolding, not plan content: it does not count against fidelity (step 6), and its rows are written by the agent during implementation, never at render time.
+
+5. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible.
+
+6. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels. The Decision log node of step 4 is the one addition — scaffolding the plugin owns, not plan content.
 
 ## Finish
 
 Reply to the user with:
 - The edit link: `https://unpaged.io/document/<documentId>/edit` — call it a canvas (or whiteboard) in your reply, never a board.
-- One sentence: approving the plan will stamp the canvas EXECUTING.
+- One sentence: approving the plan will stamp the canvas EXECUTING, and the Decision log fills in while the plan is implemented.
 
-Remember the document ID — if the plan is approved later in this session, you will be asked to update this board's status stamp.
+Remember the document ID — if the plan is approved later in this session through plan mode, you will be asked to update this board's status stamp and to keep its Decision log. If the user approves in chat instead (no plan mode, so no hook fires), do the same yourself: set the root's `**Status:**` text to `**Status:** 🚀 EXECUTING`, then keep the Decision log while you implement — append ONE row with `table_append_row` at the moment of every deviation from the plan, dropped or added task, or choice a reviewer would later ask "why" about (when, decision, why, alternative rejected, plan item; one line per cell; never rewrite earlier rows; at 20 rows start a second table titled `Decision log (2)` beneath it on the same node).
 
 ## Arm the listener for THIS board (push — no manual step)
 
