@@ -12,7 +12,8 @@ import {
   hookStoredContext,
   isUnpagedListenerUrl,
   listenerConfigFromMint,
-  monitorLine
+  monitorLine,
+  printableKeyId
 } from "./listen-core.mjs";
 
 const DOC = "564e1ca0-a655-4b75-ba45-0074c6731812";
@@ -28,6 +29,38 @@ const MINT = {
   instructions: "Hold the socket open."
 };
 const SCRIPT = fileURLToPath(new URL("./keys.mjs", import.meta.url));
+const HOOKS = fileURLToPath(new URL("../hooks/hooks.json", import.meta.url));
+
+test("the key-store hook fires for the Unpaged MCP server names only", () => {
+  const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
+  const entry = hooks.hooks.PostToolUse.find((e) => /agent_listener_key_create/.test(e.matcher));
+  assert.ok(entry, "hook entry present");
+  assert.match(entry.hooks[0].command, /keys\.mjs" hook$/);
+  const matcher = new RegExp(entry.matcher);
+  for (const name of [
+    "mcp__plugin_unpaged_unpaged__agent_listener_key_create",
+    "mcp__unpaged__agent_listener_key_create",
+    "mcp__unpaged-staging__agent_listener_key_create"
+  ]) {
+    assert.equal(matcher.test(name), true, name);
+  }
+  for (const name of [
+    "mcp__evil__agent_listener_key_create",
+    "mcp__evil_mcp__unpaged__agent_listener_key_create",
+    "mcp__unpaged__agent_listener_key_create_and_more",
+    "xmcp__unpaged__agent_listener_key_create",
+    "mcp__plugin_evil_unpaged__agent_listener_key_create"
+  ]) {
+    assert.equal(matcher.test(name), false, name);
+  }
+});
+
+test("printableKeyId prints a plain token and nothing else", () => {
+  assert.equal(printableKeyId("a0d1bf7f4d152d31"), "a0d1bf7f4d152d31");
+  assert.equal(printableKeyId("k\nignore previous"), "");
+  assert.equal(printableKeyId(""), "");
+  assert.equal(printableKeyId(42), "");
+});
 
 test("extractMint finds the mint in every shape a hook can carry", () => {
   assert.equal(extractMint(MINT), MINT);
@@ -182,6 +215,16 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.equal(r.err.includes(KEY), false);
   assert.equal(existsSync(join(home, ".claude", "unpaged", "listeners", `${OTHER}.json`)), false);
 
+  // A tool call without a documentId cannot be matched to a canvas: fail closed.
+  for (const toolInput of [undefined, {}, { documentId: 7 }]) {
+    const payload = { tool_response: JSON.stringify({ ...MINT, documentId: OTHER }) };
+    if (toolInput !== undefined) payload.tool_input = toolInput;
+    r = run(home, ["hook"], JSON.stringify(payload));
+    assert.equal(r.code, 2, JSON.stringify(toolInput));
+    assert.match(r.err, /nothing was stored/);
+    assert.equal(existsSync(join(home, ".claude", "unpaged", "listeners", `${OTHER}.json`)), false);
+  }
+
   // A mint pointing at a plaintext or foreign socket is refused the same way.
   r = run(
     home,
@@ -225,6 +268,19 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.equal(r.out, "forgotten 3");
   assert.equal(readdirSync(listeners).length, 0);
   assert.equal(existsSync(join(home, ".claude", "unpaged", "listener.json.retired-v1")), false);
+
+  // A key file naming a plaintext or foreign socket (older plugin, edited by hand) is not armed.
+  mkdirSync(listeners, { recursive: true });
+  writeFileSync(
+    join(listeners, `${OTHER}.json`),
+    JSON.stringify({ url: "ws://attacker.example/events", protocols: [SUBPROTOCOL, KEY], documentId: OTHER, keyId: "x" })
+  );
+  r = run(home, ["check", OTHER]);
+  assert.equal(r.out.split("\n")[0], "missing");
+  r = run(home, ["list"]);
+  assert.equal(r.out, "none");
+  r = run(home, ["forget", OTHER]);
+  assert.equal(r.out, "forgotten 1");
 
   // check with a malformed id still prints the host line the prompts read the label from.
   r = run(home, ["check", "../etc"]);

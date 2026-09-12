@@ -26,6 +26,7 @@ import {
   closePolicy,
   frameLine,
   isDocumentId,
+  isUnpagedListenerUrl,
   keyFileFor,
   monitorStatus,
   parseListenerConfig,
@@ -80,7 +81,12 @@ async function reportStatus(state, reason) {
 async function loadConfig(keyFile) {
   try {
     const config = parseListenerConfig(await readFile(keyFile, "utf8"));
-    return config && config.documentId === documentId ? config : null;
+    // A key file written by an older plugin or by hand may name any
+    // socket; the key rides in the subprotocol list, so only TLS to an
+    // Unpaged host is ever opened. Anything else counts as not armed.
+    return config && config.documentId === documentId && isUnpagedListenerUrl(config.url)
+      ? config
+      : null;
   } catch {
     return null;
   }

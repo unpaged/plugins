@@ -11,7 +11,7 @@
         ]
       },
       {
-        "matcher": "mcp__(plugin_unpaged_)?unpaged[A-Za-z0-9-]*__agent_listener_key_create",
+        "matcher": "^mcp__(plugin_unpaged_)?unpaged[A-Za-z0-9-]*__agent_listener_key_create$",
         "hooks": [
           {
             "type": "command",

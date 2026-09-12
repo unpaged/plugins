@@ -25,10 +25,12 @@ import {
   extractMint,
   hookStoredContext,
   isDocumentId,
+  isUnpagedListenerUrl,
   keyFileFor,
   listenerConfigFromMint,
   monitorLine,
-  parseListenerConfig
+  parseListenerConfig,
+  printableKeyId
 } from "./listen-core.mjs";
 
 const home = homedir();
@@ -75,7 +77,11 @@ async function loadConfig(documentId) {
   if (!keyFile) return null;
   try {
     const config = parseListenerConfig(await readFile(keyFile, "utf8"));
-    return config && config.documentId === documentId ? config : null;
+    // Same gate listen.mjs applies at load: a file naming a socket that
+    // is not TLS to an Unpaged host is not armed, whoever wrote it.
+    return config && config.documentId === documentId && isUnpagedListenerUrl(config.url)
+      ? config
+      : null;
   } catch {
     return null;
   }
@@ -102,7 +108,7 @@ async function check(documentId) {
   }
   await retireLegacyFile();
   const config = await loadConfig(documentId);
-  say(config ? `armed ${config.keyId || ""}`.trimEnd() : "missing");
+  say(config ? `armed ${printableKeyId(config.keyId)}`.trimEnd() : "missing");
   say(host);
 }
 
@@ -136,12 +142,17 @@ async function storeFromStdin(documentId, asHook) {
   }
   // The board the caller asked for is the only board this mint may arm:
   // the `store` verb takes it as an argument, the hook reads it from the
-  // tool call that produced the result.
+  // tool call that produced the result — and fails closed when the call
+  // carries none, so a payload without tool_input can never arm anything.
   const expected = asHook
     ? input && typeof input === "object" && input.tool_input && typeof input.tool_input === "object"
       ? input.tool_input.documentId
       : undefined
     : documentId;
+  if (asHook && typeof expected !== "string") {
+    process.stderr.write("Unpaged listener key hook: the tool call carries no documentId, so the mint cannot be matched to a canvas; nothing was stored.\n");
+    return 2;
+  }
   if (typeof expected === "string" && config.documentId !== expected) {
     if (asHook) {
       process.stderr.write(`Unpaged listener key hook: the mint names canvas ${config.documentId} but the tool was called for ${expected}; nothing was stored. Push is off for this canvas.\n`);
@@ -171,7 +182,7 @@ async function storeFromStdin(documentId, asHook) {
       })
     );
   } else {
-    say(`stored ${config.keyId || ""}`.trimEnd());
+    say(`stored ${printableKeyId(config.keyId)}`.trimEnd());
   }
   return 0;
 }

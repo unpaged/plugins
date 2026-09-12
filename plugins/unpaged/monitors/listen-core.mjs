@@ -330,7 +330,17 @@ export function monitorLine(status, isAlive) {
   return `monitor:${alive ? status.state || "unknown" : "dead"}`;
 }
 
+/**
+ * A keyId the commands may print: the server's identifier when it is a
+ * plain token, otherwise nothing — it is the one server-supplied string
+ * that lands in text the model reads outside boardRow.
+ */
+export function printableKeyId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : "";
+}
+
 /** What the PostToolUse hook hands back to the model once the key file is written. */
 export function hookStoredContext(config) {
-  return `Unpaged listener key for canvas ${config.documentId} stored by the plugin hook${config.keyId ? ` (keyId ${config.keyId})` : ""} at ~/${KEY_DIR_RELATIVE}/${config.documentId}.json — do not store it again and never repeat the key; go straight on to arming the Monitor.`;
+  const keyId = printableKeyId(config.keyId);
+  return `Unpaged listener key for canvas ${config.documentId} stored by the plugin hook${keyId ? ` (keyId ${keyId})` : ""} at ~/${KEY_DIR_RELATIVE}/${config.documentId}.json — do not store it again and never repeat the key; go straight on to arming the Monitor.`;
 }
