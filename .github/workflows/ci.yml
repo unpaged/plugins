@@ -59,7 +59,7 @@ jobs:
           '
 
       - name: Listener syntax
-        run: node --check plugins/unpaged/monitors/listen.mjs plugins/unpaged/monitors/keys.mjs
+        run: for f in plugins/unpaged/monitors/listen.mjs plugins/unpaged/monitors/keys.mjs plugins/unpaged/monitors/listen-core.mjs; do node --check "$f" || exit 1; done
 
       - name: Tests
         run: node --test 'plugins/unpaged/monitors/*.test.mjs'
