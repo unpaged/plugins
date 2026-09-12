@@ -9,6 +9,15 @@
             "command": "cat \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-approved-context.json\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*__agent_listener_key_create",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/monitors/keys.mjs\" hook"
+          }
+        ]
       }
     ]
   }

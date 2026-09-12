@@ -59,7 +59,7 @@ jobs:
           '
 
       - name: Listener syntax
-        run: node --check plugins/unpaged/monitors/listen.mjs
+        run: node --check plugins/unpaged/monitors/listen.mjs plugins/unpaged/monitors/keys.mjs
 
       - name: Tests
         run: node --test 'plugins/unpaged/monitors/*.test.mjs'
