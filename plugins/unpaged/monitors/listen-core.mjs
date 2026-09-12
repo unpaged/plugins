@@ -202,3 +202,145 @@ export function frameLine(data) {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Key-file helpers for `keys.mjs` — the one script the commands call instead
+// of inline `node -e` one-liners (auto mode classifies every inline
+// interpreter call; a named plugin script with a verb and an id is a plain,
+// narrow command). Pure; the CLI supplies fs.
+// ---------------------------------------------------------------------------
+
+/**
+ * The mint result of `agent_listener_key_create`, dug out of whatever
+ * carries it: the raw tool result (an object with url + protocols), or a
+ * PostToolUse hook input whose `tool_response` is that object, its JSON
+ * text, or MCP content blocks wrapping that text. Returns null when no
+ * mint is there (a refused mint, another tool, a parse failure) so a hook
+ * can stay silent instead of guessing.
+ */
+export function extractMint(value) {
+  const seen = new Set();
+  const dig = (candidate, depth) => {
+    if (depth > 6 || candidate === null || candidate === undefined) return null;
+    if (typeof candidate === "string") {
+      const text = candidate.trim();
+      if (!text.startsWith("{") && !text.startsWith("[")) return null;
+      try {
+        return dig(JSON.parse(text), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    if (typeof candidate !== "object") return null;
+    if (seen.has(candidate)) return null;
+    seen.add(candidate);
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        const found = dig(entry, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof candidate.url === "string" && Array.isArray(candidate.protocols)) {
+      return candidate;
+    }
+    for (const key of ["tool_response", "content", "text", "result", "structuredContent"]) {
+      if (key in candidate) {
+        const found = dig(candidate[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return dig(value, 0);
+}
+
+/**
+ * The only sockets a stored key may ever be sent to: TLS, on Unpaged's own
+ * hosts. listen.mjs opens `config.url` with the key in the subprotocol
+ * list, and the hook stores a mint with nobody reading it first, so a mint
+ * can never downgrade the transport or redirect the key to another host.
+ */
+export function isUnpagedListenerUrl(url) {
+  if (typeof url !== "string" || !url.startsWith("wss://")) return false;
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "unpaged.io" || hostname.endsWith(".unpaged.io");
+}
+
+/**
+ * The per-board config to store for a mint result, or null when the mint
+ * is not a valid listener (it must pass parseListenerConfig and point at
+ * an Unpaged wss:// socket). `title` comes from the mint's documentTitle;
+ * `cwd` and `createdAt` are the caller's bookkeeping.
+ */
+export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = {}) {
+  if (!mint || typeof mint !== "object") return null;
+  if (!isUnpagedListenerUrl(mint.url)) return null;
+  const candidate = {
+    url: mint.url,
+    protocols: mint.protocols,
+    documentId: mint.documentId,
+    keyId: typeof mint.keyId === "string" ? mint.keyId : undefined,
+    title: typeof mint.documentTitle === "string" ? mint.documentTitle : typeof mint.title === "string" ? mint.title : "",
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    createdAt: typeof createdAt === "string" ? createdAt : undefined
+  };
+  const parsed = parseListenerConfig(JSON.stringify(candidate));
+  if (!parsed) return null;
+  return {
+    url: parsed.url,
+    protocols: parsed.protocols,
+    documentId: parsed.documentId,
+    keyId: parsed.keyId ?? undefined,
+    title: parsed.title,
+    cwd: parsed.cwd ?? undefined,
+    createdAt: parsed.createdAt ?? undefined
+  };
+}
+
+/**
+ * One listing row: documentId, this-folder|other-folder, armed-at, title,
+ * keyId. Tab-separated and newline-delimited — that format is the
+ * interface the commands parse, and title/keyId/createdAt come from the
+ * server, so the separators never survive a cell. Never the key.
+ */
+export function boardRow(config, cwd) {
+  const cell = (value) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
+  return [
+    config.documentId,
+    config.cwd === cwd ? "this-folder" : "other-folder",
+    cell(config.createdAt),
+    cell(config.title),
+    cell(config.keyId)
+  ].join("\t");
+}
+
+/** `monitor:connected` / `monitor:<state>` / `monitor:dead` / `monitor:absent` from a status file's content. */
+export function monitorLine(status, isAlive) {
+  if (!status || typeof status !== "object" || typeof status.pid !== "number") {
+    return "monitor:absent";
+  }
+  const alive = isAlive(status.pid);
+  if (alive && status.state === "connected") return "monitor:connected";
+  return `monitor:${alive ? status.state || "unknown" : "dead"}`;
+}
+
+/**
+ * A keyId the commands may print: the server's identifier when it is a
+ * plain token, otherwise nothing — it is the one server-supplied string
+ * that lands in text the model reads outside boardRow.
+ */
+export function printableKeyId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : "";
+}
+
+/** What the PostToolUse hook hands back to the model once the key file is written. */
+export function hookStoredContext(config) {
+  const keyId = printableKeyId(config.keyId);
+  return `Unpaged listener key for canvas ${config.documentId} stored by the plugin hook${keyId ? ` (keyId ${keyId})` : ""} at ~/${KEY_DIR_RELATIVE}/${config.documentId}.json — do not store it again and never repeat the key; go straight on to arming the Monitor.`;
+}

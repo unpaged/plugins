@@ -4,6 +4,20 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-12
+
+Push arms in auto mode with no permission rule to add.
+
+### Changed
+
+- **The listener key is stored by a plugin hook.** A `PostToolUse` hook on `agent_listener_key_create` writes `~/.claude/unpaged/listeners/<documentId>.json` (mode 600, tmp + rename) the moment the mint returns and tells the session it did, so the model never handles the key in a shell command. If no hook ran (an older Claude Code), the command falls back to `keys.mjs store <documentId>` with the mint on stdin.
+- **Every key-file step is one call of the plugin's own script**, `monitors/keys.mjs` (`check`, `list`, `alive`, `forget`, `store`, `hook`), instead of an inline `node -e` one-liner chained with `mv`, `echo` and `hostname`. Auto mode classifies every inline interpreter call and blocked those; a named plugin script with a verb and an id is a plain, narrow command that needs no allow rule. No path prints key material.
+- **`${CLAUDE_PLUGIN_ROOT}`** names the plugin's scripts in both commands; the walk over `~/.claude/plugins` that picked the newest cached copy is replaced by an `ls` fallback for an unexpanded placeholder (newest match, not highest version), and the `ws` Monitor fallback the walk guarded is gone (the key would have travelled in the Monitor call).
+- **The hook stores only what Unpaged minted.** Its matcher fires for the Unpaged MCP server names only (`mcp__plugin_unpaged_unpaged__…`, `mcp__unpaged…__…`), a mint whose `documentId` is not the one the tool was called for is refused, and a stored `url` must be `wss://` on an `unpaged.io` host — `listen.mjs` sends the key in the subprotocol list, so a mint can never redirect it to another host or downgrade the transport. `list` rows strip tabs and newlines from server-supplied cells, so a canvas title cannot truncate or inject a row.
+- CI syntax-checks `listen.mjs`, `keys.mjs` and `listen-core.mjs` one by one (`node --check` reads only its first path); its behaviour is covered by `keys.test.mjs` (hook input shapes, file mode, v1 retirement, `forget` safety).
+- README: how push works, the troubleshooting rows for auto mode and for Monitor-less builds, and Privacy: what the second hook does.
+
+
 ## [1.1.0] - 2026-09-11
 
 The why, kept while the code is written, and the record of what shipped.
