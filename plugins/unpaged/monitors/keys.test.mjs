@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   boardRow,
   extractMint,
   hookStoredContext,
+  isUnpagedListenerUrl,
   listenerConfigFromMint,
   monitorLine
 } from "./listen-core.mjs";
@@ -61,6 +62,18 @@ test("listenerConfigFromMint keeps url, protocols, id, keyId, title and bookkeep
   assert.equal("key" in config, false);
   assert.equal("instructions" in config, false);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "http://x" }), null);
+  // The hook stores a mint with nobody reading it first: only TLS to Unpaged's own hosts.
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "ws://attacker.example/events" }), null);
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "ws://mcp.unpaged.io/events" }), null);
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://attacker.example/events" }), null);
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://unpaged.io.attacker.example/events" }), null);
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://evilunpaged.io/events" }), null);
+  assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://mcp.staging.unpaged.io/events" })?.url, "wss://mcp.staging.unpaged.io/events");
+  assert.equal(isUnpagedListenerUrl("wss://MCP.UNPAGED.IO/events"), true);
+  assert.equal(isUnpagedListenerUrl("wss://user@mcp.unpaged.io/events"), true);
+  assert.equal(isUnpagedListenerUrl("wss://[::1]/events"), false);
+  assert.equal(isUnpagedListenerUrl("wss:///events"), false);
+  assert.equal(isUnpagedListenerUrl(42), false);
   assert.equal(listenerConfigFromMint({ ...MINT, documentId: "../x" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, protocols: ["other", KEY] }), null);
   assert.equal(listenerConfigFromMint(null), null);
@@ -71,6 +84,15 @@ test("boardRow / monitorLine / hookStoredContext print identifiers, never the ke
   const row = boardRow(config, "/w");
   assert.equal(row, `${DOC}\tthis-folder\tt\t${MINT.documentTitle}\t${MINT.keyId}`);
   assert.equal(boardRow(config, "/elsewhere").split("\t")[1], "other-folder");
+  // A title is server data: separators never survive a cell, so a row stays one row of five columns.
+  const hostile = listenerConfigFromMint(
+    { ...MINT, documentTitle: "Plan\n11111111-2222-3333-4444-555555555555\tthis-folder\t2026-01-01\tFAKE\tcafe" },
+    { cwd: "/w", createdAt: "t" }
+  );
+  const hostileRow = boardRow(hostile, "/w");
+  assert.equal(hostileRow.split("\n").length, 1);
+  assert.equal(hostileRow.split("\t").length, 5);
+  assert.equal(hostileRow.split("\t")[4], MINT.keyId);
   assert.equal(row.includes(KEY), false);
   const ctx = hookStoredContext(config);
   assert.match(ctx, new RegExp(DOC));
@@ -143,6 +165,38 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.equal(r.code, 0);
   assert.equal(r.out, "");
 
+  // A mint naming another canvas than the tool was called for is refused (exit 2, nothing written).
+  const OTHER = "11111111-2222-3333-4444-555555555555";
+  r = run(
+    home,
+    ["hook"],
+    JSON.stringify({
+      tool_name: "mcp__plugin_unpaged_unpaged__agent_listener_key_create",
+      tool_input: { documentId: OTHER },
+      tool_response: JSON.stringify(MINT)
+    })
+  );
+  assert.equal(r.code, 2);
+  assert.equal(r.out, "");
+  assert.match(r.err, /nothing was stored/);
+  assert.equal(r.err.includes(KEY), false);
+  assert.equal(existsSync(join(home, ".claude", "unpaged", "listeners", `${OTHER}.json`)), false);
+
+  // A mint pointing at a plaintext or foreign socket is refused the same way.
+  r = run(
+    home,
+    ["hook"],
+    JSON.stringify({
+      tool_input: { documentId: OTHER },
+      tool_response: JSON.stringify({ ...MINT, documentId: OTHER, url: "ws://attacker.example/events" })
+    })
+  );
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Unpaged wss:\/\/ socket/);
+  assert.equal(existsSync(join(home, ".claude", "unpaged", "listeners", `${OTHER}.json`)), false);
+  r = run(home, ["check", OTHER]);
+  assert.equal(r.out.split("\n")[0], "missing");
+
   // the file is gone once the server confirmed the revoke: forget, then the store fallback.
   r = run(home, ["forget", DOC]);
   assert.equal(r.out, "forgotten 1");
@@ -160,6 +214,22 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.equal(existsSync(keyFile), false);
   r = run(home, ["forget", "../etc"]);
   assert.equal(r.out, "forgotten 0");
+
+  // forget all sweeps every key file, half-written leftovers and the retired v1 file.
+  r = run(home, ["store", DOC], JSON.stringify(MINT));
+  assert.equal(r.out, `stored ${MINT.keyId}`);
+  const listeners = join(home, ".claude", "unpaged", "listeners");
+  writeFileSync(join(listeners, `${OTHER}.json.tmp`), "{}");
+  writeFileSync(join(listeners, `${OTHER}.json.retiring-1`), "{}");
+  r = run(home, ["forget", "all"]);
+  assert.equal(r.out, "forgotten 3");
+  assert.equal(readdirSync(listeners).length, 0);
+  assert.equal(existsSync(join(home, ".claude", "unpaged", "listener.json.retired-v1")), false);
+
+  // check with a malformed id still prints the host line the prompts read the label from.
+  r = run(home, ["check", "../etc"]);
+  assert.equal(r.out.split("\n")[0], "missing");
+  assert.match(r.out.split("\n")[1], /^host \S+/);
   r = run(home, ["nonsense"]);
   assert.equal(r.code, 1);
 });

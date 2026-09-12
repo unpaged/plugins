@@ -256,13 +256,31 @@ export function extractMint(value) {
 }
 
 /**
+ * The only sockets a stored key may ever be sent to: TLS, on Unpaged's own
+ * hosts. listen.mjs opens `config.url` with the key in the subprotocol
+ * list, and the hook stores a mint with nobody reading it first, so a mint
+ * can never downgrade the transport or redirect the key to another host.
+ */
+export function isUnpagedListenerUrl(url) {
+  if (typeof url !== "string" || !url.startsWith("wss://")) return false;
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "unpaged.io" || hostname.endsWith(".unpaged.io");
+}
+
+/**
  * The per-board config to store for a mint result, or null when the mint
- * is not a valid listener (it must pass parseListenerConfig). `title`
- * comes from the mint's documentTitle; `cwd` and `createdAt` are the
- * caller's bookkeeping.
+ * is not a valid listener (it must pass parseListenerConfig and point at
+ * an Unpaged wss:// socket). `title` comes from the mint's documentTitle;
+ * `cwd` and `createdAt` are the caller's bookkeeping.
  */
 export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = {}) {
   if (!mint || typeof mint !== "object") return null;
+  if (!isUnpagedListenerUrl(mint.url)) return null;
   const candidate = {
     url: mint.url,
     protocols: mint.protocols,
@@ -285,14 +303,20 @@ export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = 
   };
 }
 
-/** One listing row: documentId, this-folder|other-folder, armed-at, title, keyId. Tab-separated, never the key. */
+/**
+ * One listing row: documentId, this-folder|other-folder, armed-at, title,
+ * keyId. Tab-separated and newline-delimited — that format is the
+ * interface the commands parse, and title/keyId/createdAt come from the
+ * server, so the separators never survive a cell. Never the key.
+ */
 export function boardRow(config, cwd) {
+  const cell = (value) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
   return [
     config.documentId,
     config.cwd === cwd ? "this-folder" : "other-folder",
-    config.createdAt || "",
-    config.title || "",
-    config.keyId || ""
+    cell(config.createdAt),
+    cell(config.title),
+    cell(config.keyId)
   ].join("\t");
 }
 

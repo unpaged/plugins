@@ -93,15 +93,17 @@ async function storeConfig(config) {
 }
 
 async function check(documentId) {
+  const host = `host ${hostname().split(".")[0]}`;
   if (!isDocumentId(documentId)) {
     say("missing");
+    say(host);
     say("error not a document id");
     return;
   }
   await retireLegacyFile();
   const config = await loadConfig(documentId);
   say(config ? `armed ${config.keyId || ""}`.trimEnd() : "missing");
-  say(`host ${hostname().split(".")[0]}`);
+  say(host);
 }
 
 async function storeFromStdin(documentId, asHook) {
@@ -126,13 +128,25 @@ async function storeFromStdin(documentId, asHook) {
   const config = listenerConfigFromMint(mint, { cwd, createdAt: new Date().toISOString() });
   if (!config) {
     if (asHook) {
-      process.stderr.write("Unpaged listener key hook: the mint result is not a valid listener config; store it with `keys.mjs store <documentId>`.\n");
+      process.stderr.write("Unpaged listener key hook: the mint result is not a valid listener config (it must name an Unpaged wss:// socket); nothing was stored. Push is off for this canvas.\n");
       return 2;
     }
-    say("error mint result is not a valid listener config");
+    say("error mint result is not a valid listener config (it must name an Unpaged wss:// socket)");
     return 1;
   }
-  if (!asHook && documentId && config.documentId !== documentId) {
+  // The board the caller asked for is the only board this mint may arm:
+  // the `store` verb takes it as an argument, the hook reads it from the
+  // tool call that produced the result.
+  const expected = asHook
+    ? input && typeof input === "object" && input.tool_input && typeof input.tool_input === "object"
+      ? input.tool_input.documentId
+      : undefined
+    : documentId;
+  if (typeof expected === "string" && config.documentId !== expected) {
+    if (asHook) {
+      process.stderr.write(`Unpaged listener key hook: the mint names canvas ${config.documentId} but the tool was called for ${expected}; nothing was stored. Push is off for this canvas.\n`);
+      return 2;
+    }
     say(`error mint is for canvas ${config.documentId}, not ${documentId}`);
     return 1;
   }
