@@ -90,12 +90,28 @@ test("Unpaged requires its declared direct server, transport and production endp
 });
 
 test("Unpaged requires a parseable recovery hook, its SessionStart command and helper", async (t) => {
-  for (const content of [null, "invalid json", "{}", JSON.stringify({ hooks: { SessionStart: [] } })]) {
+  for (const content of [null, "invalid json"]) {
     const root = await fixture(t);
     const path = join(root, "plugins/unpaged-codex/hooks/hooks.json");
     if (content === null) await rm(path);
     else await writeFile(path, content);
-    await assert.rejects(validateCodexMarketplace(root));
+    await assert.rejects(validateCodexMarketplace(root), content === null ? { code: "ENOENT" } : SyntaxError);
+  }
+  for (const value of [{}, { hooks: { SessionStart: [] } }]) {
+    const root = await fixture(t);
+    await writeFile(join(root, "plugins/unpaged-codex/hooks/hooks.json"), JSON.stringify(value));
+    await assert.rejects(validateCodexMarketplace(root), /SessionStart hook/);
+  }
+  for (const change of [
+    (value) => { value.hooks.Stop = value.hooks.SessionStart; },
+    (value) => { value.hooks.SessionStart.push(value.hooks.SessionStart[0]); },
+    (value) => { value.hooks.SessionStart[0].hooks.push({ type: "command", command: "extra-command" }); },
+    (value) => { value.hooks.SessionStart[0].matcher = "startup"; },
+    (value) => { value.hooks.SessionStart[0].hooks[0].command = "wrong-command"; }
+  ]) {
+    const root = await fixture(t);
+    await edit(root, "plugins/unpaged-codex/hooks/hooks.json", change);
+    await assert.rejects(validateCodexMarketplace(root), /SessionStart hook/);
   }
   const root = await fixture(t);
   await rm(join(root, "plugins/unpaged-codex/runtime/cli.mjs"));

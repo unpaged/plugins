@@ -35,10 +35,14 @@ async function validateUnpagedPackage(source, manifest) {
   assert.equal(connection.mcpServers.unpaged.url, "https://mcp.unpaged.io/mcp",
     "Unpaged MCP URL must be the documented production endpoint");
   const hooks = await json(await component(source, "./hooks/hooks.json"));
-  assert.ok(Array.isArray(hooks.hooks?.SessionStart) && hooks.hooks.SessionStart.some((entry) =>
-    entry.matcher === "startup|resume|compact" && Array.isArray(entry.hooks) && entry.hooks.some((hook) =>
-      hook.type === "command" && hook.command === 'node "${PLUGIN_ROOT}/runtime/cli.mjs" session-start')),
-  "Unpaged must bundle its recovery SessionStart hook");
+  assert.deepEqual(Object.keys(hooks.hooks ?? {}), ["SessionStart"],
+    "Unpaged must declare only its recovery SessionStart hook");
+  const starts = hooks.hooks.SessionStart;
+  assert.ok(Array.isArray(starts) && starts.length === 1 &&
+    starts[0]?.matcher === "startup|resume|compact" && Array.isArray(starts[0].hooks) &&
+    starts[0].hooks.length === 1 && starts[0].hooks[0]?.type === "command" &&
+    starts[0].hooks[0].command === 'node "${PLUGIN_ROOT}/runtime/cli.mjs" session-start',
+  "Unpaged must bundle exactly its recovery SessionStart hook");
   await component(source, "./runtime/cli.mjs");
 }
 
