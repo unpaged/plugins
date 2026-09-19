@@ -67,19 +67,36 @@ export function backoffMs(attempt) {
 }
 
 /**
+ * The line printed after a 4401, chosen by what retireKeyFile did with the
+ * key file. Neither branch asks the model to mint: every 4401 is a
+ * deliberate revoke (this session, another session on the machine, or
+ * Unpaged itself), so the user turns push back on. `removed`/`absent`:
+ * this session's key is gone — say push is off and name the arm command.
+ * `kept-newer`/`superseded`: the file now holds ANOTHER session's valid
+ * key, which is listening — say nothing that could lead to a write over it.
+ */
+export function rejectedKeyLine(outcome, documentId = "") {
+  const board = documentId ? ` for canvas ${documentId}` : "";
+  const id = documentId || "<documentId>";
+  if (outcome === "kept-newer" || outcome === "superseded") {
+    return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
+  }
+  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (a later /unpaged:visual-plan arms only the canvas it creates, not this one).`;
+}
+
+/**
  * What to do after a close: `stop` with a line for the model, or
  * `reconnect` (silently). 4401 = the key is gone (re-arm via the command);
  * 4409 = a newer listener took over THIS board — reconnecting would only
  * fight it, so this session stops listening to it.
  */
 export function closePolicy(code, documentId = "") {
-  const board = documentId ? ` for board ${documentId}` : "";
+  const board = documentId ? ` for canvas ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
-    return {
-      action: "stop",
-      deleteKeyFile: true,
-      line: `Unpaged listener key rejected${board}; the stored key was removed — /unpaged:listen arm ${documentId || "<documentId>"} (or the next /unpaged:visual-plan) mints a new one.`
-    };
+    // No `line` here on purpose: only the caller knows what retireKeyFile
+    // did with the file, and rejectedKeyLine(outcome) words it. A caller that
+    // prints policy.line for 4401 prints nothing rather than a wrong claim.
+    return { action: "stop", deleteKeyFile: true };
   }
   if (code === CLOSE_SUPERSEDED) {
     return {
@@ -184,4 +201,146 @@ export function frameLine(data) {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Key-file helpers for `keys.mjs` — the one script the commands call instead
+// of inline `node -e` one-liners (auto mode classifies every inline
+// interpreter call; a named plugin script with a verb and an id is a plain,
+// narrow command). Pure; the CLI supplies fs.
+// ---------------------------------------------------------------------------
+
+/**
+ * The mint result of `agent_listener_key_create`, dug out of whatever
+ * carries it: the raw tool result (an object with url + protocols), or a
+ * PostToolUse hook input whose `tool_response` is that object, its JSON
+ * text, or MCP content blocks wrapping that text. Returns null when no
+ * mint is there (a refused mint, another tool, a parse failure) so a hook
+ * can stay silent instead of guessing.
+ */
+export function extractMint(value) {
+  const seen = new Set();
+  const dig = (candidate, depth) => {
+    if (depth > 6 || candidate === null || candidate === undefined) return null;
+    if (typeof candidate === "string") {
+      const text = candidate.trim();
+      if (!text.startsWith("{") && !text.startsWith("[")) return null;
+      try {
+        return dig(JSON.parse(text), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    if (typeof candidate !== "object") return null;
+    if (seen.has(candidate)) return null;
+    seen.add(candidate);
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        const found = dig(entry, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof candidate.url === "string" && Array.isArray(candidate.protocols)) {
+      return candidate;
+    }
+    for (const key of ["tool_response", "content", "text", "result", "structuredContent"]) {
+      if (key in candidate) {
+        const found = dig(candidate[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return dig(value, 0);
+}
+
+/**
+ * The only sockets a stored key may ever be sent to: TLS, on Unpaged's own
+ * hosts. listen.mjs opens `config.url` with the key in the subprotocol
+ * list, and the hook stores a mint with nobody reading it first, so a mint
+ * can never downgrade the transport or redirect the key to another host.
+ */
+export function isUnpagedListenerUrl(url) {
+  if (typeof url !== "string" || !url.startsWith("wss://")) return false;
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "unpaged.io" || hostname.endsWith(".unpaged.io");
+}
+
+/**
+ * The per-board config to store for a mint result, or null when the mint
+ * is not a valid listener (it must pass parseListenerConfig and point at
+ * an Unpaged wss:// socket). `title` comes from the mint's documentTitle;
+ * `cwd` and `createdAt` are the caller's bookkeeping.
+ */
+export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = {}) {
+  if (!mint || typeof mint !== "object") return null;
+  if (!isUnpagedListenerUrl(mint.url)) return null;
+  const candidate = {
+    url: mint.url,
+    protocols: mint.protocols,
+    documentId: mint.documentId,
+    keyId: typeof mint.keyId === "string" ? mint.keyId : undefined,
+    title: typeof mint.documentTitle === "string" ? mint.documentTitle : typeof mint.title === "string" ? mint.title : "",
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    createdAt: typeof createdAt === "string" ? createdAt : undefined
+  };
+  const parsed = parseListenerConfig(JSON.stringify(candidate));
+  if (!parsed) return null;
+  return {
+    url: parsed.url,
+    protocols: parsed.protocols,
+    documentId: parsed.documentId,
+    keyId: parsed.keyId ?? undefined,
+    title: parsed.title,
+    cwd: parsed.cwd ?? undefined,
+    createdAt: parsed.createdAt ?? undefined
+  };
+}
+
+/**
+ * One listing row: documentId, this-folder|other-folder, armed-at, title,
+ * keyId. Tab-separated and newline-delimited — that format is the
+ * interface the commands parse, and title/keyId/createdAt come from the
+ * server, so the separators never survive a cell. Never the key.
+ */
+export function boardRow(config, cwd) {
+  const cell = (value) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
+  return [
+    config.documentId,
+    config.cwd === cwd ? "this-folder" : "other-folder",
+    cell(config.createdAt),
+    cell(config.title),
+    cell(config.keyId)
+  ].join("\t");
+}
+
+/** `monitor:connected` / `monitor:<state>` / `monitor:dead` / `monitor:absent` from a status file's content. */
+export function monitorLine(status, isAlive) {
+  if (!status || typeof status !== "object" || typeof status.pid !== "number") {
+    return "monitor:absent";
+  }
+  const alive = isAlive(status.pid);
+  if (alive && status.state === "connected") return "monitor:connected";
+  return `monitor:${alive ? status.state || "unknown" : "dead"}`;
+}
+
+/**
+ * A keyId the commands may print: the server's identifier when it is a
+ * plain token, otherwise nothing — it is the one server-supplied string
+ * that lands in text the model reads outside boardRow.
+ */
+export function printableKeyId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : "";
+}
+
+/** What the PostToolUse hook hands back to the model once the key file is written. */
+export function hookStoredContext(config) {
+  const keyId = printableKeyId(config.keyId);
+  return `Unpaged listener key for canvas ${config.documentId} stored by the plugin hook${keyId ? ` (keyId ${keyId})` : ""} at ~/${KEY_DIR_RELATIVE}/${config.documentId}.json — do not store it again and never repeat the key; go straight on to arming the Monitor.`;
 }

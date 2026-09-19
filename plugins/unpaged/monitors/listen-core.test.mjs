@@ -9,6 +9,7 @@ import {
   isDocumentId,
   keyFileFor,
   parseListenerConfig,
+  rejectedKeyLine,
   retireKeyFile,
   sameListenerConfig,
   shouldWriteStatus
@@ -73,8 +74,9 @@ test("backoff doubles from 1s and caps at 60s", () => {
 test("close policy stops on 4401 (dropping the key file) and 4409, reconnects otherwise", () => {
   assert.equal(closePolicy(4401, DOC).action, "stop");
   assert.equal(closePolicy(4401, DOC).deleteKeyFile, true);
-  assert.match(closePolicy(4401, DOC).line, new RegExp(`/unpaged:listen arm ${DOC}`));
-  assert.match(closePolicy(4401).line, /\/unpaged:visual-plan/);
+  assert.equal(closePolicy(4401, DOC).line, undefined); // worded by rejectedKeyLine(outcome) only
+  assert.match(rejectedKeyLine("removed", DOC), new RegExp(`/unpaged:listen arm ${DOC}`));
+  assert.match(rejectedKeyLine("absent"), /\/unpaged:visual-plan/);
   assert.equal(closePolicy(4409, DOC).action, "stop");
   assert.equal(closePolicy(4409, DOC).deleteKeyFile, undefined);
   assert.equal(closePolicy(4409, DOC).superseded, true);
@@ -131,6 +133,22 @@ function memFs(files) {
 }
 
 const cfg = (key, keyId) => ({ url: "wss://x/events", protocols: [SUBPROTOCOL, key], documentId: DOC, keyId });
+
+test("rejected-key line follows the retire outcome: re-arm only when this session's file is gone", () => {
+  for (const outcome of ["removed", "absent"]) {
+    const line = rejectedKeyLine(outcome, DOC);
+    assert.match(line, /the stored key file was retired/);
+    assert.match(line, /do not mint a key here/);
+    assert.match(line, new RegExp(`/unpaged:listen arm ${DOC}`));
+    assert.match(line, /\/unpaged:visual-plan/);
+  }
+  for (const outcome of ["kept-newer", "superseded"]) {
+    const line = rejectedKeyLine(outcome, DOC);
+    assert.match(line, /newer key for this canvas is already stored/);
+    assert.doesNotMatch(line, /\/unpaged:listen arm/);
+    assert.doesNotMatch(line, /was retired/);
+  }
+});
 
 test("retireKeyFile removes the rejected config but restores a newer one", async () => {
   const loaded = cfg("old", "k1");
