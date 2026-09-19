@@ -67,6 +67,11 @@ are excluded. Unknown top-level server metadata is ignored. Adding a new domain
 content field requires updating this allowlist and its regression tests. A
 persisted baseline from an older digest algorithm may differ: defer acceptance
 and explicitly rebaseline after a human review rather than silently accepting it.
+Node IDs use locale-independent code-unit order, and streamed JSON is decoded
+after collecting its bytes. Baselines produced with locale-sensitive ordering
+or split-character corruption may differ after this correction; preserve their
+receipts and use the existing phase-appropriate submission/checkpoint flow after
+verified full readback. Never silently replace an accepted digest.
 
 Acceptance records the owner event and full digest after a fresh board read.
 Unknown pending work, source drift or an unresolved reconciliation gap blocks it.
@@ -197,7 +202,7 @@ Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
 binding context. These observations validate those pilot host assumptions, not
 the complete revised package.
 
-Keep this PR in draft until this revised build has a fresh native installation,
+Do not claim release readiness until this revised build has a fresh native installation,
 trusted hook pickup and a live comment waking the assigned idle task. Current
 Claude source parity does not prove Codex installed-host parity. Public release also requires the remaining
 installed lifecycle trials. Those trials include a live comment after turn completion, another later comment, a receiver restart, a Codex restart

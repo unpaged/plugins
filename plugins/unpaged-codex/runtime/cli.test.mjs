@@ -4,9 +4,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
+import { execFileSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { dataDirectory, executeCli, findCodex, parseArgs, planDigest } from "./cli.mjs";
+import { dataDirectory, executeCli, findCodex, parseArgs, planDigest, readJson } from "./cli.mjs";
 import { Store } from "./store.mjs";
 import { EVENTS_URL, SUBPROTOCOL } from "./protocol.mjs";
 
@@ -38,6 +39,53 @@ function snapshot() {
         { id: STATUS, elementType: "text", properties: { text: "PROPOSED · version old" } }
       ] }] }, statusElementIds: [STATUS] };
 }
+
+async function* byteChunks(bytes, size = 1) {
+  for (let offset = 0; offset < bytes.length; offset += size) yield bytes.subarray(offset, offset + size);
+}
+
+test("UTF-8 chunking preserves canvas content and its digest", async () => {
+  const value = snapshot();
+  value.document.nodes[0].title = "📝 Decision log · café · 漢字";
+  value.document.nodes[0].elements[0].properties.text = "📐 As built · ✅ done";
+  const bytes = Buffer.from(JSON.stringify(value));
+  assert.deepEqual(await readJson(byteChunks(bytes)), value);
+  assert.deepEqual(await executeCli(["digest"], { input: byteChunks(bytes) }), { planDigest: planDigest(value) });
+});
+
+test("JSON input byte limit accepts exactly 2 MiB and rejects excess or malformed input", async () => {
+  const value = "é".repeat((2 * 1024 * 1024 - 2) / 2);
+  const bytes = Buffer.from(JSON.stringify(value));
+  assert.equal(bytes.length, 2 * 1024 * 1024);
+  assert.equal(await readJson(byteChunks(bytes, 16384)), value);
+  await assert.rejects(readJson(byteChunks(Buffer.concat([bytes, Buffer.from(" ")]), 16384)), /input_too_large/);
+  await assert.rejects(readJson(byteChunks(Buffer.from('{"broken":'))), /invalid_json/);
+});
+
+test("plan digest is independent of ambient locale and input node order", () => {
+  const value = snapshot();
+  value.document.nodes.push({ id: DOC, elements: [] }, { id: TASK, elements: [] });
+  value.document.nodeCount = 3;
+  const expected = planDigest(value);
+  const cli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
+  for (const locale of ["en_US.UTF-8", "da_DK.UTF-8", "nb_NO.UTF-8"]) {
+    for (const nodes of [value.document.nodes, [...value.document.nodes].reverse()]) {
+      const output = execFileSync(process.execPath, [cli, "digest"], {
+        env: { ...process.env, LANG: locale, LC_ALL: locale },
+        input: JSON.stringify({ ...value, document: { ...value.document, nodes } }),
+        encoding: "utf8", timeout: 10000
+      });
+      assert.equal(JSON.parse(output).planDigest, expected, locale);
+    }
+  }
+});
+
+test("status reports an unbound canvas without hiding invalid IDs or mutation errors", async (t) => {
+  const { directory, options } = fixture(t);
+  assert.deepEqual(await executeCli(["status", DOC, "--data", directory], options), []);
+  await assert.rejects(executeCli(["status", "invalid-id", "--data", directory], options), /invalid_uuid/);
+  await assert.rejects(executeCli(["resume", DOC, "--data", directory], options), /binding_missing/);
+});
 
 test("argument paths are absolute and unknown options are refused", () => {
   assert.deepEqual(parseArgs(["status", DOC, "--data", "/tmp/data"]), { command: "status", positionals: [DOC], data: "/tmp/data" });

@@ -34,12 +34,16 @@ export function dataDirectory(args, env = process.env) {
 }
 
 export async function readJson(input) {
-  let raw = "";
+  const parts = [];
+  let bytes = 0;
   for await (const chunk of input) {
-    raw += chunk.toString("utf8");
-    if (Buffer.byteLength(raw) > 2 * 1024 * 1024) fail("input_too_large");
+    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+    bytes += part.length;
+    if (bytes > 2 * 1024 * 1024) fail("input_too_large");
+    parts.push(part);
   }
-  try { return JSON.parse(raw); } catch { fail("invalid_json"); }
+  // Decode once: a transport chunk may end in the middle of a UTF-8 character.
+  try { return JSON.parse(Buffer.concat(parts, bytes).toString("utf8")); } catch { fail("invalid_json"); }
 }
 
 function canonical(value) {
@@ -81,7 +85,7 @@ export function planDigest({ document, statusElementIds = [] }) {
       return true;
     }).map((element) => contentFields(element, ELEMENT_CONTENT));
     return { ...contentFields(node, NODE_CONTENT), elements };
-  }).sort((a, b) => a.id.localeCompare(b.id));
+  }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   if (!seen.has(document.rootNodeId) || foundExcluded.size !== excluded.size) fail("invalid_document_snapshot");
   if (Number.isInteger(document.nodeCount) && document.nodeCount !== nodes.length) fail("partial_document_snapshot");
   return createHash("sha256").update(JSON.stringify(canonical({ id: document.id, title: document.title,
@@ -116,7 +120,7 @@ export async function findCodex(explicit, env = process.env, execute = run) {
 
 export async function ensureWorker(store, documentId, directory, options = {}) {
   let binding = store.getBinding(documentId);
-  if (!binding || binding.status !== "active") return binding;
+  if (binding.status !== "active") return binding;
   const identity = processIdentity(binding.workerPid);
   if (workerIsAlive(binding.workerPid, binding.workerIdentity, () => identity)) {
     if (typeof identity !== "string" || typeof binding.workerIdentity !== "string") fail("worker_identity_unverifiable");
@@ -134,7 +138,7 @@ export async function ensureWorker(store, documentId, directory, options = {}) {
   } finally { closeSync(fd); }
   for (let i = 0; i < 30; i++) {
     binding = store.getBinding(documentId);
-    if (binding?.workerPid && ["connected", "stopped"].includes(binding.connectionState)) return binding;
+    if (binding.workerPid && ["connected", "stopped"].includes(binding.connectionState)) return binding;
     await wait(100);
   }
   return store.getBinding(documentId);
@@ -143,7 +147,6 @@ export async function ensureWorker(store, documentId, directory, options = {}) {
 function ownBinding(store, documentId, env) {
   if (!UUID.test(documentId || "")) fail("invalid_document_id");
   const binding = store.getBinding(documentId);
-  if (!binding) fail("board_not_armed");
   if (!UUID.test(env.CODEX_THREAD_ID || "") || binding.threadId !== env.CODEX_THREAD_ID) fail("wrong_codex_task");
   return binding;
 }
@@ -171,7 +174,11 @@ export async function executeCli(argv, options = {}) {
   try {
     const [documentId, eventId] = args.positionals;
     if (args.command === "status") {
-      const bindings = documentId ? [store.getBinding(documentId)].filter(Boolean) : store.listBindings();
+      let bindings;
+      if (documentId) {
+        try { bindings = [store.getBinding(documentId)]; }
+        catch (error) { if (error.code === "BINDING_MISSING") return []; throw error; }
+      } else bindings = store.listBindings();
       return bindings.map((binding) => ({ ...binding, events: store.listEvents(binding.documentId) }));
     }
     if (args.command === "session-start") {

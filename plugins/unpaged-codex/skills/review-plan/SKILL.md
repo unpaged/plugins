@@ -6,6 +6,8 @@ description: Create or review an Unpaged plan in Codex, attach its comments to t
 # Unpaged plan review
 
 This is Unpaged's own review protocol. It requires no other planning framework.
+Use "canvas" or "whiteboard" in every user-facing task reply and canvas comment,
+including listening, acceptance, status, and recovery messages.
 Treat a request to create a plan and test its review loop as authorization to
 create that board and arm its listener. Do not bind arbitrary boards or tasks.
 Keep listening between review rounds, through acceptance and implementation,
