@@ -5,16 +5,18 @@ import { access, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { Store } from "./store.mjs";
 import { retainRuntime } from "./snapshot.mjs";
 import { UUID } from "./protocol.mjs";
 import { processIdentity, workerIsAlive } from "./process-identity.mjs";
+import { inspectSetup } from "./setup.mjs";
 
 const run = promisify(execFile);
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const fail = (code) => { throw new Error(code); };
+const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
 
 export function parseArgs(args) {
   const result = { command: args[0], positionals: [] };
@@ -118,6 +120,21 @@ export async function findCodex(explicit, env = process.env, execute = run) {
   fail("supported_codex_queue_not_found");
 }
 
+async function checkSetup(explicit, options, env) {
+  let codexPath;
+  try { codexPath = await findCodex(explicit, env, options.run ?? run); }
+  catch {
+    return { report: { setupReady: false, status: "unsupported",
+      reason: "supported_codex_queue_not_found",
+      action: "Update Codex to a supported version, then run the setup check again.",
+      evidenceScope: "native_hook_inventory",
+      evidenceLimit: "Persisted setup configuration only; does not verify the running app, listener, or recovery." } };
+  }
+  const report = await (options.inspectSetup ?? inspectSetup)({ codexPath, env,
+    cwd: options.cwd ?? process.cwd(), pluginRoot });
+  return { codexPath, report };
+}
+
 export async function ensureWorker(store, documentId, directory, options = {}) {
   let binding = store.getBinding(documentId);
   if (binding.status !== "active") return binding;
@@ -159,9 +176,25 @@ export async function executeCli(argv, options = {}) {
   if (!isAbsolute(directory)) fail("absolute_data_directory_required");
   if (args.command === "digest") return { planDigest: planDigest(await readJson(input)) };
   if (args.command === "info") return { dataDirectory: directory, node: process.version, minimumNode: "24", minimumCodex: "0.153.1" };
-  const allowed = ["arm", "resume", "status", "pending", "begin", "complete", "accept", "submit", "approve", "execute", "checkpoint", "built", "stop", "revoked", "reconcile", "recover", "session-start"];
+  const allowed = ["doctor", "arm", "resume", "status", "pending", "begin", "complete", "accept", "submit", "approve", "execute", "checkpoint", "built", "stop", "revoked", "reconcile", "recover", "session-start"];
   if (!allowed.includes(args.command)) fail("unknown_command");
   if (Number(process.versions.node.split(".")[0]) < 24) fail("node_24_required");
+  if (args.command === "doctor") return (await checkSetup(args.codex, options, env)).report;
+  // Setup failure must not create or migrate the ledger, persist a binding,
+  // retain a runtime, or launch a worker. The skill checks before minting a key;
+  // this second check protects callers and catches approval changes in between.
+  let armConfig;
+  if (args.command === "arm") {
+    armConfig = await readJson(input);
+    if (!UUID.test(env.CODEX_THREAD_ID || "") || armConfig.threadId !== env.CODEX_THREAD_ID) fail("wrong_codex_task");
+    const setup = await checkSetup(args.codex ?? armConfig.codexPath, options, env);
+    if (!setup.report.setupReady) {
+      const error = new Error("setup_not_ready");
+      error.setup = setup.report;
+      throw error;
+    }
+    armConfig.codexPath = setup.codexPath;
+  }
   const dbPath = join(directory, "reviews.sqlite");
   let hook;
   if (args.command === "session-start") {
@@ -191,11 +224,8 @@ export async function executeCli(argv, options = {}) {
         "Unpaged has existing plan bindings for this task. Use the bundled review-plan skill for events and recovery. Preserve each planPhase and its recorded task-user authorization; acceptance alone never permits implementation. For executing plans keep appending Decision log rows while implementing. No new boards were armed. Read status before claiming listening or completion. " + JSON.stringify(results) } };
     }
     if (args.command === "arm") {
-      const config = await readJson(input);
-      if (!UUID.test(env.CODEX_THREAD_ID || "") || config.threadId !== env.CODEX_THREAD_ID) fail("wrong_codex_task");
-      config.codexPath = await findCodex(args.codex ?? config.codexPath, env, options.run ?? run);
-      store.bind(config);
-      return await ensureWorker(store, config.documentId, directory, options);
+      store.bind(armConfig);
+      return await ensureWorker(store, armConfig.documentId, directory, options);
     }
     ownBinding(store, documentId, env);
     if (args.command === "resume") return await ensureWorker(store, documentId, directory, options);
@@ -218,9 +248,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   try {
     const result = await executeCli(process.argv.slice(2));
     if (result !== null && result !== undefined) process.stdout.write(JSON.stringify(result) + "\n");
+    if (process.argv[2] === "doctor" && result?.setupReady === false) process.exitCode = 1;
   } catch (error) {
     const code = /^[a-z][a-z0-9_]{2,80}$/.test(error.message ?? "") ? error.message : "adapter_command_failed";
-    process.stderr.write(JSON.stringify({ error: code }) + "\n");
+    process.stderr.write(JSON.stringify({ error: code,
+      ...(code === "setup_not_ready" ? { setup: error.setup } : {}) }) + "\n");
     process.exitCode = 1;
   }
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -24,6 +24,8 @@ const binding = { documentId: DOC, threadId: TASK, keyId: "key1", url: EVENTS_UR
 const event = { id: "event1", documentId: DOC, nodeId: NODE, threadId: "comment-thread", commentId: "comment1",
   reason: "mention", authorRole: "owner", resolved: false, createdAt: new Date().toISOString() };
 const input = (value) => Readable.from([JSON.stringify(value)]);
+const supportedRun = async (_path, args) => ({ stdout: args[0] === "--version" ? "codex-cli 0.153.1" : "--thread --message" });
+const readySetup = { setupReady: true, status: "ready", action: "Setup approved." };
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "unpaged-cli-test-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -155,6 +157,68 @@ test("binary capability check uses absolute argv, enforces version, and exposes 
   await assert.rejects(findCodex(process.execPath, {}, async () => ({ stdout: "codex-cli 0.144.1" })), /supported_codex_queue_not_found/);
 });
 
+test("doctor checks setup without creating or opening a review ledger", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "unpaged-doctor-test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const dbPath = join(directory, "reviews.sqlite");
+  for (const status of ["missing", "disabled", "untrusted", "modified", "query_failed", "ready"]) {
+    const report = { setupReady: status === "ready", status, action: "Safe next step." };
+    const result = await executeCli(["doctor", "--data", directory, "--codex", process.execPath], {
+      env: {}, cwd: directory, run: supportedRun,
+      inspectSetup: async (options) => {
+        assert.equal(options.cwd, directory);
+        assert.ok(options.pluginRoot.endsWith("/unpaged-codex/"));
+        return report;
+      },
+      spawn: () => assert.fail("doctor must not start a worker")
+    });
+    assert.deepEqual(result, report);
+    assert.equal(existsSync(dbPath), false);
+  }
+  const legacyBytes = Buffer.from("An existing ledger must not be opened or migrated by doctor.");
+  writeFileSync(dbPath, legacyBytes);
+  await executeCli(["doctor", "--data", directory, "--codex", process.execPath], {
+    env: {}, run: supportedRun, inspectSetup: async () => readySetup
+  });
+  assert.deepEqual(readFileSync(dbPath), legacyBytes);
+});
+
+test("doctor reports unsupported native Codex without leaking subprocess output", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "unpaged-doctor-unsupported-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const result = await executeCli(["doctor", "--data", directory, "--codex", process.execPath], {
+    env: {}, run: async () => { throw new Error(SECRET); },
+    inspectSetup: () => assert.fail("unsupported binary must not be queried")
+  });
+  assert.equal(result.setupReady, false);
+  assert.equal(result.status, "unsupported");
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.equal(existsSync(join(directory, "reviews.sqlite")), false);
+});
+
+test("arm refuses unapproved recovery before opening state or spawning a worker", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "unpaged-arm-setup-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const dbPath = join(directory, "reviews.sqlite");
+  for (const status of ["untrusted", "modified", "disabled", "missing", "unknown", "query_failed"]) {
+    const report = { setupReady: false, status, action: "Review Unpaged in Codex Hooks." };
+    await assert.rejects(executeCli(["arm", "--data", directory, "--codex", process.execPath], {
+      env: { CODEX_THREAD_ID: TASK }, input: input(binding), run: supportedRun,
+      inspectSetup: async () => report,
+      spawn: () => assert.fail("blocked setup must not start a worker")
+    }), (error) => error.message === "setup_not_ready" && error.setup === report);
+    assert.equal(existsSync(dbPath), false);
+    assert.equal(existsSync(join(directory, "runtimes")), false);
+  }
+  const legacyBytes = Buffer.from("An existing ledger must survive a failed setup check unchanged.");
+  writeFileSync(dbPath, legacyBytes);
+  await assert.rejects(executeCli(["arm", "--data", directory, "--codex", process.execPath], {
+    env: { CODEX_THREAD_ID: TASK }, input: input(binding), run: supportedRun,
+    inspectSetup: async () => ({ setupReady: false, status: "modified" })
+  }), /setup_not_ready/);
+  assert.deepEqual(readFileSync(dbPath), legacyBytes);
+});
+
 test("arm persists binding then waits for connected worker without leaking or passing credentials as argv", async (t) => {
   const { directory, store } = fixture(t);
   let spawned;
@@ -170,7 +234,7 @@ test("arm persists binding then waits for connected worker without leaking or pa
   };
   const result = await executeCli(["arm", "--data", directory, "--codex", process.execPath], {
     env: { CODEX_THREAD_ID: TASK }, input: input(binding), spawn: fakeSpawn,
-    run: async (_path, args) => ({ stdout: args[0] === "--version" ? "codex-cli 0.153.1" : "--thread --message" })
+    run: supportedRun, inspectSetup: async () => readySetup
   });
   assert.equal(result.connectionState, "connected");
   assert.equal(result.threadId, TASK);

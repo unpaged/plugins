@@ -12,7 +12,8 @@ It is an experimental integration, with the recovery boundaries below.
   LTS support floor for this pilot; it is deliberate, not a claim that
   `node:sqlite` first became unflagged there (that happened in Node 22.13).
   No npm dependencies.
-- Codex 0.153.1 or newer with the public `queue` command. The adapter checks
+- Codex 0.153.1 or newer with the public `queue` command and native `hooks/list`
+  support. The adapter checks
   the actual binary before arming; it does not assume the terminal and desktop
   use the same version.
 - Authenticated Unpaged MCP with comment, listener-key, and revision-safe tools.
@@ -47,6 +48,19 @@ that marketplace. Authenticate the registered Unpaged connection when prompted;
 there is no separate manual MCP setup. Review the startup hook through Codex's
 normal trust flow. A fresh task can then invoke the `visual-plan` skill.
 
+Before creating a listener, the agent runs the installed helper's read-only
+`doctor` check. If approval is missing or the hook changed, it gives one action:
+review the **Unpaged SessionStart** hook in Codex's Hooks settings and click
+**Trust**. The agent rechecks after approval; it does not ask the customer to
+inspect logs, edit trust files, or repeatedly reinstall/restart. Other setup
+problems return their own next action. Render-only canvases do not need this
+approval. `arm` independently rechecks readiness before opening local state.
+
+`doctor` reports persisted native setup, not successful comment delivery or
+proof that the running app loaded the hook. It never runs a hook, opens the
+review ledger, or starts a receiver. Live listening and restart recovery are
+verified separately. The integration remains experimental until those trials pass.
+
 The checked-in source `.mcp.json` remains a direct remote-MCP configuration for
 hosts or distributions that explicitly choose that route. The registered build
 does not ship it. Do not enable both connections for the same workflow by default.
@@ -64,6 +78,13 @@ Official references: [plugin packaging](https://developers.openai.com/plugins/bu
 
 Keep the plugin name, review data directory and startup-hook identity stable.
 Generate and validate the registered package, then use the native update flow.
+Run the installed `doctor` again after updating. Codex requires renewed approval
+when the hook definition changes. Keep the definition stable for ordinary
+runtime/skill updates; do not bypass approval for a deliberate hook change.
+An existing receiver and its key, task, phase and receipts remain intact while
+approval is pending. An interrupted receiver on an active binding is recovered
+on that same binding, never by issuing a replacement key or creating another
+task. A review stopped by the user or server remains stopped.
 New receivers copy their executable files and bundled skills to a private,
 content-addressed `${CODEX_HOME:-~/.codex}/unpaged/runtimes/<hash>/` directory before
 launching. Queued messages reference that retained copy. Replacing the plugin
