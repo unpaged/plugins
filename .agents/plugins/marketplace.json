@@ -1,0 +1,20 @@
+{
+  "name": "unpaged",
+  "interface": {
+    "displayName": "Unpaged"
+  },
+  "plugins": [
+    {
+      "name": "unpaged-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/unpaged-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

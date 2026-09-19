@@ -1,6 +1,6 @@
 # Codex connection and visual-plan readiness
 
-Maintainer runbook, refreshed on September 19, 2026 after the Codex adapter and
+Maintainer runbook, refreshed on September 20, 2026 after the Codex adapter and
 setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
 documents the observed 0.3.0 plan lifecycle and 0.3.1 setup, update and native
 recovery results. The runtime is on `main`; this runbook records release
@@ -65,21 +65,23 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (proposed Codex entry) | A catalog targeting the source Codex package and its bundled direct MCP connection | No installed workflow is validated for this route: every recorded pilot result used the registered artifact; public-directory availability is also separate |
+| Repository marketplace (Codex preview) | The `unpaged` catalog targets the source Codex package and its bundled direct MCP connection | No installed workflow is validated for this route: every recorded pilot result used the registered artifact; public-directory availability is also separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
 | Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json` | A published connection or a validated installed workflow: no recorded trial covers this route |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can
 add a GitHub marketplace and install its listed plugins without a public-directory
-listing. This repository has no Codex catalog at `.agents/plugins/marketplace.json`.
-Add the Codex entry there, pointing to `./plugins/unpaged-codex`. Keep
-`.claude-plugin/marketplace.json` as the Claude Code catalog: the Codex package is
-absent there by design. Adding it to that file would expose it to Claude Code
-users and fail the current CI check, which expects a Claude manifest for every
-listed source. Before publishing a runnable customer installation recipe, verify
-the Codex catalog and complete installation, service sign-in, hook approval and
-the visual-plan lifecycle, including restart recovery, on a clean profile.
+listing. The [Codex catalog](../.agents/plugins/marketplace.json) is named
+`unpaged` and lists `unpaged-codex` at `./plugins/unpaged-codex`.
+`.claude-plugin/marketplace.json` remains the separate Claude Code catalog;
+the Codex package is absent there by design. The [customer preview instructions](../plugins/unpaged-codex/README.md#install-from-the-repository-preview)
+target the repository's `main` branch once this catalog is available there.
+Catalog validation does not prove an installed workflow. Before treating these
+instructions as verified customer onboarding, complete installation, service
+sign-in, hook approval and the visual-plan lifecycle, including restart recovery,
+on a clean profile. The required Node 24+, macOS/Linux and native Codex capability
+checks still apply. Customers need no personal registration ID or artifact build.
 See [repository marketplace setup](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli).
 
 The source Codex package bundles direct MCP configuration; that route does not
