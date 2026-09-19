@@ -72,14 +72,22 @@ a trial pass.
 
 Repository distribution is separate from OpenAI's public directory. Codex can
 add a GitHub marketplace and install its listed plugins without a public-directory
-listing. This repository currently lists only the Claude package in
-`.claude-plugin/marketplace.json`; the Codex package has no marketplace entry.
-Before publishing a runnable customer installation recipe, add a Codex catalog
-entry and verify installation, service sign-in and hook approval on a clean
-profile. The source Codex package already bundles direct MCP configuration;
-that route does not require customers to build a personal registered artifact
-or supply a registration ID. Its complete native sign-in flow remains untested.
+listing. This repository has no Codex catalog at `.agents/plugins/marketplace.json`.
+Add the Codex entry there, pointing to `./plugins/unpaged-codex`. Keep
+`.claude-plugin/marketplace.json` as the Claude Code catalog: the Codex package is
+absent there by design. Adding it to that file would expose it to Claude Code
+users and fail the current CI check, which expects a Claude manifest for every
+listed source. Before publishing a runnable customer installation recipe, verify
+the Codex catalog and complete installation, service sign-in, hook approval and
+the visual-plan lifecycle, including restart recovery, on a clean profile.
 See [repository marketplace setup](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli).
+
+The source Codex package bundles direct MCP configuration; that route does not
+require customers to build a personal registered artifact or supply a registration
+ID. It has no recorded installed trial. All recorded 0.3.0 lifecycle and 0.3.1
+setup, update and recovery results used the registered artifact, which excluded
+`.mcp.json`. Those observations do not establish installation, sign-in, hook
+approval, lifecycle or recovery behavior for the bundled-direct-MCP route.
 
 For a registered local pilot, its `.app.json` must refer to the intended
 registration and its manifest must reference that file. Exclude direct MCP
