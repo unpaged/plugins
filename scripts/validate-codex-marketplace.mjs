@@ -25,6 +25,23 @@ async function component(root, path) {
   return target;
 }
 
+async function validateUnpagedPackage(source, manifest) {
+  assert.ok(manifest.mcpServers, "Unpaged must declare its bundled MCP configuration");
+  assert.equal(manifest.apps, undefined, "repository Unpaged must not bundle a registered connection");
+  const connection = await json(await component(source, manifest.mcpServers));
+  assert.deepEqual(Object.keys(connection.mcpServers ?? {}), ["unpaged"],
+    "Unpaged must bundle exactly its named MCP server");
+  assert.equal(connection.mcpServers.unpaged.type, "http", "Unpaged MCP transport must be http");
+  assert.equal(connection.mcpServers.unpaged.url, "https://mcp.unpaged.io/mcp",
+    "Unpaged MCP URL must be the documented production endpoint");
+  const hooks = await json(await component(source, "./hooks/hooks.json"));
+  assert.ok(Array.isArray(hooks.hooks?.SessionStart) && hooks.hooks.SessionStart.some((entry) =>
+    entry.matcher === "startup|resume|compact" && Array.isArray(entry.hooks) && entry.hooks.some((hook) =>
+      hook.type === "command" && hook.command === 'node "${PLUGIN_ROOT}/runtime/cli.mjs" session-start')),
+  "Unpaged must bundle its recovery SessionStart hook");
+  await component(source, "./runtime/cli.mjs");
+}
+
 // Validate this repository's local Codex catalog, without installing or authenticating.
 export async function validateCodexMarketplace(root = repository) {
   root = await realpath(root);
@@ -53,8 +70,10 @@ export async function validateCodexMarketplace(root = repository) {
       const target = await component(source, manifest[key]);
       if (key !== "skills") await json(target);
     }
-    const hooks = join(source, "hooks/hooks.json");
-    if (await exists(hooks)) await json(await component(source, "./hooks/hooks.json"));
+    if (entry.name === "unpaged-codex") await validateUnpagedPackage(source, manifest);
+    else if (await exists(join(source, "hooks/hooks.json"))) {
+      await json(await component(source, "./hooks/hooks.json"));
+    }
   }
   for (const directory of await readdir(join(root, "plugins"), { withFileTypes: true })) {
     if (directory.isDirectory() && await exists(join(root, "plugins", directory.name, ".codex-plugin/plugin.json"))) {

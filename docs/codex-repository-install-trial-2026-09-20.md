@@ -58,7 +58,7 @@ catalog available on `main` before then.
 
 ## Automated validation and remaining gates
 
-All 144 Node 24 tests passed, including six catalog tests. Standalone catalog
+For the recorded 0.3.1 candidate, all 144 Node 24 tests passed, including six catalog tests. Standalone catalog
 validation, the Plugin Creator package validator and whitespace checks passed.
 These checks validate packaging and existing runtime behavior, not a native
 authenticated review session.
@@ -70,3 +70,18 @@ restart/reopen recovery, credential-expiry recovery and exact listener cleanup
 remain **NOT RUN** for this route. The [registered-connection pilot](codex-installed-trial-2026-09-19.md)
 does not fill those gaps. Its existing installation and live review were not used
 or modified by these smoke tests.
+
+## Version 0.3.2 follow-up
+
+The repository package version advanced to `0.3.2` because its installed README
+now contains the repository installation guidance. Runtime, hooks and skills
+remain unchanged. Catalog validation now explicitly requires Unpaged's recovery
+hook/helper and its named direct server at the documented production endpoint.
+
+The updated candidate passed all 146 Node 24 tests, including eight catalog
+tests, and both catalog and Plugin Creator validation. A new isolated CLI profile
+installed `0.3.2` from the local candidate catalog and reported it enabled; all 25
+installed files matched the source. This is a fresh installation, not an upgrade
+or approval-preservation trial. The original Git trial above remains attributed
+to its actual 0.3.1 commit; no authentication or desktop lifecycle result is added
+by this follow-up.

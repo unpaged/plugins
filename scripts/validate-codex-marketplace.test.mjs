@@ -62,13 +62,44 @@ test("a new Codex directory must be listed and a Claude directory cannot substit
   await assert.rejects(validateCodexMarketplace(other), { code: "ENOENT" });
 });
 
-test("missing or invalid bundled connection files fail validation", async (t) => {
+test("missing or unparseable bundled connection files fail validation", async (t) => {
   const root = await fixture(t);
   await rm(join(root, "plugins/unpaged-codex/.mcp.json"));
   await assert.rejects(validateCodexMarketplace(root), { code: "ENOENT" });
   const other = await fixture(t);
   await writeFile(join(other, "plugins/unpaged-codex/.mcp.json"), "invalid json");
   await assert.rejects(validateCodexMarketplace(other), SyntaxError);
+});
+
+test("Unpaged requires its declared direct server, transport and production endpoint", async (t) => {
+  const invalid = [
+    {},
+    { mcpServers: {} },
+    { mcpServers: { unpaged: { type: "http", url: "https://example.com/mcp" } } },
+    { mcpServers: { unpaged: { type: "http", url: "http://mcp.unpaged.io/mcp" } } },
+    { mcpServers: { unpaged: { type: "stdio", url: "https://mcp.unpaged.io/mcp" } } }
+  ];
+  for (const value of invalid) {
+    const root = await fixture(t);
+    await writeFile(join(root, "plugins/unpaged-codex/.mcp.json"), JSON.stringify(value));
+    await assert.rejects(validateCodexMarketplace(root), /Unpaged (must bundle|MCP)/);
+  }
+  const root = await fixture(t);
+  await edit(root, manifest, (value) => { delete value.mcpServers; });
+  await assert.rejects(validateCodexMarketplace(root), /must declare its bundled MCP/);
+});
+
+test("Unpaged requires a parseable recovery hook, its SessionStart command and helper", async (t) => {
+  for (const content of [null, "invalid json", "{}", JSON.stringify({ hooks: { SessionStart: [] } })]) {
+    const root = await fixture(t);
+    const path = join(root, "plugins/unpaged-codex/hooks/hooks.json");
+    if (content === null) await rm(path);
+    else await writeFile(path, content);
+    await assert.rejects(validateCodexMarketplace(root));
+  }
+  const root = await fixture(t);
+  await rm(join(root, "plugins/unpaged-codex/runtime/cli.mjs"));
+  await assert.rejects(validateCodexMarketplace(root), { code: "ENOENT" });
 });
 
 test("component references cannot escape the installed package, including through symlinks", async (t) => {
