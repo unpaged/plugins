@@ -65,9 +65,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace | A catalog from which users install the packaged Codex plugin | Public-directory listing, correct sign-in, or successful clean-profile setup |
+| Repository marketplace (proposed Codex entry) | A catalog targeting the source Codex package and its bundled direct MCP connection | No installed workflow is validated for this route: every recorded pilot result used the registered artifact; public-directory availability is also separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json` | A published connection or registered-connector recovery behavior |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json` | A published connection or a validated installed workflow: no recorded trial covers this route |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can
