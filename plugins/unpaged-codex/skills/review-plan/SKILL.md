@@ -112,12 +112,17 @@ an older retained event path. `doctor` is read-only: it queries native hook
 configuration without opening the review ledger, running hooks, or starting a
 listener. Continue only if `setupReady` is true. Otherwise give the returned
 `action` in plain language and preserve the canvas. For missing/changed approval,
-the user reviews the Unpaged SessionStart hook in Codex and clicks **Trust**.
+direct the user to **Settings → Hooks → From Plugins → Unpaged for Codex**:
+review the hook row beneath **SessionStart** and click **Trust**, leaving its
+enable switch on. On macOS, **⌘,** opens Settings.
 Explain that Codex requires this approval for the exact hook definition. Recheck
 after the user completes that action; do not edit trust settings, bypass review,
 inspect logs as the normal setup flow, or prescribe repeated reinstalls/restarts.
 Other failures have different actions: do not invent a Trust step for a missing,
 disabled, unsupported, or unreadable hook. A render-only request skips this gate.
+`configuration_problem` identifies folder-wide hook loading errors or warnings;
+use its folder-configuration action rather than sending the user back to trust
+an already approved Unpaged hook. Never echo raw diagnostics from other plugins.
 
 1. Ground a requested plan in the conversation and relevant project facts.
    Preserve the user's phases, requirements, and scope. If the team uses a repo

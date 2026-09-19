@@ -6,8 +6,9 @@ const ACTIONS = {
   ready: "The current Unpaged setup is approved. Listening and recovery still require separate verification.",
   missing: "Install or enable the current Unpaged plugin, then check its SessionStart hook in Codex Hooks settings for this folder.",
   disabled: "Enable the current Unpaged SessionStart hook in Codex Hooks settings, then check setup again.",
-  untrusted: "Review the current Unpaged SessionStart hook in Codex Hooks settings and click Trust, then check setup again.",
-  modified: "The Unpaged hook changed since approval. Review its current version in Codex Hooks settings and click Trust, then check setup again.",
+  untrusted: "Open Settings → Hooks → From Plugins → Unpaged for Codex, review the SessionStart row and click Trust, then check setup again.",
+  modified: "The Unpaged hook changed since approval. Open Settings → Hooks → From Plugins → Unpaged for Codex, review the SessionStart row and click Trust, then check setup again.",
+  configuration_problem: "Check Settings → Hooks for this folder and resolve its hook configuration errors or warnings, then check setup again.",
   unknown: "Check the current Unpaged installation and its SessionStart hook in Codex Hooks settings for this folder, then check setup again.",
   unsupported: "Use a Codex version that supports the public hooks/list API, then check setup again.",
   query_failed: "Codex hook setup could not be checked. Confirm Codex is available and retry the setup check."
@@ -161,13 +162,14 @@ export async function inspectSetup({ codexPath, cwd, pluginRoot, query = queryHo
   if (!Array.isArray(entry.hooks) || !Array.isArray(entry.errors) || !Array.isArray(entry.warnings)) {
     return report("unknown", "invalid_inventory");
   }
-  if (entry.errors.length || entry.warnings.length) return report("unknown", "inventory_load_problem");
+  if (entry.errors.length || entry.warnings.length) return report("configuration_problem", "folder_hook_configuration_problem");
   const candidates = entry.hooks.filter((hook) => object(hook) && hook.source === "plugin" &&
-    typeof hook.pluginId === "string" && /^unpaged-codex@[^\s]+$/.test(hook.pluginId) && hook.eventName === "sessionStart");
+    typeof hook.pluginId === "string" && /^unpaged-codex@[^\s]+$/.test(hook.pluginId) && hook.eventName === "sessionStart" &&
+    hook.sourcePath === join(pluginRoot, "hooks", "hooks.json"));
   if (!candidates.length) return report("missing", "hook_missing");
   if (candidates.length !== 1) return report("unknown", "ambiguous_hook");
   const hook = candidates[0];
-  if (hook.sourcePath !== join(pluginRoot, "hooks", "hooks.json") || hook.handlerType !== "command" ||
+  if (hook.handlerType !== "command" ||
       hook.command !== `node "${join(pluginRoot, "runtime", "cli.mjs")}" session-start` ||
       hook.matcher !== "startup|resume|compact" || (hook.async !== undefined && hook.async !== false)) {
     return report("unknown", "current_hook_mismatch");

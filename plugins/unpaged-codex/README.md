@@ -50,10 +50,13 @@ normal trust flow. A fresh task can then invoke the `visual-plan` skill.
 
 Before creating a listener, the agent runs the installed helper's read-only
 `doctor` check. If approval is missing or the hook changed, it gives one action:
-review the **Unpaged SessionStart** hook in Codex's Hooks settings and click
-**Trust**. The agent rechecks after approval; it does not ask the customer to
+open **Settings → Hooks → From Plugins → Unpaged for Codex**, review the hook
+row beneath **SessionStart**, and click **Trust**. On macOS, **⌘,** opens Settings.
+Keep the hook enabled. The agent rechecks after approval; it does not ask the customer to
 inspect logs, edit trust files, or repeatedly reinstall/restart. Other setup
-problems return their own next action. Render-only canvases do not need this
+problems return their own next action. Folder-wide hook configuration warnings
+or errors are reported separately from Unpaged approval, without exposing their
+raw content. Render-only canvases do not need this
 approval. `arm` independently rechecks readiness before opening local state.
 
 `doctor` reports persisted native setup, not successful comment delivery or

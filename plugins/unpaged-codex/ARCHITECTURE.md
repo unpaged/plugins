@@ -153,9 +153,13 @@ See [official Codex hooks](https://learn.chatgpt.com/docs/hooks).
 the current folder. It starts no task, invokes no hook, changes no trust, and
 does not open the ledger. Output and duration are bounded, the owned query
 process is terminated, and only sanitized Unpaged setup facts leave the helper.
-Readiness requires the exact current installed SessionStart command and matcher,
+Select the current installed source path before checking ambiguity, so another
+marketplace's copy cannot block this one. Readiness requires the exact current installed SessionStart command and matcher,
 enabled and trusted. Missing, disabled, modified, untrusted, unsupported and
-uninspectable states fail closed with one appropriate next action. `arm` repeats
+uninspectable states fail closed with one appropriate next action. Folder-wide
+load errors/warnings produce `configuration_problem` with a folder-configuration
+action, not misleading Unpaged approval advice. Native warnings are unstructured
+strings and are not attributed to a plugin by guessing their text. `arm` repeats
 the check before opening/migrating state or binding; the skill checks before key
 creation and revokes a newly minted key if arming subsequently fails.
 

@@ -49,6 +49,11 @@ test("setup reports only current trusted and enabled lifecycle hook as ready", a
   assert.match(result.action, /separate verification/);
   assert.equal(result.evidenceScope, "native_hook_inventory");
   assert.match(result.evidenceLimit, /does not verify/);
+  for (const trustStatus of ["untrusted", "modified"]) {
+    const result = await inspect(inventory([hook({ trustStatus })]));
+    assert.match(result.action, /Settings → Hooks → From Plugins → Unpaged for Codex/);
+    assert.match(result.action, /review the SessionStart row and click Trust/);
+  }
   for (const [changes, status] of [
     [{ trustStatus: "untrusted" }, "untrusted"], [{ trustStatus: "modified" }, "modified"],
     [{ enabled: false }, "disabled"], [{ enabled: false, trustStatus: "modified" }, "disabled"],
@@ -69,7 +74,6 @@ test("missing, unrelated, stale, ambiguous, or changed hooks cannot approve curr
   assert.equal(mixed.setupReady, true); assert.equal(JSON.stringify(mixed).includes(SECRET), false);
   for (const changes of [
     { command: 'node "/tmp/plugins/unpaged-codex/stale/runtime/cli.mjs" session-start' },
-    { sourcePath: "/tmp/plugins/unpaged-codex/stale/hooks/hooks.json" },
     { matcher: "startup|resume" }, { matcher: ".*" }, { command: `${hook().command}; ${SECRET}` },
     { handlerType: "prompt" }, { async: true }
   ]) {
@@ -80,16 +84,48 @@ test("missing, unrelated, stale, ambiguous, or changed hooks cannot approve curr
   assert.equal((await inspect(inventory([hook(), hook()]))).reason, "ambiguous_hook");
 });
 
+test("current source is selected before comparing copies from other marketplaces", async () => {
+  const otherMarketplace = hook({ pluginId: "unpaged-codex@other-marketplace",
+    sourcePath: "/tmp/plugins/other-marketplace/unpaged-codex/hooks/hooks.json",
+    command: 'node "/tmp/plugins/other-marketplace/unpaged-codex/runtime/cli.mjs" session-start' });
+  for (const hooks of [[hook(), otherMarketplace], [otherMarketplace, hook()]]) {
+    assert.equal((await inspect(inventory(hooks))).setupReady, true);
+  }
+  const staleOnly = await inspect(inventory([otherMarketplace]));
+  assert.equal(staleOnly.setupReady, false);
+  assert.equal(staleOnly.status, "missing");
+  assert.equal(staleOnly.reason, "hook_missing");
+  const duplicateSource = hook({ pluginId: "unpaged-codex@other-marketplace" });
+  assert.equal((await inspect(inventory([hook(), duplicateSource]))).reason, "ambiguous_hook");
+});
+
 test("setup requires inventory for exact cwd and never echoes loading errors or arbitrary response fields", async () => {
   for (const value of [null, [], {}, { data: [] }, inventory([], { cwd: "/tmp/other" }),
-    { data: [...inventory().data, ...inventory().data] }, inventory([], { errors: null }),
-    inventory([], { errors: [{ path: SECRET, message: SECRET }] }), inventory([], { warnings: [SECRET] })]) {
+    { data: [...inventory().data, ...inventory().data] }, inventory([], { errors: null })]) {
     const result = await inspect(value);
     assert.equal(result.setupReady, false); assert.equal(result.status, "unknown");
     assert.equal(JSON.stringify(result).includes(SECRET), false);
   }
   const result = await inspectSetup({ codexPath, cwd, pluginRoot, query: async () => { throw new Error(SECRET); } });
   assert.equal(result.status, "query_failed"); assert.equal(JSON.stringify(result).includes(SECRET), false);
+});
+
+test("folder-wide load warnings and errors keep setup blocked with configuration guidance", async () => {
+  for (const changes of [
+    { errors: [{ path: "/tmp/unrelated-plugin/hooks.json", message: SECRET }] },
+    { warnings: [SECRET] },
+    { warnings: [`${SECRET} /tmp/unrelated-plugin/hooks.json`] }
+  ]) {
+    const result = await inspect(inventory([hook()], changes));
+    assert.equal(result.setupReady, false);
+    assert.equal(result.status, "configuration_problem");
+    assert.equal(result.reason, "folder_hook_configuration_problem");
+    assert.match(result.action, /this folder/);
+    assert.match(result.action, /configuration errors or warnings/);
+    assert.doesNotMatch(result.action, /Unpaged|Trust/);
+    assert.equal(JSON.stringify(result).includes(SECRET), false);
+    assert.equal(JSON.stringify(result).includes("unrelated-plugin"), false);
+  }
 });
 
 test("read-only native query uses exactly initialize, initialized and hooks/list, then terminates its process", async () => {

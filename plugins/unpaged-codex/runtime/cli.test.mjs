@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { Readable } from "node:stream";
@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dataDirectory, executeCli, findCodex, parseArgs, planDigest, readJson } from "./cli.mjs";
 import { Store } from "./store.mjs";
 import { EVENTS_URL, SUBPROTOCOL } from "./protocol.mjs";
+import { inspectSetup } from "./setup.mjs";
 
 const DOC = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -161,7 +162,7 @@ test("doctor checks setup without creating or opening a review ledger", async (t
   const directory = mkdtempSync(join(tmpdir(), "unpaged-doctor-test-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const dbPath = join(directory, "reviews.sqlite");
-  for (const status of ["missing", "disabled", "untrusted", "modified", "query_failed", "ready"]) {
+  for (const status of ["missing", "disabled", "untrusted", "modified", "configuration_problem", "query_failed", "ready"]) {
     const report = { setupReady: status === "ready", status, action: "Safe next step." };
     const result = await executeCli(["doctor", "--data", directory, "--codex", process.execPath], {
       env: {}, cwd: directory, run: supportedRun,
@@ -200,7 +201,7 @@ test("arm refuses unapproved recovery before opening state or spawning a worker"
   const directory = mkdtempSync(join(tmpdir(), "unpaged-arm-setup-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const dbPath = join(directory, "reviews.sqlite");
-  for (const status of ["untrusted", "modified", "disabled", "missing", "unknown", "query_failed"]) {
+  for (const status of ["untrusted", "modified", "disabled", "missing", "configuration_problem", "unknown", "query_failed"]) {
     const report = { setupReady: false, status, action: "Review Unpaged in Codex Hooks." };
     await assert.rejects(executeCli(["arm", "--data", directory, "--codex", process.execPath], {
       env: { CODEX_THREAD_ID: TASK }, input: input(binding), run: supportedRun,
@@ -275,13 +276,26 @@ test("SessionStart ignores subagents/unrelated tasks and reports stopped cleanup
   assert.equal(JSON.stringify(report).includes(SECRET), false);
 });
 
-test("plugin packages only native SessionStart repair and has no external review dependencies", () => {
-  const root = fileURLToPath(new URL("../", import.meta.url));
+test("packaged native SessionStart definition satisfies setup readiness and has no external review dependencies", async () => {
+  const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
   const hooks = JSON.parse(readFileSync(join(root, "hooks/hooks.json")));
   assert.deepEqual(Object.keys(hooks.hooks), ["SessionStart"]);
-  assert.equal(hooks.hooks.SessionStart[0].matcher, "startup|resume|compact");
+  assert.equal(hooks.hooks.SessionStart.length, 1);
+  const group = hooks.hooks.SessionStart[0];
+  assert.equal(group.hooks.length, 1);
+  const definition = group.hooks[0];
   const manifest = JSON.parse(readFileSync(join(root, ".codex-plugin/plugin.json")));
   assert.equal(manifest.name, "unpaged-codex");
+  const setup = await inspectSetup({ codexPath: process.execPath, cwd: root, pluginRoot: root,
+    query: async () => ({ data: [{ cwd: root, errors: [], warnings: [], hooks: [{
+      eventName: "sessionStart", source: "plugin", pluginId: `${manifest.name}@personal`,
+      sourcePath: join(root, "hooks/hooks.json"), handlerType: definition.type,
+      command: definition.command.replaceAll("${PLUGIN_ROOT}", root), matcher: group.matcher,
+      async: definition.async ?? false, timeoutSec: definition.timeout,
+      enabled: true, trustStatus: "trusted", currentHash: `sha256:${"a".repeat(64)}`
+    }] }] })
+  });
+  assert.equal(setup.setupReady, true, JSON.stringify(setup));
   const skill = readFileSync(join(root, "skills/review-plan/SKILL.md"), "utf8");
   assert.ok(!skill.includes("plan-exit-review"));
 });
