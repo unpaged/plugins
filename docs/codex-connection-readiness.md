@@ -65,9 +65,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | The `unpaged` catalog targets the source Codex package and its bundled direct MCP connection | No installed workflow is validated for this route: every recorded pilot result used the registered artifact; public-directory availability is also separate |
+| Repository marketplace (Codex preview) | The `unpaged` catalog targets the source package; fresh CLI Git installation and bundled-server discovery passed | Native sign-in, hook approval, lifecycle and recovery are untested for this route; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json` | A published connection or a validated installed workflow: no recorded trial covers this route |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; this package passed a fresh CLI installation smoke | A published connection or validated sign-in, hook approval, lifecycle and recovery for this route |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can
@@ -77,18 +77,22 @@ listing. The [Codex catalog](../.agents/plugins/marketplace.json) is named
 `.claude-plugin/marketplace.json` remains the separate Claude Code catalog;
 the Codex package is absent there by design. The [customer preview instructions](../plugins/unpaged-codex/README.md#install-from-the-repository-preview)
 target the repository's `main` branch once this catalog is available there.
-Catalog validation does not prove an installed workflow. Before treating these
-instructions as verified customer onboarding, complete installation, service
-sign-in, hook approval and the visual-plan lifecycle, including restart recovery,
-on a clean profile. The required Node 24+, macOS/Linux and native Codex capability
-checks still apply. Customers need no personal registration ID or artifact build.
+The [September 20 CLI smoke](codex-repository-install-trial-2026-09-20.md) verified
+local and Git installation, installed-file identity and bundled-server discovery
+in fresh CLI state. It did not sign in or exercise a desktop profile. Before
+treating these instructions as verified customer onboarding, complete desktop
+installation, service sign-in, hook approval and the visual-plan lifecycle,
+including restart recovery, on a clean profile. The required Node 24+, macOS/Linux
+and native Codex capability checks still apply. Customers need no personal
+registration ID or artifact build.
 See [repository marketplace setup](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli).
 
 The source Codex package bundles direct MCP configuration; that route does not
 require customers to build a personal registered artifact or supply a registration
-ID. It has no recorded installed trial. All recorded 0.3.0 lifecycle and 0.3.1
+ID. Its CLI installation smoke found the server enabled but `not_logged_in`.
+All recorded 0.3.0 lifecycle and 0.3.1
 setup, update and recovery results used the registered artifact, which excluded
-`.mcp.json`. Those observations do not establish installation, sign-in, hook
+`.mcp.json`. Those registered-pilot observations do not establish sign-in, hook
 approval, lifecycle or recovery behavior for the bundled-direct-MCP route.
 
 For a registered local pilot, its `.app.json` must refer to the intended

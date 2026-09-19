@@ -26,9 +26,10 @@ Both live in the same plugin repository. The app monorepo contains neither.
 
 ## Install from the repository (preview)
 
-**Validation pending:** the repository package uses its bundled direct MCP
-connection. No installed trial has yet established installation, sign-in, hook
-approval, the visual-plan lifecycle or restart recovery for this route. The
+**Installation smoke passed; full workflow pending:** a [fresh CLI trial](../../docs/codex-repository-install-trial-2026-09-20.md)
+installed this package from GitHub, verified its files and discovered its bundled
+direct MCP server as `not_logged_in`. Native sign-in, hook approval, the
+visual-plan lifecycle and restart recovery remain untested for this route. The
 [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
@@ -50,6 +51,8 @@ Complete the native Unpaged service sign-in when prompted. Start a fresh Codex
 task and invoke `visual-plan`; the agent verifies the tools actually available
 before using them. If sign-in or required tools are unavailable, report that
 setup blocker rather than treating installation as a successful connection.
+The CLI smoke returned without completing sign-in even though the catalog's
+authentication policy is `ON_INSTALL`; that policy is not proof of authentication.
 
 ## Hook approval before listening
 
