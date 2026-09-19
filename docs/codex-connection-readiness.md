@@ -221,7 +221,11 @@ they do not authorize shell, repository, network, or unrelated tool work.
 Keep listener state separate from plan phase: accepting a plan must not stop
 feedback during execution or on its as-built record. Stopping a listener must
 not mark work accepted or built. Previously terminal review bindings must not
-silently reactivate or mint replacement keys during an upgrade.
+silently reactivate or mint replacement keys during an upgrade. Before changing
+a legacy ledger schema, the runtime refuses a live or unverifiable old worker
+(`legacy_worker_upgrade_required`) or unfinished old events
+(`legacy_events_upgrade_required`). Quiesce the old worker and reconcile its
+unfinished receipts with the old runtime before retrying the upgrade.
 
 The Decision log records the date, decision, why, and rejected alternative when
 a deviation, dropped/added task, or consequential choice occurs. Do not invent
@@ -270,11 +274,14 @@ If the active catalog cannot supply that evidence, leave the event blocked for
 reconciliation and report the missing read capability. Do not apply the preview
 or acknowledge the event as completed merely because the thread was found.
 
-An experimental pilot may correlate an open thread containing one human message
-with an event when node, thread, and timestamp match unambiguously. Record that
-as a limited pilot fallback: it does not prove the exact-comment/current-authority
-read contract above. Multiple human messages or otherwise ambiguous identity
-must remain blocked; the fallback cannot close the full-release gate.
+An experimental pilot may use a single-human-message heuristic for an open
+thread with matching document, node, and thread. It does not prove exact comment
+identity or current authority. Event `createdAt` is the inbox emission timestamp
+(`functions/src/comments/notify-comment-activity.ts`), while the comment read
+returns the message creation time. These timestamps need not match; use dates
+only to assess plausibility, never as an identity join. Multiple human messages
+or other ambiguity must defer. This limited fallback cannot close the
+full-release exact-read gate.
 
 Resolved threads are absent from `comments_list_unresolved`. Do not reopen a
 thread just to inspect it: that changes human state before identity and authority
