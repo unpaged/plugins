@@ -9,7 +9,7 @@ const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
 // linked by queued prompts. Never copy connection configuration or runtime data.
 const files = [
   "runtime/cli.mjs", "runtime/process-identity.mjs", "runtime/protocol.mjs", "runtime/snapshot.mjs",
-  "runtime/store.mjs", "runtime/worker.mjs",
+  "runtime/store.mjs", "runtime/worker.mjs", "runtime/setup.mjs",
   "skills/review-plan/SKILL.md", "skills/visual-plan/SKILL.md", "skills/as-built/SKILL.md"
 ];
 

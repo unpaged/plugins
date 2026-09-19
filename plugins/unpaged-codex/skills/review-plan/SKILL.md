@@ -59,6 +59,7 @@ themselves authorize a new worker.
 Commands use positional board/event IDs:
 
 ```text
+node <installed-cli> doctor [--codex /absolute/codex]
 node <cli> arm [--codex /absolute/codex]
 node <cli> status [documentId]
 node <cli> pending documentId
@@ -105,6 +106,24 @@ arming, or status-element initialization. Preserve its task/key identity and
 immutable status-element IDs. An explicit render-only request ends after step 4;
 report that no listener was armed.
 
+For a listening review, run `doctor` from the **current installed plugin** before
+minting a key. Resolve that helper from the current installed skill entry, not
+an older retained event path. `doctor` is read-only: it queries native hook
+configuration without opening the review ledger, running hooks, or starting a
+listener. Continue only if `setupReady` is true. Otherwise give the returned
+`action` in plain language and preserve the canvas. For missing/changed approval,
+direct the user to **Settings → Hooks → From Plugins → Unpaged for Codex**:
+review the hook row beneath **SessionStart** and click **Trust**, leaving its
+enable switch on. On macOS, **⌘,** opens Settings.
+Explain that Codex requires this approval for the exact hook definition. Recheck
+after the user completes that action; do not edit trust settings, bypass review,
+inspect logs as the normal setup flow, or prescribe repeated reinstalls/restarts.
+Other failures have different actions: do not invent a Trust step for a missing,
+disabled, unsupported, or unreadable hook. A render-only request skips this gate.
+`configuration_problem` identifies folder-wide hook loading errors or warnings;
+use its folder-configuration action rather than sending the user back to trust
+an already approved Unpaged hook. Never echo raw diagnostics from other plugins.
+
 1. Ground a requested plan in the conversation and relevant project facts.
    Preserve the user's phases, requirements, and scope. If the team uses a repo
    spec, record its path, revision, and stable requirement IDs; identify which
@@ -134,10 +153,12 @@ report that no listener was armed.
    MCP write. The adapter retains the full digest internally; do not ask the
    owner to type its hash. Explain that
    agents reply and leave threads open; humans resolve and explicitly accept.
-5. Mint a board-bound key via `agent_listener_key_create`. Call `arm` with stdin:
+5. After the setup check passes, mint a board-bound key via
+   `agent_listener_key_create`. Call `arm` with stdin:
    `{ "documentId", "threadId": <current CODEX_THREAD_ID>, "keyId", "url",
       "protocols", "planDigest": <full digest>, "statusElementIds": [<status ID>] }`.
-   The helper verifies the installed Codex binary and persists the exact binding.
+   The helper rechecks native setup before opening state, verifies the installed
+   Codex binary and persists the exact binding.
    It refuses implicit takeover/rebinding. If arming fails, revoke the newly
    minted key through MCP; do not leave an orphaned credential.
 6. Inspect `status` and confirm `connectionState: "connected"` plus a live worker
@@ -352,6 +373,21 @@ An older live worker running from a plugin cache is not migrated by a new
 installation: preserve its original paths until deliberately reconciled and
 stopped or migrated. The native SessionStart hook repairs only already-authorized bindings for
 this same root task; it must be trusted through Codex's normal hook review.
+
+For setup, update, or recovery checks, inspect existing `status`/`pending` and run
+`doctor` from the current installed plugin. Keep event handling on its trusted
+retained helper; approval of the current hook is not a gate on an already queued
+event. Report listener connection and recovery setup separately: `setupReady`
+means the installed hook is enabled and trusted in persisted native configuration,
+not that this running app loaded it or that restart recovery succeeded. A failed
+setup check must not stop a live receiver or reset its canvas, key, task binding,
+phase, digests, or receipts. Give its one next action, then recheck after the user
+completes it. For an already-authorized missing receiver on an active binding,
+use normal `resume` on that same binding after readiness; never re-arm it or
+replace its key. A terminal stopped binding remains stopped. Keep an
+explicit no-manual-repair trial intact. No restart is needed merely to run this
+check or the authorized resume. A native restart/reopen trial is separate proof
+and must not be reported as passed because doctor or manual resume succeeded.
 
 `queue_uncertain` means queueing may have succeeded. Inspect the pending Codex
 queue and task history for the event marker; absence from the pending queue is

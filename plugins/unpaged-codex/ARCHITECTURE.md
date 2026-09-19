@@ -148,6 +148,31 @@ task reopen/resume loads the queue; a trusted SessionStart hook repairs the
 receiver. Stop is a turn boundary and therefore is not wired to listener teardown.
 See [official Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
+`doctor` queries the verified native binary through a temporary public
+`app-server --stdio` connection: initialize, initialized, then `hooks/list` for
+the current folder. It starts no task, invokes no hook, changes no trust, and
+does not open the ledger. Output and duration are bounded, the owned query
+process is terminated, and only sanitized Unpaged setup facts leave the helper.
+Select the current installed source path before checking ambiguity, so another
+marketplace's copy cannot block this one. Readiness requires the exact current installed SessionStart command and matcher,
+enabled and trusted. Missing, disabled, modified, untrusted, unsupported and
+uninspectable states fail closed with one appropriate next action. Folder-wide
+load errors/warnings produce `configuration_problem` with a folder-configuration
+action, not misleading Unpaged approval advice. Native warnings are unstructured
+strings and are not attributed to a plugin by guessing their text. `arm` repeats
+the check before opening/migrating state or binding; the skill checks before key
+creation and revokes a newly minted key if arming subsequently fails.
+
+Setup evidence is persisted configuration, not desktop in-memory state or a
+live recovery receipt. Queued work keeps its retained runtime; setup inspection
+uses the current installed plugin. Approval failure does not tear down an
+existing receiver or erase its binding. Changed hook definitions require native
+reapproval. On the tested Codex 0.155.0-alpha.9.2 build, read-only native hash
+probes matched the raw `${PLUGIN_ROOT}` command template before expansion;
+changing `startup|resume` to `startup|resume|compact` exactly reproduced the
+old/new trust hashes. This isolates the pilot's approval reset, but does not
+replace an installed-update trial on each supported host.
+
 WebSocket open is transport readiness, not a server authentication receipt.
 Unpaged may upgrade before closing a rejected listener. Durable work received
 earlier can be queued before that close is observed. A terminal close fences
@@ -193,6 +218,22 @@ skew, nonterminal acceptance,
 phase transitions, immutable approval history, legacy terminal migration,
 compaction context, revocation/takeover, and
 secret-free status/prompts.
+
+Customer setup and recovery acceptance matrix:
+
+| Scenario | Required observation |
+| --- | --- |
+| Fresh install, untrusted hook | One native Trust action; no key, binding or receiver before readiness. |
+| Changed hook after update | Old approval fails; existing key, task, phase and receipts survive; exact new definition requires Trust. |
+| Unchanged trusted hook update | Ready without another approval prompt; installed update preserves existing review state. |
+| Native restart and task reopen | Receiver recovers automatically with the same binding and phase; a real comment gets one verified reply. |
+| Render-only with untrusted hook | Canvas is created without listener setup or a Trust requirement. |
+| Missing, disabled or unreadable hook | Accurate next action; no automatic trust/config changes or repeated restart instructions. |
+
+The automated setup fixtures cover status detection, refusal before ledger
+access, redaction and subprocess failures. They do not exercise the native Trust
+button or prove automatic recovery. For a no-manual-repair trial, never invoke
+`resume` or `session-start` directly to obtain a passing result.
 
 Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
 `${PLUGIN_ROOT}` and the SessionStart `session_id`/`source` fields. Official
