@@ -24,8 +24,8 @@ function processing(store, token, id = "event-1", role = "owner") {
   store.receive(doc, event(id, role), token); store.markDispatching(doc, id, token);
   return store.begin(doc, id, { expectedThreadId: task });
 }
-function acceptArgs(operationToken, extras = {}) {
-  return { operationToken, humanText: acceptancePhrase(digest), currentDigest: digest, submittedPlanDigest: digest, ...extras };
+function acceptArgs({ operationToken, event }, extras = {}) {
+  return { operationToken, humanCreatedAt: event.createdAt, humanText: acceptancePhrase(digest), currentDigest: digest, submittedPlanDigest: digest, ...extras };
 }
 
 test("WAL/FULL store and sidecars remain private; default status never exposes credential or worker token", (t) => {
@@ -151,15 +151,15 @@ test("explicit retry requires queue uncertainty and keeps journal identity", (t)
 test("acceptance requires standalone owner approval, unchanged digest, current operation and no gap", (t) => {
   const { store, token } = fixture(t); const started = processing(store, token);
   for (const humanText of ["Looks good", "I accept", "I accept this plan if tests pass", '"I accept this plan"']) {
-    assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken, { humanText })), /explicit_acceptance_required/);
+    assert.throws(() => store.accept(doc, "event-1", acceptArgs(started, { humanText })), /explicit_acceptance_required/);
   }
-  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken, { currentDigest: changedDigest })), /digest_mismatch/);
+  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started, { currentDigest: changedDigest })), /digest_mismatch/);
   store.markReconciliationRequired(doc, token, "socket_reconnected");
-  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken)), /reconciliation_required/);
+  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started)), /reconciliation_required/);
   assert.throws(() => store.reconcile(doc, { evidence: "" }), /invalid_evidence/);
   store.reconcile(doc, { evidence: "MCP thread sweep checked current owner comments; no unhandled gap remains." });
-  const accepted = store.accept(doc, "event-1", acceptArgs(started.operationToken, { humanText: "\n@agent: I accept this plan.\n" }));
-  assert.equal(accepted.status, "accepted"); assert.equal(accepted.acceptedDigest, digest); assert.equal(accepted.cleanupRequired, true);
+  const accepted = store.accept(doc, "event-1", acceptArgs(started, { humanText: "\n@agent: I accept this plan.\n" }));
+  assert.equal(accepted.status, "active"); assert.equal(accepted.planPhase, "accepted"); assert.equal(accepted.acceptedDigest, digest); assert.equal(accepted.cleanupRequired, false);
   assert.equal(store.nextEvent(doc, token), null);
   assert.throws(() => store.complete(doc, "event-1", { operationToken: started.operationToken, evidence: { replyId: "reply", planDigest: changedDigest } }), /accepted_plan_changed/);
   store.complete(doc, "event-1", { operationToken: started.operationToken, evidence: { replyId: "accept-reply", planDigest: digest } });
@@ -167,11 +167,11 @@ test("acceptance requires standalone owner approval, unchanged digest, current o
 test("editor/viewer comments and outstanding received events cannot accept a plan", (t) => {
   for (const role of ["editor", "viewer"]) {
     const { store, token } = fixture(t); const started = processing(store, token, "event-1", role);
-    assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken)), /owner_acceptance_required/);
+    assert.throws(() => store.accept(doc, "event-1", acceptArgs(started)), /owner_acceptance_required/);
   }
   const { store, token } = fixture(t); const started = processing(store, token);
   store.receive(doc, event("event-2"), token);
-  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started.operationToken)), /outstanding_events/);
+  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started)), /outstanding_events/);
 });
 test("stop preserves journal and credential until matching explicit remote revocation confirmation", (t) => {
   const { store, token } = fixture(t); store.receive(doc, event(), token);
@@ -241,7 +241,40 @@ test("owner acceptance older than the clock allowance cannot accept even an iden
   const old = { ...event(), createdAt: new Date(Date.parse(store.getBinding(doc).planVersionAt) - ACCEPTANCE_CLOCK_SKEW_MS - 1).toISOString() };
   store.receive(doc, old, token); store.markDispatching(doc, old.id, token);
   const started = store.begin(doc, old.id, { expectedThreadId: task });
-  assert.throws(() => store.accept(doc, old.id, acceptArgs(started.operationToken)), /acceptance_predates_plan_version/);
+  assert.throws(() => store.accept(doc, old.id, acceptArgs(started)), /acceptance_predates_plan_version/);
+});
+test("a delayed inbox emission cannot make an older human comment approve a newer plan", (t) => {
+  const baseline = Date.parse("2026-09-19T12:00:00.000Z");
+  t.mock.timers.enable({ apis: ["Date"], now: baseline });
+  const { store, token } = fixture(t);
+  const humanCreatedAt = new Date(baseline - 60000).toISOString();
+  t.mock.timers.setTime(baseline + 1000);
+  const started = processing(store, token);
+  assert.ok(Date.parse(started.event.createdAt) > Date.parse(store.getBinding(doc).planVersionAt));
+  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started, { humanCreatedAt })), /acceptance_predates_plan_version/);
+  assert.equal(store.getBinding(doc).planPhase, "proposed");
+  assert.equal(store.getBinding(doc).acceptanceReceipts.length, 0);
+});
+test("acceptance refuses a missing or invalid verified human creation timestamp", (t) => {
+  const { store, token } = fixture(t);
+  const started = processing(store, token);
+  for (const humanCreatedAt of [undefined, null, "", "not-a-time", 123, "2026-09-19"]) {
+    assert.throws(() => store.accept(doc, "event-1", acceptArgs(started, { humanCreatedAt })), /invalid_acceptance_time/);
+  }
+  assert.equal(store.getBinding(doc).acceptanceReceipts.length, 0);
+});
+test("human approval time allows at most five seconds of forward server skew", (t) => {
+  const baseline = Date.parse("2026-09-19T12:00:00.000Z");
+  t.mock.timers.enable({ apis: ["Date"], now: baseline });
+  const { store, token } = fixture(t);
+  const started = processing(store, token);
+  assert.throws(() => store.accept(doc, "event-1", acceptArgs(started, {
+    humanCreatedAt: new Date(baseline + ACCEPTANCE_CLOCK_SKEW_MS + 1).toISOString()
+  })), /acceptance_time_in_future/);
+  const accepted = store.accept(doc, "event-1", acceptArgs(started, {
+    humanCreatedAt: new Date(baseline + ACCEPTANCE_CLOCK_SKEW_MS).toISOString()
+  }));
+  assert.equal(accepted.planPhase, "accepted");
 });
 test("owner acceptance tolerates bounded server clock skew without relaxing version checks", (t) => {
   assert.equal(ACCEPTANCE_CLOCK_SKEW_MS, 5000);
@@ -250,9 +283,10 @@ test("owner acceptance tolerates bounded server clock skew without relaxing vers
     const feedback = { ...event(), createdAt: new Date(Date.parse(store.getBinding(doc).planVersionAt) - millisecondsBefore).toISOString() };
     store.receive(doc, feedback, token); store.markDispatching(doc, feedback.id, token);
     const started = store.begin(doc, feedback.id, { expectedThreadId: task });
-    assert.throws(() => store.accept(doc, feedback.id, acceptArgs(started.operationToken, { currentDigest: changedDigest })), /digest_mismatch/);
-    const result = store.accept(doc, feedback.id, acceptArgs(started.operationToken, { humanText: ` @agent: ${acceptancePhrase(digest)}.\n` }));
-    assert.equal(result.status, "accepted");
+    assert.throws(() => store.accept(doc, feedback.id, acceptArgs(started, { currentDigest: changedDigest })), /digest_mismatch/);
+    const result = store.accept(doc, feedback.id, acceptArgs(started, { humanText: ` @agent: ${acceptancePhrase(digest)}.\n` }));
+    assert.equal(result.status, "active");
+    assert.equal(result.planPhase, "accepted");
     assert.equal(result.acceptedDigest, digest);
   }
 });
@@ -268,7 +302,7 @@ test("acceptance received before a later revision cannot approve that revision i
   store.markDispatching(doc, "acceptance", token);
   const approval = store.begin(doc, "acceptance", { expectedThreadId: task });
   assert.equal(Date.parse(store.getBinding(doc).planVersionAt) - Date.parse(approval.event.createdAt), 1000);
-  assert.throws(() => store.accept(doc, "acceptance", acceptArgs(approval.operationToken, {
+  assert.throws(() => store.accept(doc, "acceptance", acceptArgs(approval, {
     humanText: "I accept this plan.", currentDigest: changedDigest, submittedPlanDigest: changedDigest
   })), /acceptance_predates_plan_version/);
   assert.equal(store.getBinding(doc).status, "active");
@@ -285,7 +319,7 @@ test("a prior reply without a digest change does not invalidate already received
   store.markDispatching(doc, "acceptance", token);
   const approval = store.begin(doc, "acceptance", { expectedThreadId: task });
   assert.equal(Date.parse(store.getBinding(doc).planVersionAt), baseline);
-  assert.equal(store.accept(doc, "acceptance", acceptArgs(approval.operationToken, { humanText: "I accept this plan." })).status, "accepted");
+  assert.equal(store.accept(doc, "acceptance", acceptArgs(approval, { humanText: "I accept this plan." })).planPhase, "accepted");
 });
 test("plan-version timestamp advances only when completion changes the digest", async (t) => {
   const { store, token } = fixture(t); const initial = store.getBinding(doc).planVersionAt;

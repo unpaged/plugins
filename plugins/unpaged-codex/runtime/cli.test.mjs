@@ -167,7 +167,7 @@ test("plugin packages only native SessionStart repair and has no external review
   const root = fileURLToPath(new URL("../", import.meta.url));
   const hooks = JSON.parse(readFileSync(join(root, "hooks/hooks.json")));
   assert.deepEqual(Object.keys(hooks.hooks), ["SessionStart"]);
-  assert.equal(hooks.hooks.SessionStart[0].matcher, "startup|resume");
+  assert.equal(hooks.hooks.SessionStart[0].matcher, "startup|resume|compact");
   const manifest = JSON.parse(readFileSync(join(root, ".codex-plugin/plugin.json")));
   assert.equal(manifest.name, "unpaged-codex");
   const skill = readFileSync(join(root, "skills/review-plan/SKILL.md"), "utf8");

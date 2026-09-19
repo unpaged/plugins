@@ -31,13 +31,14 @@ test("concurrent publishers retain one complete private runtime without connecti
   assert.deepEqual((await readdir(root)).sort(), ["runtime", "skills"]);
   assert.deepEqual((await readdir(join(root, "runtime"))).sort(), ["cli.mjs", "process-identity.mjs", "protocol.mjs", "snapshot.mjs", "store.mjs", "worker.mjs"]);
   assert.equal(await readFile(join(root, "skills/review-plan/SKILL.md"), "utf8"), await readFile(join(plugin, "skills/review-plan/SKILL.md"), "utf8"));
+  assert.equal(await readFile(join(root, "skills/as-built/SKILL.md"), "utf8"), await readFile(join(plugin, "skills/as-built/SKILL.md"), "utf8"));
 });
 
 test("skill and executable updates retain distinct versions without modifying earlier releases", async (t) => {
   const { data, plugin } = await fixture(t);
   const first = await retainRuntime(data, plugin);
   const original = await readFile(first, "utf8");
-  const skill = join(plugin, "skills/visual-plan/SKILL.md");
+  const skill = join(plugin, "skills/as-built/SKILL.md");
   await writeFile(skill, (await readFile(skill, "utf8")) + "\nUpdated review guidance.\n");
   const second = await retainRuntime(data, plugin);
   assert.notEqual(first, second);

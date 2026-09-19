@@ -156,7 +156,7 @@ export async function executeCli(argv, options = {}) {
   if (!isAbsolute(directory)) fail("absolute_data_directory_required");
   if (args.command === "digest") return { planDigest: planDigest(await readJson(input)) };
   if (args.command === "info") return { dataDirectory: directory, node: process.version, minimumNode: "24", minimumCodex: "0.153.1" };
-  const allowed = ["arm", "resume", "status", "pending", "begin", "complete", "accept", "stop", "revoked", "reconcile", "recover", "session-start"];
+  const allowed = ["arm", "resume", "status", "pending", "begin", "complete", "accept", "submit", "approve", "execute", "checkpoint", "built", "stop", "revoked", "reconcile", "recover", "session-start"];
   if (!allowed.includes(args.command)) fail("unknown_command");
   if (Number(process.versions.node.split(".")[0]) < 24) fail("node_24_required");
   const dbPath = join(directory, "reviews.sqlite");
@@ -164,7 +164,7 @@ export async function executeCli(argv, options = {}) {
   if (args.command === "session-start") {
     hook = await readJson(input);
     if (hook.agent_id || hook.agent_type || hook.hook_event_name !== "SessionStart" ||
-        !["startup", "resume"].includes(hook.source) || !UUID.test(hook.session_id || "") ||
+        !["startup", "resume", "compact"].includes(hook.source) || !UUID.test(hook.session_id || "") ||
         (env.CODEX_THREAD_ID && hook.session_id !== env.CODEX_THREAD_ID) || !existsSync(dbPath)) return null;
   }
   const store = new Store(dbPath);
@@ -181,7 +181,7 @@ export async function executeCli(argv, options = {}) {
       for (const binding of bindings) results.push(await ensureWorker(store, binding.documentId, directory, options));
       if (!results.length) return null;
       return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext:
-        "Unpaged has existing review bindings for this task. Use the bundled review-plan skill for events and recovery. No new boards were armed. Read status before claiming listening or completion. " + JSON.stringify(results) } };
+        "Unpaged has existing plan bindings for this task. Use the bundled review-plan skill for events and recovery. Preserve each planPhase and its recorded task-user authorization; acceptance alone never permits implementation. For executing plans keep appending Decision log rows while implementing. No new boards were armed. Read status before claiming listening or completion. " + JSON.stringify(results) } };
     }
     if (args.command === "arm") {
       const config = await readJson(input);
@@ -198,6 +198,7 @@ export async function executeCli(argv, options = {}) {
     const payload = await readJson(input);
     if (args.command === "complete") return store.complete(documentId, eventId, payload);
     if (args.command === "accept") return store.accept(documentId, eventId, payload);
+    if (["submit", "approve", "execute", "checkpoint", "built"].includes(args.command)) return store.transition(documentId, args.command, payload);
     if (args.command === "revoked") return store.confirmRevoked(documentId, payload);
     if (args.command === "reconcile") return store.reconcile(documentId, payload);
     if (args.command === "recover") return store.recover(documentId, eventId, payload);

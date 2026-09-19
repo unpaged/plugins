@@ -10,8 +10,8 @@ import { processIdentity, workerIsAlive } from "./process-identity.mjs";
 
 const now = () => new Date().toISOString();
 const EVENT_STATES = ["received", "dispatching", "queued", "processing", "completed", "queue_uncertain", "effect_uncertain"];
-// Server-authored comment timestamps and local version timestamps can differ
-// slightly. Older feedback remains stale beyond this explicit bounded allowance.
+// The matched human comment's server timestamp and the local version timestamp
+// can differ slightly. Inbox emission time is not the comment creation time.
 export const ACCEPTANCE_CLOCK_SKEW_MS = 5000;
 const fail = (reason) => { const error = new Error(reason); error.code = reason === "worker_fenced" ? "OWNERSHIP_LOST" : reason.toUpperCase(); throw error; };
 
@@ -26,11 +26,24 @@ export class Store {
     this._assertPaths();
     this.db = new DatabaseSync(path);
     chmodSync(path, 0o600);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
+    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;");
+    try { this._tx(() => {
+      const columns = this._all("PRAGMA table_info(bindings)");
+      if (columns.length && !columns.some((column) => column.name === "plan_phase")) {
+        // Old retained executables do not understand plan phases. A trusted
+        // SessionStart can open this store before the skill is read, so enforce
+        // the upgrade boundary here, before altering any legacy schema.
+        if (this._all("SELECT * FROM bindings").some((binding) =>
+          binding.worker_pid && workerIsAlive(binding.worker_pid, binding.worker_identity))) fail("legacy_worker_upgrade_required");
+        if (this._get("SELECT name FROM sqlite_master WHERE type='table' AND name='events'") &&
+          this._get("SELECT event_id FROM events WHERE state<>'completed' LIMIT 1")) fail("legacy_events_upgrade_required");
+      }
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS bindings (
         document_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, key_id TEXT NOT NULL,
         url TEXT, protocols TEXT, codex_path TEXT NOT NULL, plan_digest TEXT NOT NULL, plan_version_at TEXT NOT NULL, status_element_ids TEXT NOT NULL DEFAULT '[]',
-        state TEXT NOT NULL DEFAULT 'active', connection TEXT NOT NULL DEFAULT 'stopped', connection_reason TEXT,
+        state TEXT NOT NULL DEFAULT 'active', plan_phase TEXT NOT NULL DEFAULT 'proposed', phase_evidence TEXT,
+        connection TEXT NOT NULL DEFAULT 'stopped', connection_reason TEXT,
         reconciliation_required INTEGER NOT NULL DEFAULT 0, reconciliation_evidence TEXT,
         worker_pid INTEGER, worker_identity TEXT, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
         accepted_event_id TEXT, accepted_digest TEXT, accepted_at TEXT,
@@ -41,8 +54,12 @@ export class Store {
         routing TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('received','dispatching','queued','processing','completed','queue_uncertain','effect_uncertain')),
         operation_token TEXT, queue_id TEXT, evidence TEXT, recovery_evidence TEXT,
         received_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(document_id,event_id)
+      );
+      CREATE TABLE IF NOT EXISTS acceptance_receipts (
+        receipt_id INTEGER PRIMARY KEY, document_id TEXT NOT NULL REFERENCES bindings(document_id),
+        event_id TEXT, plan_digest TEXT NOT NULL, accepted_at TEXT NOT NULL,
+        source TEXT NOT NULL, evidence TEXT
       );`);
-    this._tx(() => {
       if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "status_element_ids")) {
         this.db.exec("ALTER TABLE bindings ADD COLUMN status_element_ids TEXT NOT NULL DEFAULT '[]'");
       }
@@ -53,7 +70,20 @@ export class Store {
       if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "worker_identity")) {
         this.db.exec("ALTER TABLE bindings ADD COLUMN worker_identity TEXT");
       }
-    });
+      if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "plan_phase")) {
+        this.db.exec("ALTER TABLE bindings ADD COLUMN plan_phase TEXT NOT NULL DEFAULT 'proposed'");
+        // Earlier adapters ended the listener at acceptance. Preserve that stop
+        // and any pending revocation; an upgrade must never resurrect a key.
+        this._run("UPDATE bindings SET plan_phase='accepted',state='stopped' WHERE state='accepted'");
+      }
+      if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "phase_evidence")) {
+        this.db.exec("ALTER TABLE bindings ADD COLUMN phase_evidence TEXT");
+      }
+      this._run(`INSERT INTO acceptance_receipts(document_id,event_id,plan_digest,accepted_at,source)
+        SELECT document_id,accepted_event_id,accepted_digest,accepted_at,'legacy' FROM bindings b
+        WHERE accepted_digest IS NOT NULL AND accepted_at IS NOT NULL AND NOT EXISTS
+        (SELECT 1 FROM acceptance_receipts r WHERE r.document_id=b.document_id AND r.plan_digest=b.accepted_digest AND r.accepted_at=b.accepted_at)`);
+    }); } catch (error) { this.db.close(); throw error; }
   }
   _assertPaths() {
     for (const path of [dirname(this.path), this.path, `${this.path}-wal`, `${this.path}-shm`]) {
@@ -86,6 +116,10 @@ export class Store {
   }
   _active(binding) { if (binding.state !== "active") fail("review_inactive"); }
   _ready(binding) { this._active(binding); if (binding.reconciliation_required) fail("reconciliation_required"); }
+  _idle(id, binding) {
+    this._ready(binding);
+    if (this._get("SELECT event_id FROM events WHERE document_id=? AND state<>'completed' LIMIT 1", id)) fail("outstanding_events");
+  }
   _eventView(row) {
     if (!EVENT_STATES.includes(row.state)) fail("unknown_event_state");
     return { ...JSON.parse(row.routing), state: row.state, queueId: row.queue_id,
@@ -117,7 +151,8 @@ export class Store {
   }
   getBinding(id, { includeSecrets = false } = {}) {
     const b = this._binding(id);
-    if (!["active", "accepted", "stopped"].includes(b.state)) fail("unknown_binding_state");
+    if (!["active", "stopped"].includes(b.state)) fail("unknown_binding_state");
+    if (!["proposed", "accepted", "executing", "built"].includes(b.plan_phase)) fail("unknown_plan_phase");
     if (!validTime(b.plan_version_at)) fail("invalid_plan_version_time");
     const counts = Object.fromEntries(EVENT_STATES.map((state) => [state, 0]));
     for (const row of this._all("SELECT state,COUNT(*) AS count FROM events WHERE document_id=? GROUP BY state", id)) {
@@ -128,6 +163,8 @@ export class Store {
       planDigest: b.plan_digest, planVersionAt: b.plan_version_at, statusElementIds: JSON.parse(b.status_element_ids), status: b.state, connectionState: b.connection, connectionReason: b.connection_reason,
       reconciliationRequired: Boolean(b.reconciliation_required), workerPid: b.worker_pid, workerIdentity: b.worker_identity,
       acceptedEventId: b.accepted_event_id, acceptedDigest: b.accepted_digest, acceptedAt: b.accepted_at,
+      planPhase: b.plan_phase, phaseEvidence: b.phase_evidence ? JSON.parse(b.phase_evidence) : [],
+      acceptanceReceipts: this._all("SELECT event_id AS eventId,plan_digest AS planDigest,accepted_at AS acceptedAt,source,evidence FROM acceptance_receipts WHERE document_id=? ORDER BY receipt_id", id),
       cleanupRequired: Boolean(b.revoke_pending), credentialsPresent: b.protocols !== null, eventCounts: counts, updatedAt: b.updated_at };
     if (includeSecrets) Object.assign(result, { url: b.url, protocols: b.protocols ? JSON.parse(b.protocols) : null, workerToken: b.worker_token });
     return result;
@@ -228,8 +265,11 @@ export class Store {
   _complete(id, eventId, evidence) {
     const b = this._binding(id);
     if (evidence.planDigest) {
-      if (b.state === "accepted" && evidence.planDigest !== b.accepted_digest) fail("accepted_plan_changed");
-      this._run("UPDATE bindings SET plan_digest=?,plan_version_at=CASE WHEN plan_digest<>? THEN ? ELSE plan_version_at END,updated_at=? WHERE document_id=?", evidence.planDigest, evidence.planDigest, now(), now(), id);
+      // Acceptance's own reply must attest exactly the accepted version, even
+      // after an interrupted turn. Later execution records have a separate
+      // current digest and never rewrite the immutable acceptance receipt.
+      if (b.accepted_event_id === eventId && evidence.planDigest !== b.accepted_digest) fail("accepted_plan_changed");
+      this._run("UPDATE bindings SET plan_digest=?,plan_version_at=CASE WHEN plan_digest<>? THEN ? ELSE plan_version_at END,plan_phase=CASE WHEN plan_phase='accepted' AND plan_digest<>? THEN 'proposed' ELSE plan_phase END,updated_at=? WHERE document_id=?", evidence.planDigest, evidence.planDigest, now(), evidence.planDigest, now(), id);
     }
     this._run("UPDATE events SET state='completed',evidence=?,updated_at=? WHERE document_id=? AND event_id=?", JSON.stringify(evidence), now(), id, eventId);
     return this._eventView(this._event(id, eventId));
@@ -239,22 +279,68 @@ export class Store {
     if (planDigest !== undefined && planDigest !== proof.planDigest) fail("digest_mismatch");
     return this._tx(() => { this._processing(id, eventId, operationToken); return this._complete(id, eventId, proof); });
   }
-  accept(id, eventId, { operationToken, humanText, currentDigest, submittedPlanDigest } = {}) {
+  accept(id, eventId, { operationToken, humanText, humanCreatedAt, currentDigest, submittedPlanDigest } = {}) {
     requireDigest(currentDigest); requireDigest(submittedPlanDigest);
+    if (!validTime(humanCreatedAt)) fail("invalid_acceptance_time");
+    if (Date.parse(humanCreatedAt) > Date.now() + ACCEPTANCE_CLOCK_SKEW_MS) fail("acceptance_time_in_future");
     return this._tx(() => {
       const b = this._binding(id); this._ready(b);
+      if (b.plan_phase !== "proposed") fail("plan_already_approved");
       const event = this._processing(id, eventId, operationToken);
       const routing = JSON.parse(event.routing);
       if (routing.authorRole !== "owner") fail("owner_acceptance_required");
       // Receipt and version timestamps share this local clock. A later plan
       // change invalidates queued acceptance without any server-skew allowance.
+      // The routing timestamp is inbox emission, so delayed triggers also need
+      // the actual matched human message creation time read through MCP.
       if (!validTime(b.plan_version_at) || !validTime(event.received_at) ||
         Date.parse(event.received_at) < Date.parse(b.plan_version_at) ||
-        Date.parse(routing.createdAt) < Date.parse(b.plan_version_at) - ACCEPTANCE_CLOCK_SKEW_MS) fail("acceptance_predates_plan_version");
+        Date.parse(humanCreatedAt) < Date.parse(b.plan_version_at) - ACCEPTANCE_CLOCK_SKEW_MS) fail("acceptance_predates_plan_version");
       if (this._get("SELECT event_id FROM events WHERE document_id=? AND event_id<>? AND state<>'completed' LIMIT 1", id, eventId)) fail("outstanding_events");
       if (currentDigest !== submittedPlanDigest || currentDigest !== b.plan_digest) fail("digest_mismatch");
       if (!acceptsPlan(humanText, currentDigest)) fail("explicit_acceptance_required");
-      this._run("UPDATE bindings SET state='accepted',accepted_event_id=?,accepted_digest=?,accepted_at=?,revoke_pending=1,updated_at=? WHERE document_id=?", eventId, currentDigest, now(), now(), id);
+      const at = now();
+      this._run("UPDATE bindings SET plan_phase='accepted',accepted_event_id=?,accepted_digest=?,accepted_at=?,updated_at=? WHERE document_id=?", eventId, currentDigest, at, at, id);
+      this._run("INSERT INTO acceptance_receipts(document_id,event_id,plan_digest,accepted_at,source) VALUES(?,?,?,?,?)", id, eventId, currentDigest, at, "board-owner");
+      return this.getBinding(id);
+    });
+  }
+  // These transitions record decisions from the person in the assigned Codex
+  // task. Board-event processing cannot use them: all events must be completed.
+  // The caller must verify task-user authorization; evidence is an audit record,
+  // not a parser that turns collaborator prose into permission to run code.
+  transition(id, command, { evidence, currentDigest, recordNodeId, openTasks } = {}) {
+    boundedText(evidence); requireDigest(currentDigest);
+    if (!["submit", "approve", "execute", "checkpoint", "built"].includes(command)) fail("invalid_phase_transition");
+    if (command === "built") {
+      requireUuid(recordNodeId);
+      if (openTasks !== 0) fail("open_plan_tasks");
+    }
+    return this._tx(() => {
+      const b = this._binding(id); this._idle(id, b);
+      const phase = b.plan_phase;
+      if (command === "submit" && !["proposed", "accepted"].includes(phase)) fail("implementation_already_started");
+      if (command === "approve" && phase !== "proposed") fail("plan_already_approved");
+      if (command === "execute" && phase !== "accepted") fail("plan_acceptance_required");
+      if (command === "checkpoint" && !["executing", "built"].includes(phase)) fail("implementation_not_started");
+      if (command === "built" && phase !== "executing") fail("implementation_not_started");
+      if (["approve", "execute"].includes(command) && currentDigest !== b.plan_digest) fail("digest_mismatch");
+      if (command === "execute" && currentDigest !== b.accepted_digest) fail("accepted_plan_changed");
+      const next = { submit: "proposed", approve: "accepted", execute: "executing", checkpoint: phase, built: "built" }[command];
+      const history = b.phase_evidence ? JSON.parse(b.phase_evidence) : [];
+      if (!Array.isArray(history)) fail("invalid_phase_history");
+      const at = now();
+      history.push({ command, phase: next, evidence, planDigest: currentDigest, at,
+        ...(command === "built" ? { recordNodeId, openTasks } : {}) });
+      this._run("UPDATE bindings SET plan_phase=?,phase_evidence=?,plan_digest=?,plan_version_at=CASE WHEN plan_digest<>? THEN ? ELSE plan_version_at END,updated_at=? WHERE document_id=?",
+        next, JSON.stringify(history), currentDigest, currentDigest, at, at, id);
+      // A deliberate resubmission requires fresh acceptance even when the
+      // content hash is unchanged; earlier queued approval cannot count again.
+      if (command === "submit") this._run("UPDATE bindings SET plan_version_at=? WHERE document_id=?", at, id);
+      if (command === "approve") {
+        this._run("UPDATE bindings SET accepted_event_id=NULL,accepted_digest=?,accepted_at=? WHERE document_id=?", currentDigest, at, id);
+        this._run("INSERT INTO acceptance_receipts(document_id,plan_digest,accepted_at,source,evidence) VALUES(?,?,?,?,?)", id, currentDigest, at, "task-user", evidence);
+      }
       return this.getBinding(id);
     });
   }
@@ -280,7 +366,7 @@ export class Store {
       }
       if (decision === "continue" && event.state === "effect_uncertain") {
         const b = this._binding(id);
-        if ((b.state !== "active" && !(b.state === "accepted" && b.accepted_event_id === eventId)) || this._outstanding(id, eventId)) fail("review_inactive");
+        if (b.state !== "active" || this._outstanding(id, eventId)) fail("review_inactive");
         boundedText(evidence); record(evidence);
         const operationToken = randomUUID();
         this._run("UPDATE events SET state='processing',operation_token=?,updated_at=? WHERE document_id=? AND event_id=?", operationToken, now(), id, eventId);

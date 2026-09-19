@@ -140,7 +140,7 @@ function finishQueued(paths, data, eventId) {
   });
 }
 
-test("queued snapshot CLI and both linked skills survive deletion of the installed plugin cache", async (t) => {
+test("queued snapshot CLI and all linked skills survive deletion of the installed plugin cache", async (t) => {
   const f = await fixture(t);
   const worker = await f.launch();
   const { workerPath } = worker;
@@ -153,6 +153,7 @@ test("queued snapshot CLI and both linked skills survive deletion of the install
   await rm(f.cache, { recursive: true });
   assert.ok((await readFile(paths.skill, "utf8")).includes("../visual-plan/SKILL.md"));
   assert.ok((await readFile(join(dirname(paths.skill), "../visual-plan/SKILL.md"), "utf8")).includes("name: visual-plan"));
+  assert.ok((await readFile(join(dirname(paths.skill), "../as-built/SKILL.md"), "utf8")).includes("name: as-built"));
   const completed = finishQueued(paths, f.data, "old-event");
   assert.equal(completed.state, "completed");
   assert.equal(completed.queueId, worker.calls[0].queueId);

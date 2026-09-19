@@ -372,7 +372,7 @@ test("stop closes the socket promptly and preserves an in-flight queue outcome",
   assert.equal(f.calls.length, 1);
 });
 
-test("explicit plan acceptance stops the worker without resolving comments or dispatching again", async (t) => {
+test("explicit acceptance keeps listening and serializes later feedback through execution and built", async (t) => {
   const f = fixture(t);
   f.start();
   // Acceptance follows this fixture's submitted version, not the generic frame's fixed date.
@@ -381,13 +381,23 @@ test("explicit plan acceptance stops the worker without resolving comments or di
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   const { operationToken } = f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD });
   f.store.accept(DOCUMENT, "event-1", {
-    operationToken, humanText: acceptancePhrase(DIGEST), currentDigest: DIGEST, submittedPlanDigest: DIGEST
+    operationToken, humanCreatedAt: createdAt, humanText: acceptancePhrase(DIGEST), currentDigest: DIGEST, submittedPlanDigest: DIGEST
   });
-  const result = await f.done;
-  assert.equal(result.reason, "review_accepted");
-  assert.equal(f.sockets[0].closed, true);
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.store.getBinding(DOCUMENT).cleanupRequired, true);
+  f.sockets[0].message(frame("after-acceptance"));
+  await pause();
+  assert.equal(f.calls.length, 1, "acceptance effects must complete before later comments dispatch");
+  f.store.complete(DOCUMENT, "event-1", { operationToken, evidence: { replyId: "accepted-reply", planDigest: DIGEST } });
+  await until(() => f.calls.length === 2);
+  const feedback = f.store.begin(DOCUMENT, "after-acceptance", { expectedThreadId: THREAD });
+  f.store.complete(DOCUMENT, "after-acceptance", { operationToken: feedback.operationToken, evidence: { replyId: "feedback-reply", planDigest: DIGEST } });
+  f.store.transition(DOCUMENT, "execute", { evidence: "Task user requested implementation.", currentDigest: DIGEST });
+  f.store.transition(DOCUMENT, "built", { evidence: "Verified all plan tasks and the completed record.", currentDigest: "b".repeat(64), recordNodeId: QUEUE, openTasks: 0 });
+  f.sockets[0].message(frame("record-correction"));
+  await until(() => f.calls.length === 3);
+  assert.equal(Boolean(f.sockets[0].closed), false);
+  assert.equal(f.store.getBinding(DOCUMENT).planPhase, "built");
+  assert.equal(f.store.getBinding(DOCUMENT).acceptedDigest, DIGEST);
+  assert.equal(f.store.getBinding(DOCUMENT).cleanupRequired, false);
 });
 
 test("worker ownership loss closes stale socket and cannot release the replacement claim", async (t) => {

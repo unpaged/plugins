@@ -36,7 +36,7 @@ Replace `REGISTERED_PLUGIN_ID` with the ID obtained from the native registration
 flow. It has the `plugin_asdk_app_` prefix. Do not commit a personal ID or reuse
 one as a public listing. The builder writes `.app.json`, connects the manifest's
 `apps` field to it, and excludes the source package's direct `.mcp.json` connection.
-The output has one registered connection, both skills, the startup hook and the
+The output has one registered connection, all three skills, the startup hook and the
 runtime. It never reads or copies the adapter database or OAuth credentials.
 Existing output is refused rather than overwritten; the result prints its
 canonical output path without the registration ID.
@@ -70,6 +70,20 @@ launching. Queued messages reference that retained copy. Replacing the plugin
 cache cannot delete the code needed by those receivers or messages. Snapshots
 are retained; do not remove them while a review or queued event might use them.
 
+Before opening a 0.2 ledger with the new helper (including its SessionStart
+hook), use the original retained helper to reconcile all unfinished events and
+quiesce its receiver. Migration refuses a live or unverifiable legacy worker
+with `legacy_worker_upgrade_required`, and any unfinished legacy event with
+`legacy_events_upgrade_required`, before changing the schema. Preserve the old
+helper, queue paths, key and ledger while resolving those blockers; do not erase
+receipts or mint a replacement key to bypass them. This is an explicit upgrade
+procedure, not an automatic handoff between incompatible runtime versions.
+Drain/reconcile with the old helper while the binding is active, then use a
+graceful SIGTERM only on its verified plugin-owned receiver so it releases
+worker ownership. The CLI `stop` command permanently stops that review; it is
+not an upgrade pause. A stopped legacy binding with unreconciled events remains
+blocked instead of being silently repaired.
+
 A receiver already running from an older cache path is **not migrated by
 installation**. Keep its original code available until its pending work has been
 reconciled and it is deliberately stopped or migrated. Do not uninstall to update,
@@ -87,7 +101,7 @@ installation does not silently migrate it or treat it as a new receiver.
 
 Invoke the bundled **visual-plan** skill to render a supplied plan, the current
 task's plan, or a draft for the feature you name. It preserves phases, tasks and
-requirements, lays out the overview and useful phase detail, then delegates
+requirements, lays out the overview and useful phase detail, and a Decision log, then delegates
 review lifecycle to **review-plan**. Use review-plan directly for an existing
 review, incoming events, status, recovery or stopping. New plans default to
 **Visual plans** and honor an explicit folder choice. The agent arms the board
@@ -101,9 +115,14 @@ thread resolution, and silence are not acceptance signals.
 The agent reads the full comment through MCP, makes a scoped revision-checked
 change, and replies in the same thread. **Agents leave threads open; humans
 resolve them.** A viewer's feedback is a proposal for an owner/editor to confirm.
-If a human already resolved the thread, the agent respects that decision.
+Current MCP reads expose unresolved threads without individual message IDs.
+The adapter defers ambiguous feedback and does not reopen a resolved thread just
+to discover what it says. Claude currently reopens resolved reply events; exact
+comment reads and authorization are still needed for safe parity on this path.
 
-Both host plugins show **PROPOSED → ACCEPTED**. To accept, the owner comments
+Codex tracks **PROPOSED → ACCEPTED → EXECUTING → BUILT**. Claude starts
+execution directly when its user approves implementation. In Codex, plan
+approval and the task user's instruction to implement remain distinct. To accept, the owner comments
 `@agent I accept this plan`. Whitespace, a trailing period or exclamation mark,
 and `@agent:` are accepted; questions, quoted phrases and conditional approval
 are not. A displayed legacy `I accept plan version <version>` phrase remains
@@ -111,10 +130,31 @@ supported for existing boards. Users do not need to type a hash for new reviews.
 
 The Codex adapter retains the full digest internally and verifies that current
 content still matches the submitted baseline. It records an owner acceptance
-receipt and stops that review. Pending feedback or a reconciliation gap blocks
-acceptance. Acceptance does not authorize implementation.
+receipt and keeps listening. Pending feedback or a reconciliation gap blocks
+acceptance. Acceptance alone does not authorize implementation. An explicit
+instruction from the user in the assigned Codex task permits implementation;
+`review-plan` records that evidence before setting EXECUTING. Board comments
+cannot grant permission to run shell commands or edit the repository.
 
-The server comment timestamp allows up to five seconds of clock skew. The local
+Every new canvas includes a Decision log. During authorized implementation,
+append choices and deviations as they happen, with the reason and rejected
+alternative. The **as-built** skill reconciles the exact Git range against plan
+items and the log, creates a dated record with reviewer guidance and runtime
+flow when relevant, and distinguishes recorded reasons from inference. A partial
+record leaves the phase unchanged; a verified complete record can advance an
+executing plan to BUILT. Existing records remain unchanged on subsequent runs.
+Listening continues through all phases until the user stops it.
+
+The accepted digest remains an approval receipt as the current canvas digest
+advances through log entries, checklist progress and as-built records. Changes
+after acceptance but before execution return the plan to PROPOSED and require
+fresh approval. Approval history is retained. The local lifecycle commands are
+trusted task bookkeeping, never commands supplied by canvas collaborators.
+
+Acceptance requires the matched human message's actual creation timestamp
+from MCP; the inbox event timestamp records later emission and cannot substitute
+for it. Missing or invalid comment time blocks acceptance. The human timestamp
+allows up to five seconds of server/client clock skew. The local
 event-receipt timestamp must be at or after the local submitted-baseline timestamp,
 with no tolerance, so feedback already received before a revision cannot accept
 that revision. Larger server/client discrepancies still defer acceptance for
@@ -128,6 +168,11 @@ restart; the SessionStart hook repairs its authorized receiver and exposes its
 pending/recovery state. The adapter never starts a second model process or
 creates a replacement task. It does not install a login service or wake a
 sleeping computer.
+
+On macOS, worker ownership needs OS process inspection. If the command sandbox
+blocks that inspection, run the adapter launch/recovery command through the
+host's normal approval mechanism outside that sandbox. Do not weaken worker
+identity checks or bypass hook trust to work around it.
 
 ## Recovery and limits
 
@@ -154,8 +199,12 @@ sleeping computer.
   The adapter prevents automatic repeated effects after uncertainty but cannot
   promise exactly-once board writes. Cross-host ownership is also not globally
   fenced by the present server. Use one assigned agent per board.
-- Resuming an accepted plan is a new review decision. This version refuses
-  implicit rebinding or transfer to another task.
+- Legacy 0.2 bindings whose listener state is already terminal `accepted` stay
+  terminal after upgrade. Updating the package does not resurrect their keys or
+  transfer them to another task. Reconcile and finish their exact cleanup first.
+- New accepted, executing and built phases keep the listener active. SessionStart
+  on startup, resume or compaction restores phase and recovery context for the
+  same root task. It does not turn a plan approval into implementation permission.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for contracts and release gates.
 
@@ -188,7 +237,7 @@ From the repository root, with Node 24 or newer:
 
 ```sh
 node --test plugins/unpaged-codex/runtime/*.test.mjs
-node --test plugins/unpaged/monitors/listen-core.test.mjs
+node --test plugins/unpaged/monitors/*.test.mjs
 node --test scripts/build-codex-plugin.test.mjs
 ```
 
@@ -201,8 +250,9 @@ hook pickup or a live comment for this revised build.
 
 The package test builds a real artifact with a synthetic connection ID and
 executes its CLI, including a symlink-path invocation. Runtime tests cover cache removal, PID
-reuse, acceptance text normalization and bounded clock skew. It also verifies no direct
-MCP configuration remains in the registered artifact, both skill paths exist,
+reuse, acceptance text normalization, bounded clock skew, lifecycle transitions,
+legacy terminal bindings and approval history. It also verifies no direct
+MCP configuration remains in the registered artifact, all three skill paths exist,
 source files remain unchanged, existing outputs are protected, and source symlinks
 cannot pull external files into the package. CI is configured to run these checks with the
 existing listener and adapter tests on Linux and macOS.

@@ -28,7 +28,7 @@ test("registered artifact has one connection and executes the packaged helper wi
   assert.deepEqual(JSON.parse(await readFile(join(output, ".app.json"), "utf8")), { apps: { unpaged: { id: connectionId } } });
   await assert.rejects(lstat(join(output, ".mcp.json")), { code: "ENOENT" });
   await assert.rejects(lstat(join(output, "runtime/cli.test.mjs")), { code: "ENOENT" });
-  for (const name of ["visual-plan", "review-plan"]) {
+  for (const name of ["visual-plan", "review-plan", "as-built"]) {
     assert.ok((await readFile(join(output, "skills", name, "SKILL.md"), "utf8")).startsWith("---\n"));
   }
   const info = spawnSync(process.execPath, [join(output, "runtime/cli.mjs"), "info", "--data", join(root, "state")], {

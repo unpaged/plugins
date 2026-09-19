@@ -29,12 +29,13 @@ jobs:
             echo "ok $f"
           done
 
-      - name: Marketplace lists every plugin directory
+      - name: Claude marketplace lists every Claude plugin directory
         run: |
           node -e '
             const fs = require("fs");
             const listed = new Set(JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8")).plugins.map(p => p.source.replace(/^\.\//, "")));
-            const present = fs.readdirSync("plugins").map(d => "plugins/" + d);
+            const present = fs.readdirSync("plugins").map(d => "plugins/" + d)
+              .filter(d => fs.existsSync(d + "/.claude-plugin/plugin.json"));
             const missing = present.filter(d => !listed.has(d));
             if (missing.length) { console.error("not listed in marketplace.json:", missing.join(", ")); process.exit(1); }
             for (const d of listed) {

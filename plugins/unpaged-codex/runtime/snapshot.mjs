@@ -10,7 +10,7 @@ const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
 const files = [
   "runtime/cli.mjs", "runtime/process-identity.mjs", "runtime/protocol.mjs", "runtime/snapshot.mjs",
   "runtime/store.mjs", "runtime/worker.mjs",
-  "skills/review-plan/SKILL.md", "skills/visual-plan/SKILL.md"
+  "skills/review-plan/SKILL.md", "skills/visual-plan/SKILL.md", "skills/as-built/SKILL.md"
 ];
 
 async function directory(path) {

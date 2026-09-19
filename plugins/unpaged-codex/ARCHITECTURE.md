@@ -1,10 +1,11 @@
 # Codex review adapter
 
-Base: `b680a00a440866af268c9f6fb35d5c05416ff3d9` in the Unpaged plugin repository.
+Claude parity baseline: `34ebef185dcca4230b7690bfca791904624c6e41` in the
+Unpaged plugin repository, inspected on 2026-09-19.
 The implementation lives in a separate `plugins/unpaged-codex` package.
-The remote Unpaged server is unchanged. Both host packages use the same review
-policy: PROPOSED → ACCEPTED, owner acceptance, human thread resolution, and
-separate authorization to implement.
+The remote Unpaged server and current Claude package are unchanged. The Codex
+workflow adds Decision logs and as-built records to the durable review adapter.
+Canvas approval is separate from the task user's permission to implement.
 
 ## Ownership and data flow
 
@@ -51,8 +52,10 @@ recovery carry evidence; they do not erase history or silently retry effects.
 
 ## Acceptance
 
-The full content hash is the internal baseline. The visible status is PROPOSED
-or ACCEPTED in both plugins, and the owner comments `@agent I accept this plan`.
+The full content hash is the internal baseline. Codex displays PROPOSED,
+ACCEPTED, EXECUTING or BUILT in a separate status element. The owner can approve
+on the canvas with `@agent I accept this plan`. The assigned task user can also
+approve through chat; the adapter stores bounded evidence for that decision.
 The parser allows whitespace, line breaks, an optional `@agent:` prefix, and
 trailing periods/exclamation marks. It recognizes a standalone statement, not a
 substring: quotation, questions, negation and conditions are not acceptance.
@@ -67,7 +70,10 @@ and explicitly rebaseline after a human review rather than silently accepting it
 
 Acceptance records the owner event and full digest after a fresh board read.
 Unknown pending work, source drift or an unresolved reconciliation gap blocks it.
-The comment timestamp may precede the local baseline timestamp by at most five
+The caller passes `humanCreatedAt` from the matched full MCP message; missing or
+invalid values refuse acceptance. Inbox `createdAt` is emission time, so a delayed
+trigger cannot prove when its human approval was written. The actual comment
+timestamp may precede the local baseline timestamp by at most five
 seconds to tolerate small server/client clock differences. Larger skew still
 requires verification; this is not a server-timestamp guarantee. The content
 and ownership checks remain mandatory within that tolerance. Independently,
@@ -75,11 +81,58 @@ and ownership checks remain mandatory within that tolerance. Independently,
 tolerance. Both timestamps use the local clock, so an event already received
 before a revision cannot become acceptance of the newer baseline.
 
-The Claude command retains its submitted content baseline and acceptance evidence
-in session context; it does not claim Codex's durable acceptance receipt. Its
-ExitPlanMode hook only projects a previously verified explicit acceptance onto
-an unchanged board. Plan-mode exit alone neither accepts the plan nor authorizes
-implementation. Neither plugin resolves or reopens human comment threads.
+## Plan and listener lifecycle
+
+Listener state and plan phase are separate. A new binding stays `active` through
+`proposed → accepted → executing → built`; only an explicit stop, revocation,
+takeover or protocol rejection ends its receiver. `accept` records an owner
+comment; `approve` records an explicit task-user plan approval. Both require a
+fresh matching digest, no pending events and no reconciliation gap. The canvas
+acceptance event itself must finish its reply and receipt before later work.
+
+`execute` requires task-user implementation authorization, an accepted current
+baseline and no pending/reconciliation work. The skill records the user's
+instruction as evidence. No local flag can authenticate prose by itself: this
+is trusted agent bookkeeping, and untrusted canvas comments never invoke it.
+There is no invented Codex ExitPlanMode hook. Approval is handled explicitly in
+the same task, while SessionStart restores its binding and phase after resume
+or compaction. Claude's existing ExitPlanMode hook remains unchanged.
+
+All canvas content except the designated status element stays in the digest,
+including the Decision log and as-built records. `checkpoint` records verified
+canvas progress during executing/built. `submit` refreshes a task-authored
+proposal baseline before execution and requires fresh approval, retaining earlier
+receipts even if the content hash is unchanged. Approval receipts retain the baseline
+that was accepted; a changing current digest does not retroactively approve new
+content. A content change while accepted returns the phase to proposed, and
+reapproval appends history. During implementation, the task's existing authority
+still determines which changes are allowed; the phase is not a grant of scope.
+
+The as-built skill reads the exact Git range and plan, then creates a dated
+record. Reasons are identified as recorded, reconstructed, or not recorded.
+Partial records checkpoint progress without advancing the phase. `built` records
+a verified complete record node and zero open tasks only from executing; the
+agent must verify those facts from the canvas and code before invoking it.
+Existing unbound or non-executing plans may receive factual records without
+fabricating implementation authorization or changing their phase.
+
+A 0.2 binding already in terminal `accepted` state stays terminal. Its pending
+cleanup and receipts survive migration; neither migration nor SessionStart
+restarts that listener or mints a replacement key. A live old retained runtime
+must be deliberately quiesced and reconciled before the new helper opens its
+ledger. Before schema changes, migration rejects live or unverifiable legacy
+workers (`legacy_worker_upgrade_required`) and every unfinished legacy event
+(`legacy_events_upgrade_required`). The original helper must establish the old
+receipts first; migration never acknowledges or drops work on the user's behalf.
+This guard applies to SessionStart too, which otherwise opens the store before
+it can check worker ownership. Retaining code is not an automatic lifecycle migration.
+
+The current server exposes unresolved threads without individual message IDs.
+An event has a comment ID and historical author role, but the agent cannot always
+join that identity to the full read. Ambiguous feedback must defer. Claude
+currently reopens resolved reply threads; Codex does not do so without an exact
+authorized read. This remains an explicit backend parity gap, not a reason to
+attribute all messages in a thread to one owner's event.
 
 ## Runtime contracts and limits
 
@@ -116,7 +169,7 @@ That is an explicit release gate, not an implicit expansion of this plugin patch
 
 New receivers run from a retained, content-addressed copy under
 `<data-directory>/runtimes/<hash>/`, containing the runtime dependency closure
-and both skills. Queue prompts reference its CLI and review skill. Copies are
+and all three skills. Queue prompts reference its CLI and review skill. Copies are
 published atomically, checked before reuse, and never automatically removed;
 plugin cache replacement cannot invalidate a retained queued operation. Tests
 remove the source cache and continue from the retained copy.
@@ -130,7 +183,10 @@ pending feedback still needs an installed-package trial.
 Automated tests must cover duplicate frames, fixed task routing, write-before-send,
 worker identity/PID reuse, cache deletion, two review rounds, reconstructed
 database state, uncertain enqueue/effects, late queue receipts, owner-only version acceptance, pending/gap
-acceptance rejection, acceptance text and clock skew, revocation/takeover, and
+acceptance rejection, acceptance text, actual human timestamps and delayed triggers, bounded clock
+skew, nonterminal acceptance,
+phase transitions, immutable approval history, legacy terminal migration,
+compaction context, revocation/takeover, and
 secret-free status/prompts.
 
 Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
@@ -141,10 +197,12 @@ Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
 binding context. These observations validate those pilot host assumptions, not
 the complete revised package.
 
-Keep this PR in draft until the Claude package is public and tagged and this
-revised build has a fresh native installation, trusted hook pickup and a live
-comment waking the assigned idle task. Public release also requires the remaining
+Keep this PR in draft until this revised build has a fresh native installation,
+trusted hook pickup and a live comment waking the assigned idle task. Current
+Claude source parity does not prove Codex installed-host parity. Public release also requires the remaining
 installed lifecycle trials. Those trials include a live comment after turn completion, another later comment, a receiver restart, a Codex restart
-and task reopen, and explicit acceptance stopping only the assigned review.
+and task reopen, acceptance with continued feedback, chat-authorized execution, Decision log
+updates, partial and complete as-built records, and an explicit stop cleaning up
+only the assigned review.
 Tests with synthetic clocks establish state behavior across time, not actual
 hours of wall-clock uptime or operating-system sleep recovery.
