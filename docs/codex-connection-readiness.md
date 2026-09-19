@@ -1,14 +1,23 @@
 # Codex connection and visual-plan readiness
 
-Maintainer runbook, refreshed on September 19, 2026 against current Claude
-plugin source, local host metadata/help, and official OpenAI documentation.
-This documentation-only change defines acceptance criteria and trial preparation.
-It does not establish that installation, automatic refresh, native reconnect,
-or the installed visual-plan loop has passed. Record those outcomes separately
-below; no live trial was run for this refresh.
+Maintainer runbook, refreshed on September 19, 2026 after the Codex adapter and
+setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
+documents the observed 0.3.0 plan lifecycle and 0.3.1 setup, update and native
+recovery results. The runtime is on `main`; this runbook records release
+criteria and evidence, not another implementation. For current setup and use,
+follow the [Codex package README](../plugins/unpaged-codex/README.md).
+
+The local registered-connection pilot passed real comment review, explicit
+approval and implementation, partial/complete as-built records, native restart
+recovery, and a fresh post-recovery comment. This does not establish clean-profile
+installation/sign-in, OAuth expiry/revocation recovery, public availability,
+or unrestricted comment-identity and exactly-once guarantees. The matrices below
+keep those remaining gates visible; no new live trial is implied by this doc update.
 
 The customer requirement is: install Unpaged through the native interface,
-sign in, and continue working. Access refresh should require no intervention.
+sign in, review the startup-hook approval once, and continue working. A deliberate
+hook-definition change requires renewed native approval. Ordinary unchanged-hook
+updates should retain it. Access refresh should require no intervention.
 When another sign-in is necessary, the host must show an actionable native
 prompt and preserve the task. A working read, local package, terminal login,
 or server-only test is insufficient evidence for that experience.
@@ -26,6 +35,21 @@ For an approved, published listing available to the intended customer:
 1. Open the native Plugins directory and select the verified Unpaged listing.
 2. Install it and complete its requested service sign-in.
 3. Start a fresh task and verify the required Unpaged tools before doing work.
+
+For a listening visual plan, the current installed helper checks native setup
+before a listener key is created; `arm` repeats the check before opening state.
+When trust is missing or changed, give the user one action: **Settings → Hooks →
+From Plugins → Unpaged for Codex → Trust** on the hook row under **SessionStart**;
+**⌘,** opens Settings on macOS. Keep the hook enabled, then recheck. Other setup
+failures have their own action; a folder-wide configuration warning is not a
+request to trust Unpaged again. Do not make log inspection, manual ledger repair,
+or repeated restarts part of customer setup. Render-only canvases skip this gate.
+See the [implemented setup check](../plugins/unpaged-codex/runtime/setup.mjs).
+
+Setup readiness establishes persisted hook configuration, not a running listener
+or proven recovery. Reopen the same existing task after an app restart; the
+trusted SessionStart hook restores only that task's authorized reviews. Complete
+feedback reconciliation before proceeding. Do not create a replacement task or key.
 
 OpenAI documents this installation sequence for supported Codex surfaces. The
 IDE extension does not support plugins. API-key-authenticated Codex accounts
@@ -80,6 +104,13 @@ a repository does not grant those permissions. A private workspace import does
 not establish public customer availability.
 See [workspace plugin management](https://learn.chatgpt.com/docs/enterprise/plugin-management).
 
+Keep distribution-specific identifiers separate. The tested local builder takes
+the registered `plugin_asdk_app_` identifier supported by that host flow. Current
+workspace-import guidance instead requires an app ID such as `asdk_app_` in
+`.app.json` and explicitly excludes `plugin_...` IDs. Do not assume the pilot
+artifact is already a validated workspace-import artifact; verify that route
+and its mapping independently before distribution.
+
 ## Detect failure and preserve work
 
 The following are required behaviors to verify, not promises inferred from
@@ -119,6 +150,10 @@ credentials. Do not copy production credentials, review ledgers, or listener
 keys. A temporary CLI configuration alone does not isolate desktop plugin
 caches or account state; establish those boundaries before using it as a trial.
 The user completes native account sign-in and any account/workspace approval.
+The September 19 visual-plan pilot reused an existing authenticated connection
+and a disposable canvas/repository in the existing desktop profile. It does not
+meet this clean-profile authentication boundary. Its results apply only to the
+workflow and recovery cases actually observed; no authentication faults were injected.
 
 Before proposing an update on a profile that has visual review work, inspect
 the running receiver's executable, imported runtime files, and paths referenced
@@ -136,8 +171,11 @@ intended mutation an identifiable expected result.
 ## Connection acceptance matrix
 
 Each row needs two results: protocol/packaged-server evidence and installed-host
-evidence. A successful server check cannot fill the host column. All rows begin
-**NOT RUN** until an evidence record identifies their observed result.
+evidence. A successful server check cannot fill the host column. The controlled
+authentication cases below remain **NOT RUN** in the September 19 pilot. The
+installed-package update preserved access to the required tools, but did not test
+published metadata refresh or a changed tool schema. Worker restart recovery is
+not an OAuth-expiry result.
 
 | Trial | Controlled setup | Required installed-host observation |
 | --- | --- | --- |
@@ -168,25 +206,27 @@ still need a new version, review, and publication. Check the observed catalog;
 restarting is not evidence that an update arrived. See [connection metadata testing](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 and [published metadata versions](https://developers.openai.com/plugins/deploy/submission#how-published-mcp-metadata-versions-work).
 
-## Current host evidence and its limits
+## Recorded host evidence and its limits
 
-Read-only checks on September 19, 2026 found:
+The September 19 pilot recorded this host. These are dated observations, not a
+claim about all supported customer environments:
 
 | Component | Observed fact | Scope of evidence |
 | --- | --- | --- |
 | macOS | 27.0, build 26A428 | Local `sw_vers` output |
-| Desktop app | ChatGPT.app 26.915.31945, build 9922 | App bundle metadata, not an installed-plugin trial |
-| Desktop-bundled CLI | `/Applications/ChatGPT.app/Contents/Resources/codex`, version `0.155.0-alpha.9.2` | Its `queue --help` describes `--thread` and `--message` |
+| Desktop app | ChatGPT.app 26.915.31945, build 9922 | Local installation and real restart/reopen observed on this host |
+| Desktop-bundled CLI | `/Applications/ChatGPT.app/Contents/Resources/codex`, version `0.155.0-alpha.9.2` | Queue capability checked; real same-task delivery recorded separately |
 | CLI on `PATH` | `codex-cli 0.144.1` | Its `queue --help` returns generic help with no queue command |
-| Node on `PATH` | `v24.15.0` | Local runtime version, not receiver operation |
+| Node | `v24.15.0` | Runtime tests and the installed recovered receiver used this version |
+| Installed Codex package | 0.3.0, then `0.3.1+codex.20260919152134` | Lifecycle on 0.3.0; setup/update/restart/post-recovery comment on 0.3.1 |
 
 Probe the executable the receiver will actually use. A zero exit code from
 `queue --help` is not enough: check that the output describes the queue command
 and its required arguments. Pin and record that executable for the trial; do
 not infer capability from the desktop app version or choose an older CLI on
-`PATH`. These observations establish capability discovery only. They do not
-prove that queued work starts, targets the right task, survives an idle period,
-or resumes after a restart.
+`PATH`. Help/version output alone establishes capability discovery. The
+[trial record](codex-installed-trial-2026-09-19.md) separately records actual
+idle wakeups, native restart recovery, and a post-recovery reply.
 
 Official guidance supports plugin hooks but requires review and trust of the
 current hook definition. Installing or enabling the plugin alone does not arm
@@ -206,7 +246,8 @@ The Claude baseline is the plugin at repository commit
 plan rendering, comment-driven review, implementation tracking, and the final
 record. A receive-only WebSocket or successful MCP call covers only part of it.
 The following are Codex acceptance requirements, not claims that Claude and
-Codex have identical internal states or that an installed pilot has passed.
+Codex have identical internal states. Observed pilot results are recorded in
+the matrix below; the Claude source baseline remains unchanged by PRs #5 and #21.
 
 | Plan phase | Required evidence and behavior |
 | --- | --- |
@@ -270,9 +311,10 @@ applying feedback. Match exact
 comment identity; do not substitute the last human message or text matching.
 The read needs current thread resolution, comment deletion/edit state, full
 comment content, reliable author identity/current authority, and anchor context.
-If the active catalog cannot supply that evidence, leave the event blocked for
-reconciliation and report the missing read capability. Do not apply the preview
-or acknowledge the event as completed merely because the thread was found.
+If the active catalog cannot supply that evidence, full-release acceptance
+remains blocked. Do not apply the preview or treat finding a thread as proof of
+identity. The experimental handler follows the narrower fallback and skip
+rules below; its local completion state is not proof of the missing contract.
 
 An experimental pilot may use a single-human-message heuristic for an open
 thread with matching document, node, and thread. It does not prove exact comment
@@ -285,42 +327,53 @@ full-release exact-read gate.
 
 Resolved threads are absent from `comments_list_unresolved`. Do not reopen a
 thread just to inspect it: that changes human state before identity and authority
-are checked. Leave that event blocked until a safe read of the resolved thread
-is available, or the user explicitly reopens it and the remaining identity checks
-can pass. The current missing read contract is an external Unpaged API gate;
-local receiver tests and plugin instructions cannot close it. Agents ordinarily
+are checked. The current pilot leaves the thread untouched and records the event
+as skipped with this evidence limit, as specified by [review-plan](../plugins/unpaged-codex/skills/review-plan/SKILL.md).
+The full-release gate stays blocked until a safe exact read is available; a
+skipped receipt is not an applied-feedback result. If a human explicitly reopens
+the thread, evaluate any new routed feedback using the same identity rules.
+The missing read contract is an external Unpaged API gate; local receiver tests
+and plugin instructions cannot close it. Agents ordinarily
 reply and leave resolution to humans. Viewer feedback may receive an explanation
 or proposal but cannot cause canvas edits or accept a plan.
 
 ## Installed visual-plan acceptance matrix
 
-All rows are **NOT RUN** for this refresh. Exercise the installed candidate in an
-isolated profile and retain separate source-test, packaged-runtime, and host
-results. Do not fill these rows with a unit-test count or a historical pilot.
+Results below are from the [September 19 installed trial](codex-installed-trial-2026-09-19.md).
+**PASS** applies only to the stated version and scenario. **PARTIAL** means an
+observed subset; **BLOCKED** identifies a missing contract; **NOT RUN** means no
+live evidence. Source tests do not fill an installed-host result.
 
-| Trial | Required installed-host observation |
-| --- | --- |
-| Render and arm | Correct folder, readable plan and Decision log, one task/host/document binding, trusted hook loaded, receiver attached without exposing keys |
-| Idle comment and later rounds | After the agent turn ends, an authorized exact comment wakes that same task; re-read, revision-safe edit, reply, and leave the thread open; another review round works |
-| Busy task and two canvases | Feedback is serialized with current work; each document wakes only its bound task; duplicate delivery produces no duplicate edit/reply |
-| Identity and authorization | Edited/deleted messages, repeated text, viewer feedback, role changes, and mismatched comment IDs cannot cause unauthorized changes or approval |
-| Resolved-thread feedback | Current comment identity, authority, and resolution are verified without reopening merely to read; missing capability is reported as BLOCKED |
-| Approve and execute | Exact-version approval is retained; authorized work changes the phase to EXECUTING; feedback still arrives after acceptance; an edited proposal cannot reuse old approval |
-| Decision log | A real implementation choice produces a contemporaneous row with its reason and rejected alternative |
-| Partial and complete as-built | Inspected changes produce the nested record and reviewer guide; partial execution preserves phase, pre-execution records resubmit the changed baseline, completed execution reconciliation stamps BUILT; rerun preserves prior records |
-| Receiver/host restart and task reopen | The same authorized binding resumes safely; unrelated tasks and old terminal reviews do not reactivate |
-| Lost queue or mutation acknowledgement | Unknown delivery/effect remains uncertain until reconciled; no automatic duplicate enqueue, canvas edit, or reply |
-| Stop, revoke, and upgrade | Stop prevents new admission; revoke result is confirmed; plugin/cache changes preserve active runtime dependencies and never silently transfer ownership |
+| Trial | Result and installed-host evidence | Remaining scope |
+| --- | --- | --- |
+| Render and arm | PASS on 0.3.0: readable canvas in Visual plans, Decision log, one assigned task/document, active receiver | New 0.3.1 creation after its pre-arm setup gate has not been rerun live |
+| Setup approval before listening | PARTIAL on 0.3.1: doctor detected modified approval, user trusted it in native settings, doctor became ready | Blocked-arm/no-ledger-mutation behavior passed automated tests; complete first-customer setup remains NOT RUN |
+| Idle comments and later rounds | PASS on 0.3.0: two real idle wakeups revised the requested plan elements, replied once each and left threads open | Uses the documented single-human-message heuristic, not immutable comment identity |
+| Feedback during execution | PARTIAL on 0.3.0: event arrived during Phase 2, was handled there; delayed queued notification caused no second edit/reply | Full two-canvas concurrency and forced duplicate-delivery trials remain NOT RUN |
+| Identity and authorization | BLOCKED for full acceptance: current MCP omits per-message IDs/current author roles | Edited/deleted messages, role changes and ambiguity require exact authoritative reads; adversarial live matrix NOT RUN |
+| Resolved-thread feedback | BLOCKED for full acceptance: current tool reads unresolved threads only | Exact resolved/deleted-state read needed; do not reopen solely to inspect |
+| Approve and execute | PASS on 0.3.0 for real owner acceptance, continued feedback and separately authorized implementation | Changed-after-acceptance and pre-execution record resubmission remain NOT RUN live |
+| Decision log | PASS on 0.3.0: three contemporaneous choices with reasons/rejected alternatives | No broader project integration claimed |
+| Partial and complete as-built | PASS on 0.3.0: partial record preserved while a dated complete record and reviewer guide were added; four tasks done, zero open, BUILT | Other repeat-run and correction cases remain NOT RUN live |
+| Native restart/reopen | PASS on 0.3.1 after trust: SessionStart restored the same receiver before model commands; task/key/BUILT/digests/five receipts preserved | First untrusted-hook attempt failed; no automatic restoration of closed tasks is claimed |
+| Reconciliation and post-recovery comment | PASS on 0.3.1: reconciliation completed, a new real comment woke the idle task and received one reply; six events completed | Unresolved-only reads cannot prove complete unseen feedback history or exactly-once effects |
+| Ordinary installed update | PASS for a 0.3.1 update with unchanged hook and no unfinished events: trust and ledger contents preserved | Update with pending work and clean-profile upgrade remain NOT RUN live |
+| Legacy ledger migration | PARTIAL: controlled migration to 0.3.0 preserved three existing bindings and their completed receipts after verified old workers were paused | No unfinished legacy events were present; migration with unfinished work is not demonstrated |
+| Lost queue or mutation acknowledgement | NOT RUN live; uncertainty states covered by local fixtures | Fault-injected host evidence still needed; no blind replay |
+| Stop and exact-key revocation | NOT RUN live for this completed trial; receiver deliberately remains listening | Verify stop/revoke/readback without affecting other reviews when cleanup is authorized |
 
-An installed parity pass requires every applicable row to pass. A precisely
-reproduced host or API limitation is a useful BLOCKED result, not a pass.
+The pilot demonstrates a useful installed workflow, not full customer-release
+acceptance. An installed parity pass requires every applicable scenario and
+the connection/publication gates to be satisfied. Preserve the version and
+scenario boundary when reporting a PASS; do not combine partial rows into a
+blanket recovery or authorization guarantee.
 
 ## Evidence record and completion
 
 Create a redacted record per trial with:
 
 ```text
-Trial / timestamp / PASS, FAIL, BLOCKED, or NOT RUN:
+Trial / timestamp / PASS, PARTIAL, FAIL, BLOCKED, or NOT RUN:
 OS, host app version/build, bundled CLI version:
 Account authentication type, plan, workspace policy (no identity):
 Connection provenance and installed plugin version:
