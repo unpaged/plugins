@@ -1,0 +1,21 @@
+{
+  "name": "unpaged-codex",
+  "version": "0.3.0",
+  "description": "Create and review visual Unpaged plans, record implementation decisions, and compile as-built canvases in the same Codex task.",
+  "author": {
+    "name": "Unpaged",
+    "url": "https://unpaged.io"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Unpaged for Codex",
+    "shortDescription": "Visual plans, review, and as-built records.",
+    "longDescription": "Create a visual plan, handle anchored feedback in its assigned Codex task, record decisions during authorized implementation, and compile an as-built canvas. Includes durable local delivery state and visible recovery limits.",
+    "developerName": "Unpaged",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["Turn our plan into an Unpaged visual plan and listen for review comments.", "Review the new feedback on our Unpaged plan.", "Create an as-built record for our implemented plan."],
+    "websiteURL": "https://unpaged.io"
+  },
+  "mcpServers": "./.mcp.json"
+}

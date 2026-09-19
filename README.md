@@ -11,6 +11,13 @@ Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where hu
 /plugin install unpaged@unpaged
 ```
 
+## Codex preview
+
+The experimental [Unpaged for Codex](plugins/unpaged-codex/README.md) package
+adds visual plans, same-task comment review, implementation Decision logs, and
+as-built canvases. Its installation and live recovery trials remain release
+gates; the Claude installation commands above do not install the Codex package.
+
 ## Plugins
 
 | Plugin | What it does |
