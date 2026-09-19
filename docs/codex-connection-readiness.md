@@ -238,8 +238,10 @@ reasons later. The as-built record must include:
   only when a runtime flow changed.
 - A dated nested record with the inspected base/head. A repeat run adds a new
   record; it does not silently overwrite an earlier one. Owner/editor-requested
-  corrections remain attributable. A partial record ticks completed work but
-  leaves the plan phase/stamp unchanged until nothing remains open.
+  corrections remain attributable. A partial record during execution ticks
+  completed work and leaves the phase/stamp unchanged. A record added to a
+  proposed or accepted binding changes its content baseline: submit it as
+  PROPOSED and require fresh approval, retaining earlier acceptance receipts.
 
 Do not let an old acceptance receipt approve a changed proposal. Re-read after
 a revision conflict and obtain approval for a revised plan when needed. Keeping
@@ -298,7 +300,7 @@ results. Do not fill these rows with a unit-test count or a historical pilot.
 | Resolved-thread feedback | Current comment identity, authority, and resolution are verified without reopening merely to read; missing capability is reported as BLOCKED |
 | Approve and execute | Exact-version approval is retained; authorized work changes the phase to EXECUTING; feedback still arrives after acceptance; an edited proposal cannot reuse old approval |
 | Decision log | A real implementation choice produces a contemporaneous row with its reason and rejected alternative |
-| Partial and complete as-built | Inspected changes produce the nested record and reviewer guide; partial work preserves phase, completed reconciliation stamps BUILT; rerun preserves prior records |
+| Partial and complete as-built | Inspected changes produce the nested record and reviewer guide; partial execution preserves phase, pre-execution records resubmit the changed baseline, completed execution reconciliation stamps BUILT; rerun preserves prior records |
 | Receiver/host restart and task reopen | The same authorized binding resumes safely; unrelated tasks and old terminal reviews do not reactivate |
 | Lost queue or mutation acknowledgement | Unknown delivery/effect remains uncertain until reconciled; no automatic duplicate enqueue, canvas edit, or reply |
 | Stop, revoke, and upgrade | Stop prevents new admission; revoke result is confirmed; plugin/cache changes preserve active runtime dependencies and never silently transfer ownership |
