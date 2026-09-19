@@ -65,9 +65,21 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
+| Repository marketplace | A catalog from which users install the packaged Codex plugin | Public-directory listing, correct sign-in, or successful clean-profile setup |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
 | Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json` | A published connection or registered-connector recovery behavior |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
+
+Repository distribution is separate from OpenAI's public directory. Codex can
+add a GitHub marketplace and install its listed plugins without a public-directory
+listing. This repository currently lists only the Claude package in
+`.claude-plugin/marketplace.json`; the Codex package has no marketplace entry.
+Before publishing a runnable customer installation recipe, add a Codex catalog
+entry and verify installation, service sign-in and hook approval on a clean
+profile. The source Codex package already bundles direct MCP configuration;
+that route does not require customers to build a personal registered artifact
+or supply a registration ID. Its complete native sign-in flow remains untested.
+See [repository marketplace setup](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli).
 
 For a registered local pilot, its `.app.json` must refer to the intended
 registration and its manifest must reference that file. Exclude direct MCP
@@ -82,7 +94,8 @@ See [plugin packaging](https://developers.openai.com/plugins/build/plugins).
 
 ## Registration, ownership, and publication gates
 
-Before promising a public customer flow, the release owner must verify:
+For distribution through OpenAI's public Plugins Directory, the release owner
+must verify:
 
 - The submission is owned by the intended OpenAI organization; the submitter has
   Apps Management write access and a verified publisher identity.
@@ -224,9 +237,11 @@ Probe the executable the receiver will actually use. A zero exit code from
 `queue --help` is not enough: check that the output describes the queue command
 and its required arguments. Pin and record that executable for the trial; do
 not infer capability from the desktop app version or choose an older CLI on
-`PATH`. Help/version output alone establishes capability discovery. The
-[trial record](codex-installed-trial-2026-09-19.md) separately records actual
-idle wakeups, native restart recovery, and a post-recovery reply.
+`PATH`. Verified help/version output establishes capability discovery only; it
+does not prove that queued work starts, targets the right task, survives an idle
+period, or resumes after a restart. The [trial record](codex-installed-trial-2026-09-19.md)
+separately records actual idle wakeups, native restart recovery, and a
+post-recovery reply.
 
 Official guidance supports plugin hooks but requires review and trust of the
 current hook definition. Installing or enabling the plugin alone does not arm
@@ -355,7 +370,7 @@ live evidence. Source tests do not fill an installed-host result.
 | Approve and execute | PASS on 0.3.0 for real owner acceptance, continued feedback and separately authorized implementation | Changed-after-acceptance and pre-execution record resubmission remain NOT RUN live |
 | Decision log | PASS on 0.3.0: three contemporaneous choices with reasons/rejected alternatives | No broader project integration claimed |
 | Partial and complete as-built | PASS on 0.3.0: partial record preserved while a dated complete record and reviewer guide were added; four tasks done, zero open, BUILT | Other repeat-run and correction cases remain NOT RUN live |
-| Native restart/reopen | PASS on 0.3.1 after trust: SessionStart restored the same receiver before model commands; task/key/BUILT/digests/five receipts preserved | First untrusted-hook attempt failed; no automatic restoration of closed tasks is claimed |
+| Native restart/reopen | PASS on 0.3.1 after trust: SessionStart restored the same receiver before model commands; task/key/BUILT/digests/five receipts preserved | The first untrusted-hook attempt failed on 0.3.0; no automatic restoration of closed tasks is claimed |
 | Reconciliation and post-recovery comment | PASS on 0.3.1: reconciliation completed, a new real comment woke the idle task and received one reply; six events completed | Unresolved-only reads cannot prove complete unseen feedback history or exactly-once effects |
 | Ordinary installed update | PASS for a 0.3.1 update with unchanged hook and no unfinished events: trust and ledger contents preserved | Update with pending work and clean-profile upgrade remain NOT RUN live |
 | Legacy ledger migration | PARTIAL: controlled migration to 0.3.0 preserved three existing bindings and their completed receipts after verified old workers were paused | No unfinished legacy events were present; migration with unfinished work is not demonstrated |
@@ -364,9 +379,9 @@ live evidence. Source tests do not fill an installed-host result.
 
 The pilot demonstrates a useful installed workflow, not full customer-release
 acceptance. An installed parity pass requires every applicable scenario and
-the connection/publication gates to be satisfied. Preserve the version and
-scenario boundary when reporting a PASS; do not combine partial rows into a
-blanket recovery or authorization guarantee.
+the connection and chosen distribution route's gates to be satisfied. Preserve
+the version and scenario boundary when reporting a PASS; do not combine partial
+rows into a blanket recovery or authorization guarantee.
 
 ## Evidence record and completion
 
