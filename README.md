@@ -15,8 +15,10 @@ Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where hu
 
 The experimental [Unpaged for Codex](plugins/unpaged-codex/README.md) package
 adds visual plans, same-task comment review, implementation Decision logs, and
-as-built canvases. Its installation and live recovery trials remain release
-gates; the Claude installation commands above do not install the Codex package.
+as-built canvases. A local installed trial verified the plan workflow and native
+restart recovery; [the readiness runbook](docs/codex-connection-readiness.md)
+records that evidence and the remaining customer-release gates. The Claude
+installation commands above do not install the Codex package.
 
 ## Plugins
 

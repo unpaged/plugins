@@ -206,9 +206,9 @@ remove the source cache and continue from the retained copy.
 
 This does not retroactively move an older live cache-based receiver or repair an
 already queued legacy path. Those reviews need explicit reconciliation and a
-controlled stop/migration with their old files preserved. This patch does not
-change an installed binding or run that migration. A native package update with
-pending feedback still needs an installed-package trial.
+controlled stop/migration with their old files preserved. The recorded controlled
+0.3.0 migration had no unfinished events. A native package update with pending
+feedback still needs an installed-package trial.
 
 Automated tests must cover duplicate frames, fixed task routing, write-before-send,
 worker identity/PID reuse, cache deletion, two review rounds, reconstructed
@@ -238,17 +238,23 @@ button or prove automatic recovery. For a no-manual-repair trial, never invoke
 Official [hook documentation](https://learn.chatgpt.com/docs/hooks) defines
 `${PLUGIN_ROOT}` and the SessionStart `session_id`/`source` fields. Official
 [plugin packaging](https://developers.openai.com/plugins/build/plugins) documents
-`.app.json`, `apps` and `interface`. The pilot task's shell exposed the expected
-`CODEX_THREAD_ID`, and the earlier installed package delivered native SessionStart
-binding context. These observations validate those pilot host assumptions, not
-the complete revised package.
+`.app.json`, `apps` and `interface`.
 
-Do not claim release readiness until this revised build has a fresh native installation,
-trusted hook pickup and a live comment waking the assigned idle task. Current
-Claude source parity does not prove Codex installed-host parity. Public release also requires the remaining
-installed lifecycle trials. Those trials include a live comment after turn completion, another later comment, a receiver restart, a Codex restart
-and task reopen, acceptance with continued feedback, chat-authorized execution, Decision log
-updates, partial and complete as-built records, and an explicit stop cleaning up
-only the assigned review.
+The [September 19 installed trial](../../docs/codex-installed-trial-2026-09-19.md)
+records exact versions and observations on one macOS host with an existing
+registered connection. Version 0.3.0 covered rendering, idle and busy review,
+acceptance with continued feedback, authorized implementation, Decision logs,
+and partial and complete as-built records. Version 0.3.1 preserved approval
+across an unchanged-hook update, delivered native SessionStart context and
+automatically restored that same BUILT review after a real app restart/task
+reopen, then handled a fresh human comment with one read-only reply. No manual
+listener start or wake was used for that recovery/comment trial. It was not a
+clean-profile installation or a full 0.3.1 lifecycle rerun.
+
+Release readiness still requires the [maintainer runbook's remaining gates](../../docs/codex-connection-readiness.md):
+public customer availability, clean-profile installation/sign-in, controlled
+authentication and fault recovery, an installed update with unfinished work,
+and explicit stop/revocation cleaning up only the assigned review. Exact comment
+identity, current authority and resolved-history reads remain backend gates.
 Tests with synthetic clocks establish state behavior across time, not actual
 hours of wall-clock uptime or operating-system sleep recovery.

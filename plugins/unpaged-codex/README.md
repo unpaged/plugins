@@ -62,7 +62,8 @@ approval. `arm` independently rechecks readiness before opening local state.
 `doctor` reports persisted native setup, not successful comment delivery or
 proof that the running app loaded the hook. It never runs a hook, opens the
 review ledger, or starts a receiver. Live listening and restart recovery are
-verified separately. The integration remains experimental until those trials pass.
+verified separately. The integration remains experimental; the dated evidence
+and remaining gates are described below.
 
 The checked-in source `.mcp.json` remains a direct remote-MCP configuration for
 hosts or distributions that explicitly choose that route. The registered build
@@ -266,11 +267,17 @@ node --test scripts/build-codex-plugin.test.mjs
 ```
 
 The automated tests use temporary databases and fake sockets/queue commands.
-They do not spend model tokens or write to a live board. The earlier live spike
-proved one actual board comment waking the same idle desktop task and producing
-a revision-checked edit and open-thread reply. An earlier installed package also
-delivered native SessionStart context for its existing binding. Neither establishes
-hook pickup or a live comment for this revised build.
+They do not spend model tokens or write to a live board.
+
+The [September 19 installed trial](../../docs/codex-installed-trial-2026-09-19.md)
+records a macOS pilot using an existing registered connection. Version 0.3.0
+demonstrated rendering, repeated and busy comment review, acceptance with
+continued feedback, authorized implementation, Decision logs, and partial and
+complete as-built records. Version 0.3.1 retained native approval across an
+unchanged-hook update, automatically restored the same BUILT review after an
+app restart and task reopen, and handled a fresh comment with one read-only
+reply. This was neither a clean-profile installation/sign-in trial nor a full
+0.3.1 rerun of the earlier lifecycle.
 
 The package test builds a real artifact with a synthetic connection ID and
 executes its CLI, including a symlink-path invocation. Runtime tests cover cache removal, PID
@@ -283,6 +290,7 @@ existing listener and adapter tests on Linux and macOS.
 
 Plugin and skill schema validation uses the installed OpenAI plugin-creator and
 skill-creator validators during local authoring; those external tools are not
-repository dependencies. Live visual fidelity, native hook pickup, comment
-wakeup and recovery still need the installed-package trials described in the
-architecture. A read-only connection check alone does not pass those gates.
+repository dependencies. The [maintainer readiness runbook](../../docs/codex-connection-readiness.md)
+tracks the remaining publication, authentication, fault-recovery, pending-work
+update and cleanup gates, alongside the backend identity and history limits.
+A read-only connection check alone does not pass those gates.
