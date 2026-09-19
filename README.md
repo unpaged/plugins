@@ -1,8 +1,8 @@
 # Unpaged plugins for Claude Code
 
-Render plans as visual boards on [Unpaged](https://unpaged.io), review specific
-parts with `@agent` comments, and receive replies in the session that made them.
-Agents reply and leave threads open; humans resolve them and accept plans.
+Claude Code plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
+
+![A Claude Code plan rendered as a canvas on Unpaged](docs/images/visual-plan-overview.png)
 
 ## Install
 
@@ -11,19 +11,18 @@ Agents reply and leave threads open; humans resolve them and accept plans.
 /plugin install unpaged@unpaged
 ```
 
-Use `/unpaged:visual-plan` to create a board. See the
-[Claude Code package](plugins/unpaged) for authentication, commands and listeners.
+## Plugins
 
-Experimental: [Unpaged for Codex](plugins/unpaged-codex) is a development pilot,
-not a public release.
+| Plugin | What it does |
+| --- | --- |
+| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are pushed straight back to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
 
-## Test
+## Support
 
-With Node 24 or newer, no npm installation is needed:
+- Bugs and ideas: [GitHub issues](https://github.com/unpaged/plugins/issues)
+- Chat: [Unpaged on Discord](https://discord.gg/K8TR7cUGX)
+- Versions: [CHANGELOG](CHANGELOG.md)
 
-```sh
-node --test plugins/unpaged/monitors/*.test.mjs plugins/unpaged-codex/runtime/*.test.mjs scripts/*.test.mjs
-```
+## License
 
-CI runs these local tests on Linux and macOS; it does not write to Unpaged or
-start a model task.
+[MIT](LICENSE) © Graph Knowledge SRL
