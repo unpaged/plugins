@@ -24,7 +24,69 @@ The package is under `plugins/unpaged-codex`; its manifest is
 `.codex-plugin/plugin.json`. It is separate from the existing Claude package.
 Both live in the same plugin repository. The app monorepo contains neither.
 
-## Build for the registered connection
+## Install from the repository (preview)
+
+**Installation smoke passed; full workflow pending:** a [fresh CLI trial](../../docs/codex-repository-install-trial-2026-09-20.md)
+installed this package from GitHub, verified its files and discovered its bundled
+direct MCP server as `not_logged_in`. Native sign-in, hook approval, the
+visual-plan lifecycle and restart recovery remain untested for this route. The
+[earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
+does not establish those results for this package.
+
+Once the Codex catalog is available on `main`, run these commands with a supported
+Codex CLI:
+
+```sh
+codex plugin marketplace add unpaged/plugins
+codex plugin add unpaged-codex@unpaged
+```
+
+The [Codex catalog](../../.agents/plugins/marketplace.json) is named `unpaged`
+and points to this package, which contains all three skills, the startup hook,
+the local runtime and the connection to `https://mcp.unpaged.io/mcp`. You do not
+need a personal registration ID or a generated artifact. Do not add a separate
+manual MCP connection alongside the bundled one.
+
+Complete the native Unpaged service sign-in when prompted. Start a fresh Codex
+task and invoke `visual-plan`; the agent verifies the tools actually available
+before using them. If sign-in or required tools are unavailable, report that
+setup blocker rather than treating installation as a successful connection.
+The CLI smoke returned without completing sign-in even though the catalog's
+authentication policy is `ON_INSTALL`; that policy is not proof of authentication.
+
+## Hook approval before listening
+
+Before creating a listener, the agent runs the installed helper's read-only
+`doctor` check. If approval is missing or the hook changed, it gives one action:
+open **Settings → Hooks → From Plugins → Unpaged for Codex**, review the hook
+row beneath **SessionStart**, and click **Trust**. On macOS, **⌘,** opens Settings.
+Keep the hook enabled. The agent rechecks after approval; it does not ask the customer to
+inspect logs, edit trust files, or repeatedly reinstall/restart. Other setup
+problems return their own next action. Folder-wide hook configuration warnings
+or errors are reported separately from Unpaged approval, without exposing their
+raw content. Render-only canvases do not need this
+approval. `arm` independently rechecks readiness before opening local state.
+
+`doctor` reports persisted native setup, not successful comment delivery or
+proof that the running app loaded the hook. It never runs a hook, opens the
+review ledger, or starts a receiver. Live listening and restart recovery are
+verified separately. The integration remains experimental; the dated evidence
+and remaining gates are described below.
+
+Repository marketplace distribution is separate from publication in OpenAI's
+public Plugins Directory. That directory route needs a reviewed registration,
+explicit publication and intended-customer availability. Neither a repository
+catalog nor a working personal registration establishes a public-directory listing.
+
+Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
+[installation](https://learn.chatgpt.com/docs/plugins), and
+[hook trust](https://learn.chatgpt.com/docs/hooks).
+
+## Advanced: build for a registered connection
+
+This is the separate route used by the local pilot. It replaces the bundled
+direct MCP connection with a reference to an existing registered connection.
+Use only one connection route for a review.
 
 From this repository's root, supply the actual registered Unpaged connection ID
 and a new output directory outside every Git worktree. Its parent must already exist:
@@ -44,44 +106,17 @@ canonical output path without the registration ID.
 
 For a local pilot, point the personal Codex marketplace at that generated
 package with the native plugin-creator flow, then install `unpaged-codex` from
-that marketplace. Authenticate the registered Unpaged connection when prompted;
-there is no separate manual MCP setup. Review the startup hook through Codex's
-normal trust flow. A fresh task can then invoke the `visual-plan` skill.
+that marketplace. Authenticate the registered Unpaged connection when prompted
+and use the hook approval flow above. This build step neither publishes the
+plugin nor registers a new server.
 
-Before creating a listener, the agent runs the installed helper's read-only
-`doctor` check. If approval is missing or the hook changed, it gives one action:
-open **Settings → Hooks → From Plugins → Unpaged for Codex**, review the hook
-row beneath **SessionStart**, and click **Trust**. On macOS, **⌘,** opens Settings.
-Keep the hook enabled. The agent rechecks after approval; it does not ask the customer to
-inspect logs, edit trust files, or repeatedly reinstall/restart. Other setup
-problems return their own next action. Folder-wide hook configuration warnings
-or errors are reported separately from Unpaged approval, without exposing their
-raw content. Render-only canvases do not need this
-approval. `arm` independently rechecks readiness before opening local state.
-
-`doctor` reports persisted native setup, not successful comment delivery or
-proof that the running app loaded the hook. It never runs a hook, opens the
-review ledger, or starts a receiver. Live listening and restart recovery are
-verified separately. The integration remains experimental; the dated evidence
-and remaining gates are described below.
-
-The checked-in source `.mcp.json` remains a direct remote-MCP configuration for
-hosts or distributions that explicitly choose that route. The registered build
-does not ship it. Do not enable both connections for the same workflow by default.
-
-Public distribution needs a reviewed registration accessible to the intended
-customers and the complete installation/recovery trials. A working personal
-registration does not establish that availability. This build step does not
-publish the plugin or register a new server.
-
-Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
-[installation](https://learn.chatgpt.com/docs/plugins), and
-[hook trust](https://learn.chatgpt.com/docs/hooks).
-
-## Updating an existing pilot
+## Updating an existing installation
 
 Keep the plugin name, review data directory and startup-hook identity stable.
-Generate and validate the registered package, then use the native update flow.
+Use the native update flow for the marketplace from which it was installed.
+Registered-pilot users first regenerate and validate their registered artifact;
+repository users keep the bundled direct MCP route. Do not switch connection
+routes as part of an ordinary update.
 Run the installed `doctor` again after updating. Codex requires renewed approval
 when the hook definition changes. Keep the definition stable for ordinary
 runtime/skill updates; do not bypass approval for a deliberate hook change.
@@ -261,9 +296,10 @@ plan approval, and permission to implement remain separate decisions.
 From the repository root, with Node 24 or newer:
 
 ```sh
+node scripts/validate-codex-marketplace.mjs
 node --test plugins/unpaged-codex/runtime/*.test.mjs
 node --test plugins/unpaged/monitors/*.test.mjs
-node --test scripts/build-codex-plugin.test.mjs
+node --test scripts/*.test.mjs
 ```
 
 The automated tests use temporary databases and fake sockets/queue commands.

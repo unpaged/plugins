@@ -44,6 +44,9 @@ jobs:
             }
           '
 
+      - name: Codex marketplace and package references
+        run: node scripts/validate-codex-marketplace.mjs
+
       - name: Commands have frontmatter
         run: |
           node -e '
