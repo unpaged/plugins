@@ -119,6 +119,77 @@ function persistedFixture(t) {
   return { ...f, store, token, open };
 }
 
+test("an unknown identity after reserving an unsent signal can retry without burning the reservation", async (t) => {
+  const f = persistedFixture(t);
+  let reserved = false;
+  let blipped = false;
+  const reserve = f.store.claimUpgradeSignal.bind(f.store);
+  f.store.claimUpgradeSignal = (...args) => { const result = reserve(...args); reserved ||= result; return result; };
+  f.options.identify = (pid) => {
+    if (pid === 10 && reserved && !blipped) { blipped = true; return undefined; }
+    return f.processes.get(pid) ?? null;
+  };
+  f.options.timeoutMs = 300;
+  f.options.sleep = async (ms) => { f.advance(ms); if (f.signals.length) f.processes.delete(10); };
+  assert.equal(await prepareHandover(documentId, f.options), true);
+  assert.equal(blipped, true);
+  assert.deepEqual(f.signals, [[10, "SIGTERM"]]);
+});
+
+test("an unknown identity before reservation retries without creating or cancelling a signal record", async (t) => {
+  const f = persistedFixture(t);
+  let leased = false;
+  let blipped = false;
+  let reservations = 0;
+  const claim = f.store.claimUpgrade.bind(f.store);
+  const reserve = f.store.claimUpgradeSignal.bind(f.store);
+  f.store.claimUpgrade = (...args) => { const result = claim(...args); leased ||= Boolean(result); return result; };
+  f.store.claimUpgradeSignal = (...args) => { reservations++; return reserve(...args); };
+  f.store.cancelUnsentUpgradeSignal = () => assert.fail("no signal reservation was made before this blip");
+  f.options.identify = (pid) => {
+    if (pid === 10 && leased && !blipped) { blipped = true; return undefined; }
+    return f.processes.get(pid) ?? null;
+  };
+  f.options.timeoutMs = 300;
+  f.options.sleep = async (ms) => { f.advance(ms); if (f.signals.length) f.processes.delete(10); };
+  assert.equal(await prepareHandover(documentId, f.options), true);
+  assert.equal(blipped, true);
+  assert.equal(reservations, 1);
+  assert.deepEqual(f.signals, [[10, "SIGTERM"]]);
+});
+
+test("PID reuse before or during reservation never signals the replacement process", async (t) => {
+  for (const stage of ["before", "during"]) {
+    const f = persistedFixture(t);
+    let changed = false;
+    const method = stage === "before" ? "claimUpgrade" : "claimUpgradeSignal";
+    const original = f.store[method].bind(f.store);
+    f.store[method] = (...args) => {
+      const result = original(...args);
+      f.processes.set(10, "unrelated-process-birth");
+      changed = true;
+      return result;
+    };
+    assert.equal(await prepareHandover(documentId, f.options), true, stage);
+    assert.equal(changed, true);
+    assert.deepEqual(f.signals, []);
+    assert.equal(f.store.getBinding(documentId).upgradePending, false);
+    assert.equal(f.store.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(documentId).upgrade_signaled_token, null);
+  }
+});
+
+test("an inherited signal reservation is never cancelled or retried by a new coordinator", async (t) => {
+  const f = persistedFixture(t);
+  const oldLease = f.store.claimUpgrade(documentId, { pid: 30, identity: "dead-coordinator", isAlive: () => false, at: 0 });
+  f.store.claimUpgradeSignal(documentId, oldLease, { workerToken: f.token, pid: 10, identity: "old-birth" });
+  f.store.cancelUnsentUpgradeSignal = () => assert.fail("a prior signal may already have been delivered");
+  f.advance(60000);
+  f.options.timeoutMs = 200;
+  assert.equal(await prepareHandover(documentId, f.options), false);
+  assert.deepEqual(f.signals, []);
+  assert.equal(f.store.db.prepare("SELECT upgrade_signaled_lease FROM bindings WHERE document_id=?").get(documentId).upgrade_signaled_lease, oldLease);
+});
+
 test("a 150-second timeout and expired coordinator lease never re-signal the same persisted worker", async (t) => {
   const f = persistedFixture(t);
   f.store.receive(documentId, { id: "pending-event", documentId, nodeId: "root", threadId: "comment-thread",

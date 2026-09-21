@@ -48,7 +48,7 @@ export class Store {
         reconciliation_required INTEGER NOT NULL DEFAULT 0, reconciliation_evidence TEXT,
         worker_pid INTEGER, worker_identity TEXT, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
         worker_transport TEXT, worker_transport_token TEXT,
-        upgrade_signaled_token TEXT, upgrade_signaled_pid INTEGER, upgrade_signaled_identity TEXT,
+        upgrade_signaled_token TEXT, upgrade_signaled_pid INTEGER, upgrade_signaled_identity TEXT, upgrade_signaled_lease TEXT,
         accepted_event_id TEXT, accepted_digest TEXT, accepted_at TEXT,
         revoke_pending INTEGER NOT NULL DEFAULT 0, revocation_evidence TEXT, updated_at TEXT NOT NULL
       );
@@ -89,7 +89,7 @@ export class Store {
       // Add fields without changing the legacy state enum or credential shape:
       // queued tasks may still use retained helpers against this same ledger.
       const bindingColumns = new Set(this._all("PRAGMA table_info(bindings)").map((column) => column.name));
-      for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token", "upgrade_signaled_token", "upgrade_signaled_identity"]) {
+      for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token", "upgrade_signaled_token", "upgrade_signaled_identity", "upgrade_signaled_lease"]) {
         if (!bindingColumns.has(column)) this.db.exec(`ALTER TABLE bindings ADD COLUMN ${column} TEXT`);
       }
       if (!bindingColumns.has("upgrade_signaled_pid")) this.db.exec("ALTER TABLE bindings ADD COLUMN upgrade_signaled_pid INTEGER");
@@ -228,7 +228,20 @@ export class Store {
       if (b.upgrade_signaled_token === workerToken && b.upgrade_signaled_pid === pid && b.upgrade_signaled_identity === identity) return false;
       // Commit intent before the OS signal. A crash between these two actions
       // must leave handover pending, not risk replaying a once-only signal.
-      this._run("UPDATE bindings SET upgrade_signaled_token=?,upgrade_signaled_pid=?,upgrade_signaled_identity=? WHERE document_id=?", workerToken, pid, identity, id);
+      this._run("UPDATE bindings SET upgrade_signaled_token=?,upgrade_signaled_pid=?,upgrade_signaled_identity=?,upgrade_signaled_lease=? WHERE document_id=?", workerToken, pid, identity, leaseToken, id);
+      return true;
+    });
+  }
+  cancelUnsentUpgradeSignal(id, leaseToken, { workerToken, pid, identity } = {}) {
+    return this._tx(() => {
+      const b = this._fence(id, workerToken); this._active(b);
+      if (this._get("SELECT token FROM worker_upgrades WHERE document_id=?", id)?.token !== leaseToken) fail("upgrade_fenced");
+      if (b.worker_pid !== pid || b.worker_identity !== identity) fail("worker_fenced");
+      if (b.upgrade_signaled_lease !== leaseToken || b.upgrade_signaled_token !== workerToken ||
+          b.upgrade_signaled_pid !== pid || b.upgrade_signaled_identity !== identity) fail("upgrade_signal_fenced");
+      // Only the original coordinator, before any kill attempt, may cancel its
+      // own reservation. A replacement cannot erase an uncertain prior signal.
+      this._run("UPDATE bindings SET upgrade_signaled_token=NULL,upgrade_signaled_pid=NULL,upgrade_signaled_identity=NULL,upgrade_signaled_lease=NULL WHERE document_id=?", id);
       return true;
     });
   }
@@ -247,7 +260,7 @@ export class Store {
         this._run("UPDATE events SET state='effect_uncertain',updated_at=? WHERE document_id=? AND state='processing'", now(), id);
       }
       const token = randomUUID();
-      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_transport=?,worker_transport_token=?,upgrade_signaled_token=NULL,upgrade_signaled_pid=NULL,upgrade_signaled_identity=NULL,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, transport ?? null, transport ? token : null, now(), id);
+      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_transport=?,worker_transport_token=?,upgrade_signaled_token=NULL,upgrade_signaled_pid=NULL,upgrade_signaled_identity=NULL,upgrade_signaled_lease=NULL,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, transport ?? null, transport ? token : null, now(), id);
       this._run("DELETE FROM worker_upgrades WHERE document_id=?", id);
       return { token, recovered };
     });

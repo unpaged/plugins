@@ -40,9 +40,26 @@ export async function prepareHandover(documentId, options) {
         if (current.workerPid !== predecessor.pid || current.workerIdentity !== predecessor.identity ||
             current.workerToken !== predecessor.workerToken ||
             current.workerTransport === "poll-v1" || current.status !== "active") return false;
+        if (identify(predecessor.pid) !== predecessor.identity) {
+          store.releaseUpgrade(documentId, lease);
+          lease = undefined;
+          await sleep(100);
+          continue;
+        }
         const shouldSignal = store.claimUpgradeSignal(documentId, lease, predecessor);
         signalRecorded = true;
-        if (shouldSignal && identify(predecessor.pid) === predecessor.identity) {
+        if (shouldSignal) {
+          // SQLite may have waited for another writer. Check the kernel again
+          // before kill, but undo only this call's provably unsent reservation
+          // if inspection failed or the PID changed during that transaction.
+          if (identify(predecessor.pid) !== predecessor.identity) {
+            store.cancelUnsentUpgradeSignal(documentId, lease, predecessor);
+            signalRecorded = false;
+            store.releaseUpgrade(documentId, lease);
+            lease = undefined;
+            await sleep(100);
+            continue;
+          }
           try { kill(predecessor.pid, "SIGTERM"); }
           catch (error) { if (error.code !== "ESRCH") throw new Error("worker_handover_unavailable"); }
         }

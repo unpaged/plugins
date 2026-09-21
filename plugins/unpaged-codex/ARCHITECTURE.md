@@ -232,6 +232,11 @@ fences the exact predecessor token, PID and process identity across lease expiry
 and coordinator restarts. The reservation is committed before SIGTERM, so a crash
 in that narrow interval leaves handover pending until the predecessor exits or
 the situation is explicitly inspected; it never retries a once-only signal.
+Identity is checked immediately before and after reserving the signal. If the
+second check is inconclusive or changed, the original coordinator can cancel
+only its own provably unsent reservation and retry. Cancellation is fenced by
+the reservation's writer lease, current coordination lease and exact worker
+claim; a replacement cannot cancel an earlier coordinator's uncertain signal.
 `upgradePending` reports that handover; it is not a successful poll. Unverifiable identity or a failed shutdown remains a
 blocker; never kill a guessed PID, replace the key or discard the binding.
 
