@@ -171,7 +171,7 @@ export async function runCommand(documentId, options = {}) {
   if (result.reason === "unsupported-node") {
     await say("Unpaged listener needs Node 22 or newer with an HTTP client — push stays off on this machine.");
   } else if (result.reason === "ownership-unavailable" && !options.signal?.aborted) {
-    await say("Unpaged listener could not take ownership of this canvas's local monitor. End the previous Monitor and start /unpaged:listen again; do not mint another key.");
+    await say("Unpaged listener could not take ownership of this canvas's local monitor: another Monitor may still be draining, or too few local ports are usable. Push is off for this canvas on this machine. Check /unpaged:listen status and local port restrictions before retrying; do not mint another key.");
   } else if (result.reason === "monitor-unavailable" && !options.signal?.aborted) {
     await say("Unpaged listener could not start or continue safely. Check /unpaged:listen status; the stored listener key has not been replaced.");
   }
