@@ -3,7 +3,7 @@ import test from "node:test";
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireMonitorOwnership, ownershipPorts, probeMonitorOwnership } from "./ownership.mjs";
@@ -157,6 +157,48 @@ test("the public ownership probe authenticates the current owner without request
   assert.equal(stopped, false);
   await owner.release();
   assert.equal(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT }), null);
+});
+
+test("POSIX owner records require private permissions for both probing and takeover", { skip: process.platform === "win32" }, async (t) => {
+  const f = await fixture(t);
+  let stopped = 0;
+  const owner = await acquireMonitorOwnership({ home: f.home, documentId: DOCUMENT, onTakeover: () => { stopped++; } });
+  t.after(() => owner?.release());
+  assert.ok(owner);
+  await chmod(f.path, 0o600);
+  assert.deepEqual(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT }), { pid: process.pid, ownerId: owner.ownerId });
+  for (const mode of [0o640, 0o644]) {
+    await chmod(f.path, mode);
+    assert.equal(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT }), null);
+    assert.equal(await acquireMonitorOwnership({ home: f.home, documentId: DOCUMENT, timeoutMs: 120, onTakeover: () => {} }), null);
+    assert.equal(stopped, 0, "a group/other-readable capability must not authorize shutdown");
+  }
+  await chmod(f.path, 0o600);
+  assert.deepEqual(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT }), { pid: process.pid, ownerId: owner.ownerId });
+});
+
+test("controlled win32 permissions allow authenticated probe and takeover without trusting mode bits", async (t) => {
+  const f = await fixture(t);
+  let stopped = 0;
+  const owner = await acquireMonitorOwnership({ home: f.home, documentId: DOCUMENT, onTakeover: () => { stopped++; void owner.release(); } });
+  t.after(() => owner?.release());
+  assert.ok(owner);
+  const original = await readFile(f.path, "utf8");
+  // This injects the platform decision and a 0666 record on this host. It
+  // verifies the permission branch, not native Windows stat behavior or ACLs.
+  await chmod(f.path, 0o666);
+  assert.deepEqual(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT, platform: "win32" }), { pid: process.pid, ownerId: owner.ownerId });
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(original), capability: "0".repeat(64) }));
+  assert.equal(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT, platform: "win32" }), null);
+  assert.equal(await acquireMonitorOwnership({ home: f.home, documentId: DOCUMENT, platform: "win32", timeoutMs: 120, onTakeover: () => {} }), null);
+  assert.equal(stopped, 0, "the Windows permission branch still requires the private capability proof");
+  await writeFile(f.path, original);
+  const replacement = await acquireMonitorOwnership({ home: f.home, documentId: DOCUMENT, platform: "win32", onTakeover: () => {} });
+  t.after(() => replacement?.release());
+  assert.ok(replacement);
+  assert.equal(stopped, 1);
+  assert.notEqual(replacement.ownerId, owner.ownerId);
+  assert.deepEqual(await probeMonitorOwnership({ home: f.home, documentId: DOCUMENT, platform: "win32" }), { pid: process.pid, ownerId: replacement.ownerId });
 });
 
 test("malformed local control messages cannot crash or stop the owner", async (t) => {

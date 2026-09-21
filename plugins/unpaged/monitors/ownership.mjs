@@ -29,10 +29,12 @@ async function location(home, documentId) {
   return { scope, path: join(canonicalHome, STATUS_DIR_RELATIVE, "ownership", `${documentId}.json`) };
 }
 
-async function readOwner(path, scope, ports) {
+async function readOwner(path, scope, ports, platform) {
   try {
     const info = await lstat(path);
-    if (!info.isFile() || info.size > 2048 || (info.mode & 0o077) !== 0) return null;
+    // Node does not implement owner/group/other mode distinctions on Windows.
+    // Keep the POSIX capability-file gate; skipping it does not verify an ACL.
+    if (!info.isFile() || info.size > 2048 || (platform !== "win32" && (info.mode & 0o077) !== 0)) return null;
     const owner = JSON.parse(await readFile(path, "utf8"));
     return owner?.scope === scope && typeof owner.capability === "string" && HEX.test(owner.capability) && ports.includes(owner.port) &&
       Number.isSafeInteger(owner.pid) && owner.pid > 0 ? owner : null;
@@ -135,16 +137,16 @@ async function closeAll(owners) {
   })));
 }
 
-export async function probeMonitorOwnership({ home, documentId }) {
+export async function probeMonitorOwnership({ home, documentId, platform = process.platform }) {
   try {
     const { path, scope } = await location(home, documentId);
-    const owner = await readOwner(path, scope, ownershipPorts(scope));
+    const owner = await readOwner(path, scope, ownershipPorts(scope), platform);
     return owner && await contact(owner, false) ? { pid: owner.pid, ownerId: ownerId(owner.capability) } : null;
   } catch { return null; }
 }
 
 export async function acquireMonitorOwnership({ home, documentId, signal, onTakeover,
-  timeoutMs = 10000, ports: testPorts, beforePublish, createServer: makeServer = createServer } = {}) {
+  timeoutMs = 10000, ports: testPorts, beforePublish, createServer: makeServer = createServer, platform = process.platform } = {}) {
   const { path, scope } = await location(home, documentId);
   const ports = testPorts ?? ownershipPorts(scope);
   if (!Array.isArray(ports) || ports.length !== 5 || new Set(ports).size !== 5 ||
@@ -157,7 +159,7 @@ export async function acquireMonitorOwnership({ home, documentId, signal, onTake
   let claimed = [];
   try {
     while (!signal?.aborted && Date.now() < deadline) {
-      const previous = await readOwner(path, scope, ports);
+      const previous = await readOwner(path, scope, ports, platform);
       if (previous) await contact(previous, true);
       if (signal?.aborted) break;
       for (const port of ports) {
