@@ -3,6 +3,7 @@ import { cp, lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/pro
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { validateUnpagedPackage } from "./validate-codex-marketplace.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const pluginSource = join(repository, "plugins/unpaged-codex");
@@ -43,6 +44,8 @@ export async function buildPlugin({ connectionId, output, source = pluginSource 
     if (manifest.name !== "unpaged-codex" || manifest.skills !== "./skills/") {
       throw new Error("unexpected_plugin_manifest");
     }
+    await validateUnpagedPackage(sourceRoot, manifest);
+    const servers = JSON.parse(await readFile(join(sourceRoot, ".mcp.json"), "utf8")).mcpServers;
     for (const component of components) {
       await cp(join(sourceRoot, component), join(destination, component), {
         recursive: true,
@@ -57,11 +60,13 @@ export async function buildPlugin({ connectionId, output, source = pluginSource 
         }
       });
     }
-    delete manifest.mcpServers;
+    // Only the remote account connection is replaced. Native local listener
+    // operations remain part of both distribution forms.
     manifest.apps = "./.app.json";
     await mkdir(join(destination, ".codex-plugin"));
     await writeFile(join(destination, ".codex-plugin/plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     await writeFile(join(destination, ".app.json"), JSON.stringify({ apps: { unpaged: { id: connectionId } } }, null, 2) + "\n");
+    await writeFile(join(destination, ".mcp.json"), JSON.stringify({ mcpServers: { unpaged_review: servers.unpaged_review } }, null, 2) + "\n");
     return { plugin: manifest.name, version: manifest.version, output: destination, connection: "registered" };
   } catch (error) {
     await rm(destination, { recursive: true, force: true });

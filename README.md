@@ -16,9 +16,12 @@ Claude Code and Codex plugins by [Unpaged](https://unpaged.io) — the whiteboar
 The experimental [Unpaged for Codex](plugins/unpaged-codex/README.md) package
 adds visual plans, same-task comment review, implementation Decision logs, and
 as-built canvases. It requires macOS or Linux, Node.js 24+ available to Codex's
-hooks, and Codex 0.153.1+ with the public `queue` command and `hooks/list` support.
-Listening is blocked in the ordinary Codex 0.155 Linux command sandbox because
-detached receivers do not survive command completion; rendering remains usable.
+hooks and local MCP servers. The 0.5.0 candidate uses a bundled local review
+tool to perform setup and launch detached receivers on the host. It requires
+native task/workspace metadata plus the public `queue` and `hooks/list` APIs;
+those source contracts were verified in Codex `0.155.0-alpha.9.2`. Missing
+metadata blocks listening. Installed Linux delivery and recovery are not yet
+verified for this candidate; rendering remains usable.
 
 Use a supported Codex CLI:
 
@@ -36,18 +39,18 @@ then invoke `visual-plan` in a fresh task. Desktop users can instead use the
 The repository package includes its direct MCP connection; no personal
 registration ID or artifact build is required.
 
-The setup check may need native approval to initialize Codex's local runtime
-storage. Version 0.4.1 identifies that failure separately from hook trust; use
-the [host permission guidance](plugins/unpaged-codex/README.md#hook-approval-before-listening)
-and keep the same task and profile. Setup approval alone does not verify that
-the host allows a persistent background listener.
+The agent checks setup through the bundled local `unpaged_review` server's
+`review` tool before creating a listener key. If that tool is absent after an
+update, reload the plugin through Codex and rediscover it. Do not use SQLite
+file grants or repeated reinstalls as the normal setup flow. A ready setup
+check confirms hook configuration; it does not prove listening or recovery.
 
 **Installation smoke passed; full workflow pending:** a [fresh CLI trial](docs/codex-repository-install-trial-2026-09-20.md)
 installed the GitHub package and discovered its bundled server as not signed in.
 A later user-reported fresh Ubuntu installation of 0.4.0 confirmed that the
 explicit login command is required. The user confirmed sign-in and native hook
 trust; a screenshot showed `visual-plan` and `review-plan` loading. A PROPOSED
-canvas and Decision log were independently verified. Native sandbox failures
+canvas and Decision log were independently verified. Native sandbox failures in the 0.4.0 CLI flow
 blocked listener setup; comment delivery, the plan lifecycle and restart
 recovery remain unproven for that trial.
 The successful [earlier pilot](docs/codex-installed-trial-2026-09-19.md)

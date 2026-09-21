@@ -128,6 +128,9 @@ test("queue transport uses only fixed routing, the validated binary and shell:fa
   assert.equal(invocation.settings.shell, false);
   assert.equal(invocation.settings.timeout, 45000);
   assert.equal(invocation.settings.maxBuffer, 65536);
+  assert.ok(invocation.args[4].includes("Prefer the installed local unpaged_review MCP server"));
+  assert.ok(invocation.args[4].includes(JSON.stringify({ operation: "begin", documentId: DOCUMENT, eventId: event.id })));
+  assert.ok(invocation.args[4].includes("never use ordinary Linux bwrap"));
   const prompt = invocation.args[4];
   for (const forbidden of [SECRET, "PRIVATE COMMENT", "private-author", "private-node-title", "untrusted.invalid", "touch /tmp/untrusted"]) {
     assert.equal(prompt.includes(forbidden), false);

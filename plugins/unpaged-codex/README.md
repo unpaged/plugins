@@ -6,18 +6,16 @@ It is an experimental integration, with the recovery boundaries below.
 
 ## Requirements
 
-- macOS or Linux for rendering and setup checks. Worker process identity is
-  supported on both, but listening also requires a native supported persistent
-  launch. The ordinary Codex 0.155 Linux sandbox cannot keep this detached
-  receiver alive; see the limitation below. Windows is not a supported pilot host.
-- Node.js 24 or newer, available to Codex and its hooks. Node 24 is the tested
-  LTS support floor for this pilot; it is deliberate, not a claim that
-  `node:sqlite` first became unflagged there (that happened in Node 22.13).
-  No npm dependencies.
-- Codex 0.153.1 or newer with the public `queue` command and native `hooks/list`
-  support. The adapter checks
-  the actual binary before arming; it does not assume the terminal and desktop
-  use the same version.
+- macOS or Linux. The 0.5.0 candidate uses a native local MCP tool for setup,
+  bookkeeping and detached-worker launch. Installed Linux delivery and recovery
+  still need verification. Windows is not a supported pilot host.
+- Node.js 24 or newer, available to Codex, its local MCP servers and hooks.
+  Node 24 is the tested support floor; no npm dependencies are required.
+- Codex with local stdio MCP, native per-call task/workspace metadata, the
+  public `queue` command and native `hooks/list` support. These source contracts
+  were verified in native `0.155.0-alpha.9.2`; missing metadata fails closed.
+  The older CLI's version check alone does not establish local-tool support.
+  The adapter verifies the actual queue binary before arming.
 - Authenticated Unpaged MCP with comment, listener-key, and revision-safe tools.
 - Native Codex trust for this plugin's SessionStart hook. Installing a plugin
   does not itself grant hook trust. Do not bypass that review.
@@ -49,9 +47,11 @@ codex mcp login unpaged
 
 The [Codex catalog](../../.agents/plugins/marketplace.json) is named `unpaged`
 and points to this package, which contains all three skills, the startup hook,
-the local runtime and the connection to `https://mcp.unpaged.io/mcp`. You do not
-need a personal registration ID or a generated artifact. Do not add a separate
-manual MCP connection alongside the bundled one.
+the local runtime, the remote `unpaged` connection to `https://mcp.unpaged.io/mcp`,
+and the local stdio `unpaged_review` server. Its `review` tool performs local
+setup and review bookkeeping; remote Unpaged tools read and change the canvas.
+You do not need a personal registration ID, a generated artifact or another
+manual MCP connection.
 
 Complete Unpaged sign-in through the explicit `codex mcp login unpaged` command;
 plugin installation does not complete this step. Then review and trust the
@@ -64,8 +64,9 @@ authentication policy is `ON_INSTALL`; that policy is not proof of authenticatio
 
 ## Hook approval before listening
 
-Before creating a listener, the agent runs the installed helper's native setup
-`doctor` check. If approval is missing or the hook changed, use the native
+Before creating a listener key, the agent discovers the current installed
+`unpaged_review` / `review` tool and calls `operation: "doctor"`. Tool prefixes
+can differ, so it uses the tool actually exposed in the task. If approval is missing or the hook changed, use the native
 approval surface: in the CLI, open `/hooks` and review and trust the Unpaged
 plugin's **SessionStart** hook. In the desktop app, open **Settings → Hooks →
 From Plugins → Unpaged for Codex**, review that hook row and click **Trust**.
@@ -83,30 +84,30 @@ review ledger, or starts a receiver. Live listening and restart recovery are
 verified separately. The integration remains experimental; the dated evidence
 and remaining gates are described below.
 
-The native helper uses the current Codex profile. Although it only requests hook
-metadata, Codex startup may create or migrate its own SQLite runtime storage.
-If this is blocked, version 0.4.1 reports `native_state_initialization_failed`
-without printing private paths or native diagnostics. Use the host's native
-approval flow for the exact command in the same task. If that host requires
-path permissions instead, grant the required **directory roots**, never individual
-SQLite files or their `-wal`/`-shm` companions. The relevant roots are the actual
-Codex home, any separately configured SQLite state directory, and the private
-Unpaged data directory when the listener is launched. Prefer a single approved
-command over a broader grant when supported. This failure does not call for
-renewed hook trust, a replacement profile, or repeated reinstalls.
+The local MCP process runs the setup check and worker launch on the host using
+native task/workspace metadata. It accepts fixed review operations, not arbitrary
+commands or paths. Codex's native child may initialize its own runtime storage;
+this no longer depends on granting that storage to an agent command sandbox.
+The current profile is preserved through `CODEX_HOME` forwarding. If native
+metadata or the local tool is unavailable, listening remains blocked before a
+key is minted. After an update, reload the plugin through Codex and rediscover
+its tools; repeated installation is not a repair procedure.
 
-The detached listener inherits its launch restrictions. Its storage, HTTPS
-polling and native queue calls must remain allowed after launch; a successful
-`doctor` does not prove that they will. Verify listener survival and comment
-delivery separately. Hosts that cannot support that background process through
-their native approval flow remain blocked. In Codex 0.155's ordinary Linux
-`bwrap` path, the command's PID namespace ends with the command, preventing a
-detached worker from surviving; directory/network grants alone do not fix this.
-Listening remains blocked there until a native supported persistent launch is
-available. All-access mode is not a customer workaround for this integration.
-The [review skill](skills/review-plan/SKILL.md#runtime-and-tools) also describes the
-one-time same-task recovery attempt for the observed Codex 0.155 Linux sandbox error
-caused by session grants on individual database files.
+The CLI remains available for retained legacy helpers and explicitly approved
+host maintenance. Pure `digest` and `info` operations remain safe in an ordinary
+command sandbox; they open no ledger, inspect no process and start no native
+Codex child. Render-only work can use that digest fallback if the local tool is
+unavailable. Do not launch or verify a host worker through ordinary Linux
+`bwrap`: detached children cannot outlive that command's PID namespace, and host
+PIDs are not reliably visible inside it. Directory/network grants do not change
+that boundary. No SQLite-file grants, copied state, alternate profile or
+all-access mode are part of the normal customer flow. Preserve an existing
+binding and report a blocker rather than guessing worker ownership.
+
+The local-tool path is a 0.5.0 candidate, not an installed Linux success claim.
+Verify worker survival, an authenticated poll, actual comment delivery and native
+restart recovery separately. The historical Ubuntu evidence below describes the
+0.4.0 CLI failure, not a failed or passing trial of this new path.
 
 Repository marketplace distribution is separate from publication in OpenAI's
 public Plugins Directory. That directory route needs a reviewed registration,
@@ -134,9 +135,9 @@ node scripts/build-codex-plugin.mjs --connection-id REGISTERED_PLUGIN_ID --outpu
 Replace `REGISTERED_PLUGIN_ID` with the ID obtained from the native registration
 flow. It has the `plugin_asdk_app_` prefix. Do not commit a personal ID or reuse
 one as a public listing. The builder writes `.app.json`, connects the manifest's
-`apps` field to it, and excludes the source package's direct `.mcp.json` connection.
-The output has one registered connection, all three skills, the startup hook and the
-runtime. It never reads or copies the adapter database or OAuth credentials.
+`apps` field to it, and removes the remote direct connection from `.mcp.json` while retaining the
+local `unpaged_review` stdio server. The output has one registered remote
+connection, local review tools, all three skills, the startup hook and runtime. It never reads or copies the adapter database or OAuth credentials.
 Existing output is refused rather than overwritten; the result prints its
 canonical output path without the registration ID.
 
@@ -153,7 +154,9 @@ Use the native update flow for the marketplace from which it was installed.
 Registered-pilot users first regenerate and validate their registered artifact;
 repository users keep the bundled direct MCP route. Do not switch connection
 routes as part of an ordinary update.
-Run the installed `doctor` again after updating. Codex requires renewed approval
+Reload the plugin through Codex so its current local tools are available, then
+run the local `doctor` operation again. Do not repeat installation to repair
+tool discovery. Codex requires renewed approval
 when the hook definition changes. Keep the definition stable for ordinary
 runtime/skill updates; do not bypass approval for a deliberate hook change.
 An existing receiver and its key, task, phase and receipts remain intact while
@@ -212,7 +215,9 @@ requirements, lays out the overview and useful phase detail, and a Decision log,
 review lifecycle to **review-plan**. Use review-plan directly for an existing
 review, incoming events, status, recovery or stopping. New plans default to
 **Visual plans** and honor an explicit folder choice. The agent arms the board
-using the remote MCP listener key and the local adapter. It must report the
+using the remote MCP listener key and the local `review` tool. Its fixed operation
+input never accepts a task ID, executable, data path, cwd or environment override;
+native metadata supplies the task and workspace. It must report the
 actual connection state before asking you to comment.
 
 Mention `@agent` on the part you want changed. Human replies in an agent thread
@@ -281,10 +286,9 @@ a new event. New feedback returns it to the normal interval. These are polling
 intervals, not maximum response times: network availability and the assigned
 task's state also affect delivery and processing.
 
-On macOS, worker ownership needs OS process inspection. If the command sandbox
-blocks that inspection, run the adapter launch/recovery command through the
-host's normal approval mechanism outside that sandbox. Do not weaken worker
-identity checks or bypass hook trust to work around it.
+Worker ownership checks run on the host through the local tool or trusted
+recovery hook. Do not substitute process inspection from an agent command
+sandbox, weaken identity checks, or bypass hook trust.
 
 ## Recovery and limits
 
@@ -298,10 +302,14 @@ identity checks or bypass hook trust to work around it.
 - `connected` means an authenticated poll succeeded, including an empty result.
   `lastSuccessfulPollAt` records that response; `lastEventAt` records the latest
   newly received event. Normal waits between healthy polls remain connected.
+  Local tool status also returns `workerAlive` from a fresh host identity check:
+  true for the recorded process, false when absent or replaced, and null when
+  inspection is unavailable. Neither process liveness nor a successful poll
+  proves comment delivery or recovery.
   A failed poll reports reconnecting and a reconciliation gap. Previously
   received work may already be queued when a terminal response arrives.
   The adapter blocks new board work as soon as it observes that response;
-  use the local stop command first when cancelling the whole review.
+  use the local `stop` operation first when cancelling the whole review.
 - An interrupted enqueue becomes `queue_uncertain`; interrupted board work
   becomes `effect_uncertain`. Neither is blindly retried. Inspect Codex's task
   history and the board, record what actually committed, and make an explicit
@@ -331,8 +339,10 @@ is private (0700) and the database is private (0600). Retained runtime snapshots
 credential is stored in the database to allow reconnection; it is not an OAuth token.
 Treat database backups as credentials. Never print or attach the database.
 Status and queued prompts contain routing metadata, not comment text or keys.
-An explicit `--data /absolute/path` overrides the directory for tests; the
-SessionStart hook uses the default directory.
+The local tool and SessionStart hook use that same default directory; the MCP
+server forwards the native `CODEX_HOME` setting. Only the legacy CLI supports
+`--data` for isolated tests or explicitly approved host maintenance. The local
+tool never accepts a data-path override.
 
 Use the review-plan skill to stop: request local stop, revoke that exact key
 through Unpaged MCP, verify revocation, then clear the stored credential. Other
@@ -370,13 +380,15 @@ unchanged-hook update, automatically restored the same BUILT review after an
 app restart and task reopen, and handled a fresh comment with one read-only
 reply. This was neither a clean-profile installation/sign-in trial nor a full
 0.3.1 rerun of the earlier lifecycle. Those versions used sockets; the trial does
-not prove installed 0.4.0 polling, socket-to-poll handover or restart recovery.
+not prove installed 0.4.0 polling, socket-to-poll handover, or the 0.5.0 local-tool
+launch and restart recovery.
 
 The package test builds a real artifact with a synthetic connection ID and
 executes its CLI, including a symlink-path invocation. Runtime tests cover cache removal, PID
 reuse, acceptance text normalization, bounded clock skew, lifecycle transitions,
-legacy terminal bindings and approval history. It also verifies no direct
-MCP configuration remains in the registered artifact, all three skill paths exist,
+legacy terminal bindings and approval history. It also verifies no remote
+direct MCP connection remains in the registered artifact, while the local
+review server and all three skill paths exist,
 source files remain unchanged, existing outputs are protected, and source symlinks
 cannot pull external files into the package. CI is configured to run these checks with the
 existing listener and adapter tests on Linux and macOS.

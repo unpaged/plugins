@@ -122,7 +122,10 @@ to render only or not listen: prepare the board without arming a listener and
 state that mode. For an existing binding, use its status and recovery flow;
 never mint a replacement key or bind another task just to run visual-plan again.
 Before minting a key for listening, follow review-plan's read-only `doctor`
-setup check from the current installed plugin. If setup needs native approval,
+setup check through the current installed local `unpaged_review` / `review`
+tool. Discover its actual prefixed name; task and workspace come from native
+metadata, never caller-supplied paths or task IDs. If the tool is absent after an
+update, follow review-plan's plugin-reload guidance. If setup needs native approval,
 keep the canvas, report that listening has not started, and give the single
 action returned by the check. Recheck after completion. Render-only work does
 not require hook approval; a ready setup check does not prove live delivery.

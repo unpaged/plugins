@@ -6,9 +6,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Changed
 
-- Unpaged for Codex 0.4.1: installation guides now require `codex mcp login unpaged` after plugin installation, followed by native SessionStart hook approval before listening. The guides include the CLI `/hooks` path and distinguish user-confirmed Ubuntu setup and verified canvas creation from blocked listening and unproven delivery/lifecycle/recovery behavior.
-- The setup helper now recognizes the native SQLite startup failure that blocked an Ubuntu trial. It reports a fixed diagnostic and native-approval action without exposing stderr or private state paths; readiness still fails closed.
-- The review skill distinguishes hook-inventory reads from native runtime storage writes, directs required path permissions to directory roots rather than SQLite files, and preserves the existing task/profile. It describes a one-time recovery attempt for the observed Linux session-grant error without editing trust, copying state or bypassing host policy. Setup approval remains separate from proof that a detached listener survives and delivers comments. Hooks and polling behavior are unchanged.
+- Unpaged for Codex 0.5.0 candidate: local review operations move to the bundled `unpaged_review` stdio MCP server's `review` tool. Native per-call metadata supplies task and workspace identity; the tool accepts no caller task, executable or path overrides and fails closed when required metadata is absent.
+- Setup inspection and detached-worker launch run on the host through that tool, avoiding nested native storage initialization and worker ownership checks inside Linux agent-command sandboxes. The SessionStart recovery hook, polling protocol, keys, bindings and receipt semantics remain unchanged. Installed Linux survival, delivery and restart recovery still require a live trial.
+- Installation guidance requires `codex mcp login unpaged` after plugin installation, then native SessionStart hook approval. An updated plugin must be reloaded to discover its local tools. Normal setup no longer asks for native SQLite file grants or repeated restarts/reinstalls.
+- The setup helper recognizes the verified native SQLite initialization diagnostic without exposing private paths or stderr. The historical Ubuntu 0.4.0 trial remains partial: sign-in and hook trust are user-confirmed, canvas creation was independently verified, and listener setup was blocked.
 
 ## [1.3.0] - 2026-09-21
 

@@ -99,6 +99,7 @@ export async function findCodex(explicit, env = process.env, execute = run) {
     env.UNPAGED_CODEX_PATH,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     "/Applications/Codex.app/Contents/Resources/codex",
+    "/usr/lib/chatgpt/resources/codex",
     ...(env.PATH || "").split(delimiter).filter(Boolean).map((dir) => join(dir, "codex"))
   ].filter(Boolean);
   for (const candidate of candidates) {

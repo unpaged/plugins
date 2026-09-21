@@ -1,6 +1,6 @@
 # Codex connection and visual-plan readiness
 
-Maintainer runbook, setup guidance refreshed on September 21, 2026. The Codex
+Maintainer runbook, setup guidance refreshed on September 22, 2026. The Codex
 adapter and setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
 documents the observed 0.3.0 plan lifecycle and 0.3.1 setup, update and native
 recovery results. The runtime is on `main`; this runbook records release
@@ -56,8 +56,9 @@ For a separately approved, published listing available to the intended customer:
 2. Install it and complete its requested service sign-in.
 3. Start a fresh task and verify the required Unpaged tools before doing work.
 
-For a listening visual plan, the current installed helper checks native setup
-before a listener key is created; `arm` repeats the check before opening state.
+For a listening visual plan, discover the current installed `unpaged_review`
+server's `review` tool and call `operation: "doctor"` before creating a listener
+key; `arm` repeats the check before opening state.
 When trust is missing or changed, give the user the action for their host: in the
 CLI, open `/hooks` and review and trust the Unpaged plugin's **SessionStart** hook;
 in the desktop app, use **Settings → Hooks → From Plugins → Unpaged for Codex →
@@ -68,31 +69,30 @@ request to trust Unpaged again. Do not make log inspection, manual ledger repair
 or repeated restarts part of customer setup. Render-only canvases skip this gate.
 See the [implemented setup check](../plugins/unpaged-codex/runtime/setup.mjs).
 
-The 0.4.1 setup diagnostic also distinguishes a confirmed native SQLite startup
-failure from a generic query exit. `doctor` starts a temporary native app-server
-in the current profile; querying hook metadata can require native runtime
-storage writes even though the request changes no hook settings. For
-`native_state_initialization_failed`, use the host's native approval mechanism
-for the exact command in the same task. Prefer approved command execution when
-available; if path permissions are required, request the actual Codex state/home
-and private review **directories**, never SQLite files or their sidecars.
-Do not change trust, copy state to a temporary profile, or reinstall for this
-storage diagnostic. The [skill's permission guidance](../plugins/unpaged-codex/skills/review-plan/SKILL.md#runtime-and-tools)
-includes a one-time same-task restart attempt only for the verified Codex 0.155
-Linux error caused by stale session grants on database files. Source indicates
-that a fresh native session drops those grants; this is not yet a verified
-Ubuntu recovery result.
+The 0.5.0 candidate runs setup and detached-worker launch through this local
+stdio MCP tool on the host. Native per-call metadata supplies the actual task
+and workspace; missing metadata fails closed before listening. The model cannot
+choose a task, executable, data directory or environment. If the tool is missing
+after an update, reload the plugin through Codex and rediscover it. Preserve the
+same profile and existing binding; do not prescribe SQLite grants, copied state,
+repeated reinstalls or all-access mode. See the
+[skill's native tool contract](../plugins/unpaged-codex/skills/review-plan/SKILL.md#runtime-and-tools).
 
-This correction does not establish that a host permits detached listeners.
-The worker inherits launch restrictions, and both network access and native
-queue access must remain usable after the command ends. An approved setup check
-cannot stand in for a live receiver and comment-delivery test. If the host's
-native approval flow cannot support that lifetime, preserve the canvas and
-report that gate as blocked. In Codex 0.155's ordinary Linux `bwrap` path, the
-command's PID namespace ends with the command, so a detached worker cannot
-survive; directory/network permissions alone do not remove that restriction.
-Listening remains blocked there until a native supported persistent launch is
-available. Do not prescribe all-access mode as a customer workaround.
+`doctor` starts a bounded temporary native app-server in the current profile;
+startup can initialize native storage even though the hook query changes no
+settings. A `native_state_initialization_failed` result from the local tool is
+a host setup blocker, not an instruction to grant database access. Preserve the
+canvas and report it. The earlier Ubuntu 0.4.0 sandbox failures remain historical
+evidence in the [trial record](codex-repository-install-trial-2026-09-20.md).
+
+Native local MCP launch and metadata were inspected in Codex
+`0.155.0-alpha.9.2`; source evidence does not prove installed worker survival,
+comment delivery or restart recovery. Ordinary Linux `bwrap` still cannot
+launch a persistent receiver: its per-command PID namespace ends with the
+command, and cannot safely identify host workers. Legacy bookkeeping, setup and
+worker CLI paths require explicitly approved host execution. Pure `digest` and
+`info` remain available in an ordinary sandbox for render-only work. Keep actual
+listener and recovery observations separate from the setup result.
 
 Setup readiness establishes persisted hook configuration, not a running listener
 or proven recovery. Reopen the same existing task after an app restart; the
@@ -144,8 +144,9 @@ setup, update and recovery results used the registered artifact, which excluded
 approval, lifecycle or recovery behavior for the bundled-direct-MCP route.
 
 For a registered local pilot, its `.app.json` must refer to the intended
-registration and its manifest must reference that file. Exclude direct MCP
-wiring from that artifact. Use a synthetic identifier in packaging tests and
+registration and its manifest must reference that file. Replace only the remote
+`unpaged` MCP connection; retain the bundled local `unpaged_review` stdio server
+in `.mcp.json`. Use a synthetic identifier in packaging tests and
 keep real personal registration identifiers out of source control. The manifest
 connects components; authentication stays in the server/host integration.
 Current packaging guidance prefers root `plugin.json` and `mcp.json`; legacy

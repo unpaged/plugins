@@ -127,6 +127,19 @@ and no listener key or worker was created by these diagnostics.
 
 The repository route remains **PARTIAL**, with listener setup **BLOCKED**.
 Comment delivery, the full plan lifecycle and restart recovery remain unproven
-for the Ubuntu trial. These observations concern 0.4.0; the local 0.4.1
-documentation correction is not a new installed-version trial or completed
-onboarding result.
+for the Ubuntu trial. These observations concern 0.4.0 and are historical
+evidence for its CLI launch path, not a result for the new local-tool candidate.
+
+## Local review-tool candidate — September 22, 2026
+
+The unreleased 0.5.0 candidate adds a bundled local stdio MCP review tool for
+host-side setup and detached-worker launch. Its fixed operations use native
+per-call task/workspace metadata. Source inspection of native Codex
+`0.155.0-alpha.9.2` establishes the launch and metadata mechanism; it does not
+establish installed Linux behavior. The SessionStart recovery hook is unchanged.
+
+No successful installed Ubuntu local-tool setup, listener survival, comment
+delivery or restart-recovery trial is added by this documentation update. The
+original canvas, binding/credential evidence and diagnostics above are not
+reinterpreted as proof of the new route. Keep the full workflow pending until
+those observations are recorded separately.
