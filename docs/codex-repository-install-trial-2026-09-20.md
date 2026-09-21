@@ -100,7 +100,24 @@ loading. These are user-reported setup results and visually observed skill
 loading, separate from the isolated macOS smoke above; they are not
 machine-verified comment-delivery evidence.
 
-The repository route remains **PARTIAL**. Canvas creation, comment delivery,
-the full plan lifecycle and restart recovery have not yet been demonstrated for
-the Ubuntu trial. These observations concern 0.4.0; the 0.4.1 documentation
-correction is not a new installed-version trial.
+The user subsequently reported creating an **Ubuntu plugin trial** canvas in
+**Visual plans**, marked **PROPOSED**, with a Decision log and successful content
+readback and digest verification. These are reported results, not independently
+verified canvas or digest evidence. Visual inspection remained blocked by the
+browser's sign-in requirement.
+
+**Listener setup is blocked.** No listener was started and no listener key was
+minted. The installed helper's read-only `doctor` check reportedly returned
+`query_failed` / `early_exit` even when using the installed Codex CLI. The VM
+agent also reported a read-only Codex SQLite error and sandbox failures after
+file-level grants attempted to create a directory inside a SQLite file;
+granting the containing directory reportedly left the earlier entries in place,
+and subsequent commands failed before starting. The exact raw error and CLI
+version have been requested. This diagnostic account and its proposed cause
+remain unverified; no runtime repair is established by this record.
+
+The repository route remains **PARTIAL**, with listener setup **BLOCKED**.
+Comment delivery, the full plan lifecycle and restart recovery remain unproven
+for the Ubuntu trial. These observations concern 0.4.0; the local 0.4.1
+documentation correction is not a new installed-version trial or completed
+onboarding result.
