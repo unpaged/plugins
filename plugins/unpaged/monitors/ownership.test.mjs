@@ -190,3 +190,25 @@ test("malformed array capabilities are ignored without contacting a foreign serv
   assert.ok(await f.claim());
   assert.equal(contacted, false);
 });
+
+test("controlled EACCES and EADDRNOTAVAIL bind failures skip candidates and retain the quorum requirement", async (t) => {
+  const f = await fixture(t);
+  const attempted = [];
+  const failures = new Map([[f.ports[0], "EACCES"], [f.ports[1], "EADDRNOTAVAIL"]]);
+  const owner = await f.claim({ createServer(listener) {
+    const server = createServer(listener);
+    const listen = server.listen;
+    server.listen = function (options) {
+      attempted.push(options.port);
+      const code = failures.get(options.port);
+      // Inject only the binding error; the three successful sockets use the
+      // real local kernel. This is not evidence of a native Windows run.
+      if (code) { queueMicrotask(() => server.emit("error", Object.assign(new Error(code), { code }))); return server; }
+      return listen.call(server, options);
+    };
+    return server;
+  } });
+  assert.ok(owner);
+  assert.deepEqual(attempted, f.ports);
+  assert.equal(JSON.parse(await readFile(f.path, "utf8")).port, f.ports[2]);
+});

@@ -155,10 +155,14 @@ test("the runner reads legacy config without rewriting the key and persists last
   const raw = JSON.stringify({ url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, SECRET], documentId: DOCUMENT });
   await writeFile(keyFile, raw, { mode: 0o600 });
   const controller = new AbortController();
-  await runMonitor(DOCUMENT, { home, signal: controller.signal, fetch: async () => response(), sleep: async () => controller.abort() });
+  const lines = [];
+  await runMonitor(DOCUMENT, { home, signal: controller.signal, say: (line) => lines.push(line),
+    fetch: async () => response(), sleep: async () => controller.abort() });
   assert.equal(await readFile(keyFile, "utf8"), raw);
   const status = JSON.parse(await readFile(join(home, STATUS_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"));
   assert.equal(status.state, "stopped");
+  assert.equal(status.reason, "shutdown");
+  assert.deepEqual(lines, []);
   assert.ok(status.lastSuccessfulPollAt);
   assert.equal(JSON.stringify(status).includes(SECRET), false);
 });
@@ -170,14 +174,21 @@ test("same-key takeover drains old stdout before the replacement can poll or pub
   await writeFile(join(home, KEY_DIR_RELATIVE, `${DOCUMENT}.json`), JSON.stringify(config), { mode: 0o600 });
   const a = new AbortController(), b = new AbortController();
   let releaseWrite;
+  let releaseNotice;
   let writing = false;
+  let noticing = false;
   let replacementRequests = 0;
   const output = [];
   const first = runMonitor(DOCUMENT, { home, signal: a.signal, fetch: async () => response([frame()]),
     say: async (line) => {
       if (line === PROTOCOL_PREAMBLE) return;
-      writing = true;
-      await new Promise((resolve) => { releaseWrite = resolve; });
+      if (line.startsWith("{")) {
+        writing = true;
+        await new Promise((resolve) => { releaseWrite = resolve; });
+      } else {
+        noticing = true;
+        await new Promise((resolve) => { releaseNotice = resolve; });
+      }
       output.push(line);
     }
   });
@@ -186,11 +197,17 @@ test("same-key takeover drains old stdout before the replacement can poll or pub
     now: () => Date.parse("2027-01-01T00:00:00.000Z"),
     fetch: async () => { replacementRequests++; return response(); }
   });
-  t.after(async () => { a.abort(); b.abort(); releaseWrite?.(); await Promise.all([first, second]); });
+  t.after(async () => { a.abort(); b.abort(); releaseWrite?.(); releaseNotice?.(); await Promise.all([first, second]); });
   await pause(80);
   assert.equal(replacementRequests, 0, "the old output drain still owns the quorum");
   releaseWrite();
-  assert.deepEqual(await first, { reason: "shutdown" });
+  await until(() => noticing);
+  assert.equal(replacementRequests, 0, "the supersession notice must also drain before releasing ownership");
+  const stopped = JSON.parse(await readFile(join(home, STATUS_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"));
+  assert.equal(stopped.state, "stopped");
+  assert.equal(stopped.reason, "local-superseded");
+  releaseNotice();
+  assert.deepEqual(await first, { reason: "local-superseded" });
   await until(() => replacementRequests === 1);
   let status;
   for (let i = 0; i < 100; i++) {
@@ -200,7 +217,12 @@ test("same-key takeover drains old stdout before the replacement can poll or pub
   }
   assert.equal(status.state, "connected");
   assert.equal(status.lastSuccessfulPollAt, "2027-01-01T00:00:00.000Z");
-  assert.equal(output.length, 1);
+  assert.notEqual(status.ownerId, stopped.ownerId);
+  assert.equal(output.length, 2);
+  assert.match(output[1], /Another local Monitor/);
+  assert.match(output[1], /do not mint another key/);
+  assert.equal(output[1].includes(SECRET), false);
+  assert.equal(await readFile(join(home, KEY_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"), JSON.stringify(config));
   b.abort();
   await second;
 });
@@ -243,4 +265,29 @@ test("a key changed during handover is reloaded before the replacement's first p
   });
   assert.equal(header, `Bearer ${"n".repeat(43)}`);
   assert.equal(released, true);
+});
+
+test("takeover before the first poll emits one notice before releasing ownership", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "unpaged-claude-early-takeover-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await mkdir(join(home, KEY_DIR_RELATIVE), { recursive: true });
+  await writeFile(join(home, KEY_DIR_RELATIVE, `${DOCUMENT}.json`), JSON.stringify(config), { mode: 0o600 });
+  const lines = [];
+  let released = false;
+  const result = await runMonitor(DOCUMENT, { home,
+    acquireOwnership: async ({ onTakeover }) => {
+      onTakeover();
+      onTakeover();
+      return { ownerId: "early-owner", release: async () => { released = true; } };
+    },
+    fetch: async () => assert.fail("a superseded monitor must not poll"),
+    say: async (line) => { assert.equal(released, false); lines.push(line); }
+  });
+  assert.deepEqual(result, { reason: "local-superseded" });
+  assert.equal(released, true);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /Another local Monitor/);
+  const status = JSON.parse(await readFile(join(home, STATUS_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"));
+  assert.equal(status.reason, "local-superseded");
+  assert.equal(status.ownerId, "early-owner");
 });

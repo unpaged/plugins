@@ -17,6 +17,7 @@ import { acquireMonitorOwnership } from "./ownership.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 export const DEDUPE_LIMIT = 4096;
+const LOCAL_SUPERSEDED = "local-superseded";
 
 function duration(value, fallback, maximum) {
   const result = value ?? fallback;
@@ -60,7 +61,15 @@ export async function runListener(config, options = {}) {
   const reportStatus = async (state, reason) => {
     if (!signal?.aborted) await report(state, reason, { lastSuccessfulPollAt });
   };
-  if (signal?.aborted) return { reason: "shutdown" };
+  const finish = async () => {
+    const reason = signal?.reason === LOCAL_SUPERSEDED ? LOCAL_SUPERSEDED : "shutdown";
+    await report("stopped", reason, { lastSuccessfulPollAt });
+    if (reason === LOCAL_SUPERSEDED) {
+      await say("Another local Monitor requested this canvas's Unpaged listener, so this session stops listening. Leave the stored key in place; do not mint another key. Use /unpaged:listen status to check the replacement.");
+    }
+    return { reason };
+  };
+  if (signal?.aborted) return signal.reason === LOCAL_SUPERSEDED ? finish() : { reason: "shutdown" };
   await reportStatus("connecting");
   while (!signal?.aborted) {
     let result;
@@ -103,10 +112,9 @@ export async function runListener(config, options = {}) {
     attempt = 0;
     await sleep(interval(), signal);
   }
-  // An owning runner may write its own final state while still holding the
-  // local ownership gate. No event or terminal notice is emitted after stop.
-  await report("stopped", "shutdown", { lastSuccessfulPollAt });
-  return { reason: "shutdown" };
+  // The local ownership gate remains held until the final status and any
+  // supersession notice drain. Ordinary external shutdown stays silent.
+  return finish();
 }
 
 export async function runMonitor(documentId, options = {}) {
@@ -130,12 +138,13 @@ export async function runMonitor(documentId, options = {}) {
   };
   const controller = new AbortController();
   const onAbort = () => controller.abort();
+  const onTakeover = () => controller.abort(LOCAL_SUPERSEDED);
   if (options.signal?.aborted) controller.abort();
   options.signal?.addEventListener("abort", onAbort, { once: true });
   let ownership;
   try {
     ownership = await (options.acquireOwnership ?? acquireMonitorOwnership)({
-      home, documentId, signal: controller.signal, onTakeover: onAbort
+      home, documentId, signal: controller.signal, onTakeover
     });
     if (!ownership) return { reason: "ownership-unavailable" };
     // A new key may have been stored while the previous monitor drained.

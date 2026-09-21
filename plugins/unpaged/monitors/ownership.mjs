@@ -75,9 +75,9 @@ async function contact(owner, stop, timeoutMs = 1000) {
   });
 }
 
-function controlServer(scope, capability, onTakeover) {
+function controlServer(scope, capability, onTakeover, makeServer) {
   const sockets = new Set();
-  const server = createServer((socket) => {
+  const server = makeServer((socket) => {
     sockets.add(socket);
     const timer = setTimeout(() => socket.destroy(), 1000);
     socket.on("close", () => { clearTimeout(timer); sockets.delete(socket); });
@@ -113,12 +113,12 @@ function controlServer(scope, capability, onTakeover) {
   return { server, sockets };
 }
 
-async function bind(port, scope, capability, onTakeover) {
-  const owner = controlServer(scope, capability, onTakeover);
+async function bind(port, scope, capability, onTakeover, makeServer) {
+  const owner = controlServer(scope, capability, onTakeover, makeServer);
   return new Promise((resolveBind, reject) => {
     const onError = (error) => {
       owner.server.removeListener("listening", onListen);
-      if (error.code === "EADDRINUSE") resolveBind(null);
+      if (["EADDRINUSE", "EACCES", "EADDRNOTAVAIL"].includes(error.code)) resolveBind(null);
       else reject(new Error("monitor_lock_unavailable"));
     };
     const onListen = () => { owner.server.removeListener("error", onError); resolveBind({ ...owner, port }); };
@@ -144,11 +144,12 @@ export async function probeMonitorOwnership({ home, documentId }) {
 }
 
 export async function acquireMonitorOwnership({ home, documentId, signal, onTakeover,
-  timeoutMs = 10000, ports: testPorts, beforePublish } = {}) {
+  timeoutMs = 10000, ports: testPorts, beforePublish, createServer: makeServer = createServer } = {}) {
   const { path, scope } = await location(home, documentId);
   const ports = testPorts ?? ownershipPorts(scope);
   if (!Array.isArray(ports) || ports.length !== 5 || new Set(ports).size !== 5 ||
-      ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535) || typeof onTakeover !== "function") {
+      ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535) ||
+      typeof onTakeover !== "function" || typeof makeServer !== "function") {
     throw new Error("monitor_lock_configuration_invalid");
   }
   const deadline = Date.now() + timeoutMs;
@@ -160,7 +161,7 @@ export async function acquireMonitorOwnership({ home, documentId, signal, onTake
       if (previous) await contact(previous, true);
       if (signal?.aborted) break;
       for (const port of ports) {
-        const owner = await bind(port, scope, capability, onTakeover);
+        const owner = await bind(port, scope, capability, onTakeover, makeServer);
         if (owner) claimed.push(owner);
         if (claimed.length === 3 || signal?.aborted) break;
       }
