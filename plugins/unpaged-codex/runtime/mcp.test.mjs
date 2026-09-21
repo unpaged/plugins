@@ -4,6 +4,7 @@ import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createHandler, nativeContext, serve } from "./mcp.mjs";
+import { executeControl } from "./control.mjs";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
 const meta = { threadId, "codex/sandbox-state-meta": { sandboxCwd: "file:///tmp/Review%20workspace" } };
@@ -77,8 +78,46 @@ test("stdio preserves chunked UTF-8, sequences operations and bounds malformed i
   await serve({ input: Readable.from([Buffer.from([0x22, 0xc3, 0x22, 0x0a])]), output,
     handler: () => assert.fail("invalid UTF-8 must not reach an operation") });
   assert.equal(JSON.parse(replies.at(-1)).error.code, -32700);
-  await assert.rejects(serve({ input: Readable.from([Buffer.alloc(2 * 1024 * 1024 + 1, 65)]), output }), /input_too_large/);
+  await serve({ input: Readable.from([Buffer.alloc(2 * 1024 * 1024 + 256 * 1024 + 1, 65)]), output });
+  assert.deepEqual(JSON.parse(replies.at(-1)), { jsonrpc: "2.0", id: null, error: { code: -32600, message: "input_too_large" } });
   await assert.rejects(serve({ input: Readable.from(["{"]), output }), /incomplete_message/);
+});
+
+test("oversized frames are discarded once through newline and later requests still run", async () => {
+  const oversized = Buffer.alloc(2 * 1024 * 1024 + 256 * 1024 + 1, 65);
+  const following = Buffer.from("\n" + JSON.stringify(request(3, "tools/list")) + "\n");
+  for (const chunks of [[Buffer.concat([oversized, following])],
+    [oversized.subarray(0, 100), oversized.subarray(100), Buffer.from("more discarded bytes"), following]]) {
+    const replies = [], seen = [];
+    const output = new Writable({ write(chunk, _, done) { replies.push(JSON.parse(chunk.toString())); done(); } });
+    await serve({ input: Readable.from(chunks), output, handler: async (message) => {
+      seen.push(message); return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
+    } });
+    assert.deepEqual(seen, [{ jsonrpc: "2.0", id: 3, method: "tools/list" }]);
+    assert.deepEqual(replies, [
+      { jsonrpc: "2.0", id: null, error: { code: -32600, message: "input_too_large" } },
+      { jsonrpc: "2.0", id: 3, result: { tools: [] } }
+    ]);
+  }
+});
+
+test("bounded envelope overhead lets the payload limit return a correlated tool error without executing", async () => {
+  let executions = 0;
+  const handler = createHandler({ control: (args, context, options) => executeControl(args, context,
+    { ...options, executeCli: async () => { executions++; return {}; } }) });
+  await ready(handler);
+  const oversized = request(2, "tools/call", { name: "review", _meta: meta,
+    arguments: { operation: "digest", payload: { document: { title: "private".repeat(300000) } } } });
+  const replies = [];
+  const output = new Writable({ write(chunk, _, done) { replies.push(JSON.parse(chunk.toString())); done(); } });
+  await serve({ input: Readable.from([JSON.stringify(oversized) + "\n" + JSON.stringify(request(3, "tools/list")) + "\n"]), output, handler });
+  assert.equal(executions, 0);
+  assert.equal(replies[0].id, 2);
+  assert.equal(replies[0].result.isError, true);
+  assert.deepEqual(JSON.parse(replies[0].result.content[0].text), { error: "input_too_large" });
+  assert.equal(JSON.stringify(replies).includes("private"), false);
+  assert.equal(replies[1].id, 3);
+  assert.equal(replies[1].result.tools[0].name, "review");
 });
 
 test("the packaged stdio process negotiates and exits cleanly on EOF without a task or native state", async () => {
@@ -93,7 +132,12 @@ test("the packaged stdio process negotiates and exits cleanly on EOF without a t
     request(1, "initialize", { protocolVersion: "2025-11-25" }),
     { jsonrpc: "2.0", method: "notifications/initialized" },
     request(2, "tools/list"),
-    request(3, "tools/call", { name: "review", arguments: { operation: "doctor" } })
+    request(3, "tools/call", { name: "review", arguments: { operation: "doctor" } }),
+    request(4, "tools/call", { name: "review", _meta: meta,
+      arguments: { operation: "digest", payload: { document: { title: "x".repeat(2 * 1024 * 1024) } } } }),
+    request(5, "tools/call", { name: "review", _meta: meta,
+      arguments: { operation: "digest", payload: { document: { title: "x".repeat(3 * 1024 * 1024) } } } }),
+    request(6, "tools/list")
   ].map((value) => JSON.stringify(value) + "\n").join(""));
   const code = await new Promise((resolve, reject) => { child.once("close", resolve); child.once("error", reject); });
   clearTimeout(timeout);
@@ -101,4 +145,10 @@ test("the packaged stdio process negotiates and exits cleanly on EOF without a t
   const replies = stdout.trim().split("\n").map(JSON.parse);
   assert.equal(replies[1].result.tools[0].name, "review");
   assert.equal(JSON.parse(replies[2].result.content[0].text).error, "native_task_context_required");
+  assert.equal(replies[3].id, 4);
+  assert.equal(JSON.parse(replies[3].result.content[0].text).error, "input_too_large");
+  assert.deepEqual(replies[4], { jsonrpc: "2.0", id: null, error: { code: -32600, message: "input_too_large" } });
+  assert.equal(replies[5].id, 6);
+  assert.equal(replies[5].result.tools[0].name, "review");
+  assert.doesNotMatch(stderr, /unpaged_review_transport_failed/);
 });

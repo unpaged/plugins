@@ -183,6 +183,14 @@ private review state, the canonical listener endpoint and verified native Codex
 commands. These limits are enforced by the adapter input contract, not by
 claiming that the host process inherits the agent's filesystem sandbox.
 
+Tool payloads are limited to 2 MiB, with a further 256 KiB bound for the native
+request envelope. A frame beyond that combined limit is never dispatched, so
+that request makes no local mutation. The server emits a constant protocol
+error, discards through the next newline and continues serving later requests.
+It does not parse a request ID from the oversized frame: the error has a null
+ID, so the host may time out that tool call. Do not report success or retry a
+mutation automatically; inspect the relevant status or receipts first.
+
 `doctor` calls the verified native binary through a bounded temporary public
 `app-server --stdio` connection: initialize, initialized, then `hooks/list` for
 the metadata-derived current folder. It starts no task, invokes no hook, changes

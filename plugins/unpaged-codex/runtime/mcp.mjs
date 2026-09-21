@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { executeControl, controlInputSchema } from "./control.mjs";
 import { UUID } from "./protocol.mjs";
 
-const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
+// Control payloads remain capped at 2 MiB; allow bounded native context/envelope overhead.
+const MAX_MESSAGE_BYTES = 2 * 1024 * 1024 + 256 * 1024;
 const VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (code) => { throw new Error(code); };
@@ -79,6 +80,7 @@ export function createHandler({ control = executeControl, env = process.env } = 
 // also keeps lifecycle mutations ordered within this client connection.
 export async function serve({ input = process.stdin, output = process.stdout, handler = createHandler() } = {}) {
   let buffered = Buffer.alloc(0);
+  let discarding = false;
   const send = async (message) => {
     if (message === null) return;
     const line = JSON.stringify(message) + "\n";
@@ -89,7 +91,17 @@ export async function serve({ input = process.stdin, output = process.stdout, ha
     while (bytes.length) {
       const end = bytes.indexOf(10);
       const part = end < 0 ? bytes : bytes.subarray(0, end);
-      if (buffered.length + part.length > MAX_MESSAGE_BYTES) fail("input_too_large");
+      if (discarding || buffered.length + part.length > MAX_MESSAGE_BYTES) {
+        if (!discarding) {
+          buffered = Buffer.alloc(0);
+          // The bounded prefix cannot safely identify the request. Do not guess its id or execute it.
+          await send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "input_too_large" } });
+        }
+        discarding = end < 0;
+        if (end < 0) break;
+        bytes = bytes.subarray(end + 1);
+        continue;
+      }
       buffered = Buffer.concat([buffered, part]);
       if (end < 0) break;
       bytes = bytes.subarray(end + 1);
