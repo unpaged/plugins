@@ -10,6 +10,7 @@ const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
 const files = [
   "runtime/cli.mjs", "runtime/process-identity.mjs", "runtime/protocol.mjs", "runtime/snapshot.mjs",
   "runtime/store.mjs", "runtime/worker.mjs", "runtime/setup.mjs",
+  "runtime/handover.mjs", "runtime/poll.mjs",
   "skills/review-plan/SKILL.md", "skills/visual-plan/SKILL.md", "skills/as-built/SKILL.md"
 ];
 
@@ -46,7 +47,8 @@ async function syncDirectory(path) {
 
 // Content-addressed snapshots are retained indefinitely: queued events can
 // reference an older version after its worker exits or the plugin is updated.
-// A fresh worker uses the current version; an already-live worker is not replaced.
+// A fresh worker uses the current version. Live polling workers keep their
+// runtime; a legacy socket worker receives a verified graceful handover.
 export async function retainRuntime(dataDir, source = pluginRoot) {
   if (!isAbsolute(dataDir) || !isAbsolute(source)) throw new Error("absolute_runtime_directory_required");
   await directory(dataDir);

@@ -7,11 +7,13 @@ import { Readable } from "node:stream";
 import { Store } from "./store.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { executeCli } from "./cli.mjs";
-import { EVENTS_URL, SUBPROTOCOL } from "./protocol.mjs";
+import { POLL_URL } from "./protocol.mjs";
+import { runWorker } from "./worker.mjs";
 
 const DOC = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const RECORD = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const KEY = "K".repeat(43);
 const DIGEST = "a".repeat(64), CHANGED = "b".repeat(64), BUILT = "c".repeat(64);
 const proof = (currentDigest = DIGEST) => ({ evidence: "Verified the explicit request in the assigned Codex task.", currentDigest });
 const input = (value) => Readable.from([JSON.stringify(value)]);
@@ -19,9 +21,9 @@ function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "unpaged-lifecycle-test-"));
   const path = join(directory, "reviews.sqlite");
   const store = new Store(path);
-  store.bind({ documentId: DOC, threadId: TASK, keyId: "key", url: EVENTS_URL,
-    protocols: [SUBPROTOCOL, "private-test-credential"], codexPath: process.execPath, planDigest: DIGEST });
-  const { token } = store.claimWorker(DOC, { pid: process.pid });
+  store.bind({ documentId: DOC, threadId: TASK, keyId: "key", pollUrl: POLL_URL,
+    key: KEY, codexPath: process.execPath, planDigest: DIGEST });
+  const { token } = store.claimWorker(DOC, { pid: process.pid, transport: "poll-v1" });
   t.after(() => { try { store.close(); } catch {} rmSync(directory, { recursive: true, force: true }); });
   const receive = (id) => store.receive(DOC, { id, documentId: DOC, nodeId: "root", threadId: `thread-${id}`,
     commentId: `comment-${id}`, reason: "mention", authorRole: "owner", resolved: false, createdAt: new Date().toISOString() }, token);
@@ -213,7 +215,7 @@ test("restart and compaction retain implementation evidence and phase without au
   store.transition(DOC, "approve", proof());
   store.transition(DOC, "execute", proof());
   store.transition(DOC, "checkpoint", proof(CHANGED));
-  store.setConnection(DOC, token, "connected");
+  store.recordPollSuccess(DOC, token, { at: new Date().toISOString(), newEvents: false });
   const before = store.getBinding(DOC);
   const report = await executeCli(["session-start", "--data", directory], {
     env: { CODEX_THREAD_ID: TASK }, input: input({ hook_event_name: "SessionStart", source: "compact", session_id: TASK }),
@@ -231,12 +233,88 @@ test("restart and compaction retain implementation evidence and phase without au
   store.releaseWorker(DOC, token);
   store.close();
   const restored = new Store(path); t.after(() => restored.close());
-  restored.claimWorker(DOC, { pid: process.pid });
+  restored.claimWorker(DOC, { pid: process.pid, transport: "poll-v1" });
   const after = restored.getBinding(DOC);
   assert.equal(after.planPhase, "executing");
   assert.equal(after.planDigest, CHANGED);
+  assert.equal(after.lastSuccessfulPollAt, before.lastSuccessfulPollAt);
+  assert.equal(after.lastEventAt, null);
   assert.deepEqual(after.phaseEvidence, before.phaseEvidence);
   assert.deepEqual(after.acceptanceReceipts, before.acceptanceReceipts);
   assert.equal(after.reconciliationRequired, true);
   assert.throws(() => restored.transition(DOC, "checkpoint", proof(BUILT)), /reconciliation_required/);
+});
+
+test("polling a built review preserves approval and completion receipts while routing new feedback", async (t) => {
+  const { store, directory, token, begin, complete } = fixture(t);
+  store.transition(DOC, "approve", proof());
+  store.transition(DOC, "execute", proof());
+  store.transition(DOC, "built", { ...proof(BUILT), recordNodeId: RECORD, openTasks: 0 });
+  const previous = begin("previous-feedback");
+  complete(previous.event.id, previous.operationToken, BUILT);
+  const before = store.getBinding(DOC);
+  const receipt = store.listEvents(DOC)[0];
+  const credentials = store.getBinding(DOC, { includeSecrets: true }).protocols;
+  store.releaseWorker(DOC, token);
+
+  const frame = (id) => ({ type: "agent-inbox-event", id, documentId: DOC,
+    nodeId: "root", threadId: `thread-${id}`, commentId: `comment-${id}`,
+    reason: "mention", authorRole: "owner", resolved: false, createdAt: new Date().toISOString(),
+    documentTitle: "Plan", nodeTitle: "Overview", authorName: "Owner",
+    textPreview: "@agent review", boardUrl: "https://unpaged.io/board", anchorElementId: null });
+  const frames = [frame("previous-feedback"), frame("new-feedback")];
+  const controller = new AbortController();
+  const calls = [];
+  let polls = 0;
+  const done = runWorker(DOC, { store, dataDir: directory, signal: controller.signal,
+    pollMs: 10, pollIntervalMs: 10, idlePollIntervalMs: 10,
+    async fetch(url, options) {
+      assert.equal(url, POLL_URL);
+      assert.equal(options.headers.Authorization, `Bearer ${KEY}`);
+      polls++;
+      return Response.json({ events: polls === 1 ? frames : [] });
+    },
+    execFile(path, args, options, callback) {
+      calls.push({ path, args, options });
+      callback(null, `Queued message ${RECORD} for thread ${TASK}`);
+    }
+  });
+  const until = async (condition) => {
+    const deadline = Date.now() + 2000;
+    while (!condition()) {
+      assert.ok(Date.now() < deadline, "polling lifecycle condition timed out");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
+  try {
+    await until(() => polls >= 2 && store.listEvents(DOC).some((event) => event.id === "new-feedback" && event.state === "queued"));
+    const active = store.getBinding(DOC);
+    assert.equal(active.status, "active");
+    assert.equal(active.connectionState, "connected");
+    assert.equal(active.planPhase, "built");
+    assert.equal(active.planDigest, BUILT);
+    assert.equal(active.acceptedDigest, DIGEST);
+    assert.equal(active.workerTransport, "poll-v1");
+    assert.ok(active.lastSuccessfulPollAt);
+    assert.ok(active.lastEventAt);
+    assert.equal(active.reconciliationRequired, true, "successful polling must retain the restart gap");
+    assert.deepEqual(active.acceptanceReceipts, before.acceptanceReceipts);
+    assert.deepEqual(active.phaseEvidence, before.phaseEvidence);
+    assert.deepEqual(store.listEvents(DOC)[0], receipt);
+    assert.equal(calls.length, 1, "completed replay must not queue a second review");
+    assert.deepEqual(calls[0].args.slice(0, 3), ["queue", "--thread", TASK]);
+    const next = store.begin(DOC, "new-feedback", { expectedThreadId: TASK });
+    complete("new-feedback", next.operationToken, BUILT);
+  } finally {
+    controller.abort();
+    await done;
+  }
+  const stopped = store.getBinding(DOC);
+  assert.equal(stopped.status, "active", "graceful shutdown preserves the review");
+  assert.equal(stopped.planPhase, "built");
+  assert.equal(stopped.keyId, before.keyId);
+  assert.equal(stopped.threadId, before.threadId);
+  assert.equal(stopped.credentialsPresent, true);
+  assert.deepEqual(store.getBinding(DOC, { includeSecrets: true }).protocols, credentials);
+  assert.equal(stopped.eventCounts.completed, 2);
 });

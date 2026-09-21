@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the `unpaged` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are the `version` field of `plugins/unpaged/.claude-plugin/plugin.json`.
+All notable changes to the Unpaged plugins. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Unprefixed versions refer to `plugins/unpaged/.claude-plugin/plugin.json`; Codex entries name their package and use `plugins/unpaged-codex/.codex-plugin/plugin.json`.
 
 ## [Unreleased]
 
@@ -13,6 +13,15 @@ All notable changes to the `unpaged` plugin. The format follows [Keep a Changelo
 - Successful empty polls count as connected. Invalid/revoked keys (401) and newer-key takeover (409) stop; rate limiting, temporary service failures and network failures retry the same key.
 - A second Monitor for the same canvas on the same machine takes over after the earlier Monitor stops polling and drains its output; the displaced session receives a notice that it stopped listening. A pre-1.3 Monitor does not participate in local ownership: end it through Claude Code before arming the canvas from the updated session.
 - Installation and command guidance now describe polling intervals and the staged server/client rollout. WebSocket-era release notes below remain historical.
+
+## [unpaged-codex 0.4.0] - 2026-09-21
+
+### Changed
+
+- The Codex receiver uses authenticated `GET /events/poll` requests with the existing listener key in the Authorization header. It polls every 30 seconds, or every 60 seconds after an hour without a new event. Transient failures retry the same key with bounded backoff; invalid/revoked keys (401) and a newer key for the same canvas (409) stop the receiver.
+- Status records the last successful authenticated poll, including empty responses, and the last newly received event. Healthy intervals between polls remain connected; transport failures and restarts retain the existing reconciliation requirement.
+- Existing bindings gain polling fields without replacing their key, task, plan phase, digests or receipts. Recovery can gracefully hand over a verified local socket receiver before starting its polling replacement. Retained helpers remain available to queued work; installation alone does not migrate a running process.
+- Node 24 remains the minimum supported runtime. Historical installed socket trials do not establish polling recovery or update behavior; a native installed polling trial remains required.
 
 ## [1.2.0] - 2026-09-12
 

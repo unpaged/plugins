@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Store } from "./store.mjs";
-import { EVENTS_URL, acceptancePhrase, parseEvent } from "./protocol.mjs";
+import { EVENTS_URL, POLL_URL, acceptancePhrase, parseEvent } from "./protocol.mjs";
 import { enqueue, parseQueueReceipt, parseWorkerArguments, routingMessage, runWorker } from "./worker.mjs";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
@@ -18,6 +18,7 @@ const binding = () => ({
   threadId: THREAD,
   keyId: "listener-key-id",
   url: EVENTS_URL,
+  pollUrl: POLL_URL,
   protocols: ["unpaged-listener.v1", SECRET],
   codexPath: CODEX_PATH,
   planDigest: DIGEST
@@ -44,23 +45,27 @@ function fixture(t, options = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "unpaged-worker-test-"));
   const store = new Store(join(dataDir, "reviews.sqlite"));
   store.bind(binding());
-  const sockets = [];
+  const requests = [];
   const calls = [];
   const controller = new AbortController();
   let run;
-  class Socket extends EventTarget {
-    constructor(url, protocols) {
-      super();
-      this.url = url;
-      this.protocols = protocols;
-      this.closed = false;
-      sockets.push(this);
-    }
-    open() { this.dispatchEvent(new Event("open")); }
-    message(raw) { this.dispatchEvent(new MessageEvent("message", { data: raw })); }
-    serverClose(code) { this.dispatchEvent(Object.assign(new Event("close"), { code })); }
-    close() { this.closed = true; this.serverClose(1000); }
-  }
+  const fetch = (url, settings) => new Promise((resolve, reject) => {
+    const request = { url, settings, resolve, reject, replied: false, aborted: false };
+    requests.push(request);
+    settings.signal.addEventListener("abort", () => { request.aborted = true; reject(new Error("request_aborted")); }, { once: true });
+  });
+  const pending = async () => {
+    await until(() => requests.some((request) => !request.replied && !request.aborted));
+    return requests.find((request) => !request.replied && !request.aborted);
+  };
+  const reply = async (value, status = 200) => {
+    const request = await pending();
+    request.replied = true;
+    request.resolve(new Response(JSON.stringify(value), { status }));
+    await pause(1);
+    return request;
+  };
+  const respond = (events = [], status = 200) => reply({ events: events.map((event) => typeof event === "string" ? JSON.parse(event) : event) }, status);
   const execFile = (path, args, settings, callback) => {
     calls.push({ path, args, settings, callback });
     options.onQueue?.({ path, args, settings, callback }, store);
@@ -69,10 +74,10 @@ function fixture(t, options = {}) {
   };
   const start = (extra = {}) => {
     run = runWorker(DOCUMENT, {
-      dataDir, store, Socket, execFile, pid: 990001, isAlive: () => false,
-      signal: controller.signal, pollMs: 10, reconnectBaseMs: 5, ...extra
+      dataDir, store, fetch, execFile, pid: 990001, isAlive: () => false,
+      signal: controller.signal, pollMs: 10, pollIntervalMs: 10, idlePollIntervalMs: 40,
+      retryBaseMs: 10, maxRetryMs: 40, ...extra
     });
-    if (options.openSocket !== false) sockets[0]?.open();
     return run;
   };
   t.after(async () => {
@@ -83,7 +88,7 @@ function fixture(t, options = {}) {
     store.close();
     rmSync(dataDir, { recursive: true, force: true });
   });
-  return { dataDir, store, sockets, calls, controller, start, Socket, execFile, get done() { return run; } };
+  return { dataDir, store, requests, calls, controller, start, pending, reply, respond, get done() { return run; } };
 }
 
 test("queue receipt tolerates prose changes but requires only the queue UUID and bound task UUID", () => {
@@ -132,7 +137,7 @@ test("queue transport uses only fixed routing, the validated binary and shell:fa
   assert.ok(prompt.includes(JSON.stringify(["/tmp/plugin/runtime/cli.mjs", "begin", DOCUMENT, event.id, "--data", "/tmp/review-data"])));
 });
 
-test("event is committed before the queue command and duplicate frames dispatch once", async (t) => {
+test("events commit before queueing and replayed poll frames dispatch once", async (t) => {
   let committed;
   const f = fixture(t, { onQueue(_call, store) {
     const second = new Store(store.path);
@@ -140,39 +145,34 @@ test("event is committed before the queue command and duplicate frames dispatch 
     second.close();
   } });
   f.start();
-  const socket = f.sockets[0];
-  assert.equal(socket.url, EVENTS_URL);
-  assert.deepEqual(socket.protocols, binding().protocols);
-  socket.open();
-  socket.message(frame());
-  socket.message(frame());
+  await f.respond([frame(), frame()]);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
+  assert.equal(f.requests[0].url, POLL_URL);
+  assert.equal(f.requests[0].settings.headers.Authorization, `Bearer ${SECRET}`);
   assert.equal(committed.length, 1);
   assert.equal(committed[0].state, "dispatching");
+  await f.respond([frame()]);
   assert.equal(f.calls.length, 1);
   assert.equal(f.store.listEvents(DOCUMENT)[0].queueId, QUEUE);
   assert.equal(JSON.stringify(committed).includes("PRIVATE COMMENT"), false);
+  assert.equal(f.store.getBinding(DOCUMENT).workerTransport, "poll-v1");
 });
 
-test("malformed, foreign-board and non-string frames never persist or queue", async (t) => {
+test("a malformed or foreign frame rejects the entire batch without a false successful connection", async (t) => {
   const f = fixture(t);
   f.start();
-  const socket = f.sockets[0];
-  socket.message("not-json");
-  socket.message(frame("foreign", { documentId: THREAD }));
-  socket.message(frame("bad-version", { schemaVersion: 2 }));
-  socket.message(frame("bad-author", { authorRole: "agent" }));
-  socket.message(new Uint8Array([1, 2]));
-  await pause();
+  await f.respond([frame(), frame("foreign", { documentId: THREAD })]);
+  await until(() => f.store.getBinding(DOCUMENT).connectionState === "reconnecting");
   assert.equal(f.calls.length, 0);
   assert.equal(f.store.listEvents(DOCUMENT).length, 0);
+  assert.equal(f.store.getBinding(DOCUMENT).lastSuccessfulPollAt, null);
+  assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
 });
 
 test("received rounds remain serialized through queued and processing until completion", async (t) => {
   const f = fixture(t);
   f.start();
-  f.sockets[0].message(frame("first"));
-  f.sockets[0].message(frame("second"));
+  await f.respond([frame("first"), frame("second")]);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   assert.deepEqual(f.store.listEvents(DOCUMENT).map((event) => event.state), ["queued", "received"]);
   const operation = f.store.begin(DOCUMENT, "first", { expectedThreadId: THREAD });
@@ -181,76 +181,62 @@ test("received rounds remain serialized through queued and processing until comp
   f.store.complete(DOCUMENT, "first", {
     operationToken: operation.operationToken, evidence: { replyId: "reply-1", planDigest: DIGEST }
   });
-  await until(() => f.calls.length === 2);
   await until(() => f.store.listEvents(DOCUMENT)[1].state === "queued");
   assert.deepEqual(f.store.listEvents(DOCUMENT).map((event) => event.state), ["completed", "queued"]);
 });
 
-test("transient disconnect marks a reconciliation gap and reconnects without inventing work", async (t) => {
+test("a retryable response keeps the key and last success while recording a reconciliation gap", async (t) => {
   const f = fixture(t);
   f.start();
-  const first = f.sockets[0];
-  first.open();
-  first.serverClose(1006);
+  await f.respond();
+  await until(() => f.store.getBinding(DOCUMENT).connectionState === "connected");
+  const success = f.store.getBinding(DOCUMENT).lastSuccessfulPollAt;
+  assert.ok(success);
+  assert.equal(f.store.getBinding(DOCUMENT).lastEventAt, null);
+  await f.respond([], 503);
+  await until(() => f.store.getBinding(DOCUMENT).connectionState === "reconnecting");
+  assert.equal(f.store.getBinding(DOCUMENT).lastSuccessfulPollAt, success);
   assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
-  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "reconnecting");
-  await until(() => f.sockets.length === 2);
-  f.sockets[1].open();
-  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
-  assert.equal(f.calls.length, 0);
-  // Stale callbacks from the replaced socket cannot inject another event.
-  first.message(frame("stale-socket"));
-  assert.equal(f.store.listEvents(DOCUMENT).length, 0);
-});
-
-test("a received event after reconnect proceeds while the missed-event gap remains visible", async (t) => {
-  const f = fixture(t);
-  f.start();
-  f.sockets[0].serverClose(1006);
-  await until(() => f.sockets.length === 2);
-  f.sockets[1].open();
-  f.sockets[1].message(frame());
+  await f.respond([frame()]);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
   assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
+  assert.ok(f.requests.every((request) => request.settings.headers.Authorization === `Bearer ${SECRET}`));
 });
 
-for (const code of [4401, 4409, 1003]) {
-  test(`terminal close ${code} stops without reconnect and retains key cleanup information`, async (t) => {
+for (const status of [401, 409]) {
+  test(`HTTP ${status} stops without retry and retains key cleanup information`, async (t) => {
     const f = fixture(t);
     f.start();
-    f.sockets[0].serverClose(code);
+    await f.respond([], status);
     const result = await f.done;
-    assert.equal(result.reason, `terminal_close_${code}`);
+    assert.equal(result.reason, `terminal_http_${status}`);
     await pause();
-    assert.equal(f.sockets.length, 1);
+    assert.equal(f.requests.length, 1);
     const state = f.store.getBinding(DOCUMENT);
+    assert.equal(state.status, "stopped");
+    assert.equal(state.cleanupRequired, true);
     assert.equal(state.connectionState, "stopped");
-    assert.equal(state.connectionReason, `terminal_close_${code}`);
+    assert.equal(state.connectionReason, `terminal_http_${status}`);
     assert.equal(state.keyId, "listener-key-id");
     assert.deepEqual(f.store.getBinding(DOCUMENT, { includeSecrets: true }).protocols, binding().protocols);
     assert.equal(f.calls.length, 0);
   });
 
-  test(`terminal close ${code} fences agent begin before a pending queue receipt arrives`, async (t) => {
+  test(`HTTP ${status} fences agent begin before a pending queue receipt arrives`, async (t) => {
     const f = fixture(t, { autoReceipt: false });
     f.start();
-    f.sockets[0].message(frame());
-    assert.equal(f.store.listEvents(DOCUMENT)[0].state, "dispatching");
-    f.sockets[0].serverClose(code);
-    // No wait and no queue callback: rejection is durable in this same tick.
-    const stopped = f.store.getBinding(DOCUMENT);
-    assert.equal(stopped.status, "stopped");
-    assert.equal(stopped.cleanupRequired, true);
-    assert.equal(stopped.connectionReason, `terminal_close_${code}`);
+    await f.respond([frame()]);
+    await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "dispatching");
+    await f.respond([], status);
+    await until(() => f.store.getBinding(DOCUMENT).status === "stopped");
+    assert.equal(f.store.getBinding(DOCUMENT).cleanupRequired, true);
     assert.throws(() => f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD }), /review_inactive/);
     f.calls[0].callback(null, receipt(), "");
     await f.done;
-    const event = f.store.listEvents(DOCUMENT)[0];
-    assert.equal(event.state, "queued");
-    assert.equal(event.queueId, QUEUE);
+    assert.equal(f.store.listEvents(DOCUMENT)[0].state, "queued");
+    assert.equal(f.store.listEvents(DOCUMENT)[0].queueId, QUEUE);
     assert.equal(f.store.getBinding(DOCUMENT).status, "stopped");
-    assert.throws(() => f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD }), /review_inactive/);
     assert.equal(f.calls.length, 1);
   });
 }
@@ -258,11 +244,11 @@ for (const code of [4401, 4409, 1003]) {
 test("queue errors become uncertain and block successors without automatic retry", async (t) => {
   const f = fixture(t, { autoReceipt: false });
   f.start();
-  f.sockets[0].message(frame("first"));
-  f.sockets[0].message(frame("second"));
+  await f.respond([frame("first"), frame("second")]);
+  await until(() => f.calls.length === 1);
   f.calls[0].callback(new Error(`secret error ${SECRET}`), receipt(), SECRET);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queue_uncertain");
-  f.sockets[0].message(frame("first"));
+  await f.respond([frame("first")]);
   await pause(40);
   assert.equal(f.calls.length, 1);
   assert.deepEqual(f.store.listEvents(DOCUMENT).map((event) => event.state), ["queue_uncertain", "received"]);
@@ -272,7 +258,8 @@ test("queue errors become uncertain and block successors without automatic retry
 test("unexpected queue stdout is uncertain even after exit success", async (t) => {
   const f = fixture(t, { autoReceipt: false });
   f.start();
-  f.sockets[0].message(frame());
+  await f.respond([frame()]);
+  await until(() => f.calls.length === 1);
   f.calls[0].callback(null, receipt(QUEUE, DOCUMENT), "");
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queue_uncertain");
   await pause();
@@ -283,7 +270,7 @@ test("synchronous command launch failure is uncertain and is not retried", async
   let attempts = 0;
   const f = fixture(t);
   f.start({ execFile() { attempts++; throw new Error("private_launch_failure"); } });
-  f.sockets[0].message(frame());
+  await f.respond([frame()]);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queue_uncertain");
   await pause();
   assert.equal(attempts, 1);
@@ -295,37 +282,36 @@ test("restart after the durable dispatch boundary becomes uncertain and does not
   f.store.receive(DOCUMENT, parseEvent(frame(), binding()), old.token);
   f.store.markDispatching(DOCUMENT, "event-1", old.token);
   f.start();
-  await pause();
+  await f.respond();
   assert.equal(f.store.listEvents(DOCUMENT)[0].state, "queue_uncertain");
   assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
   assert.equal(f.calls.length, 0);
 });
 
-test("persisted received backlog waits for transport open and then dispatches", async (t) => {
-  const f = fixture(t, { openSocket: false });
+test("persisted received backlog waits for authenticated HTTP success before dispatch", async (t) => {
+  const f = fixture(t);
   const previous = f.store.claimWorker(DOCUMENT, { pid: 990002, isAlive: () => false });
   f.store.receive(DOCUMENT, parseEvent(frame(), binding()), previous.token);
   f.store.releaseWorker(DOCUMENT, previous.token);
   f.start();
+  await f.pending();
   await pause(30);
   assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connecting");
   assert.equal(f.store.listEvents(DOCUMENT)[0].state, "received");
   assert.equal(f.calls.length, 0);
-  f.sockets[0].open();
+  await f.respond();
   await until(() => f.store.listEvents(DOCUMENT)[0].state === "queued");
   assert.equal(f.calls.length, 1);
 });
 
-for (const code of [4401, 4409]) {
-  test(`terminal close ${code} before transport open leaves persisted received backlog unqueued`, async (t) => {
-    const f = fixture(t, { openSocket: false });
+for (const status of [401, 409]) {
+  test(`HTTP ${status} before first success leaves persisted received backlog unqueued`, async (t) => {
+    const f = fixture(t);
     const previous = f.store.claimWorker(DOCUMENT, { pid: 990002, isAlive: () => false });
     f.store.receive(DOCUMENT, parseEvent(frame(), binding()), previous.token);
     f.store.releaseWorker(DOCUMENT, previous.token);
     f.start();
-    await pause(30);
-    assert.equal(f.calls.length, 0);
-    f.sockets[0].serverClose(code);
+    await f.respond([], status);
     await f.done;
     assert.equal(f.store.getBinding(DOCUMENT).status, "stopped");
     assert.equal(f.store.listEvents(DOCUMENT)[0].state, "received");
@@ -333,37 +319,15 @@ for (const code of [4401, 4409]) {
   });
 }
 
-test("transport open can dispatch backlog before terminal rejection, which immediately fences agent begin", async (t) => {
-  const f = fixture(t, { openSocket: false, autoReceipt: false });
-  const previous = f.store.claimWorker(DOCUMENT, { pid: 990002, isAlive: () => false });
-  f.store.receive(DOCUMENT, parseEvent(frame(), binding()), previous.token);
-  f.store.releaseWorker(DOCUMENT, previous.token);
-  f.start();
-  f.sockets[0].open();
-  // The real server upgrades before rejecting an invalid key. There is no
-  // authentication ACK, so already persisted work can queue in this interval.
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.store.listEvents(DOCUMENT)[0].state, "dispatching");
-  f.sockets[0].serverClose(4401);
-  assert.equal(f.store.getBinding(DOCUMENT).status, "stopped");
-  assert.throws(() => f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD }), /review_inactive/);
-  f.calls[0].callback(null, receipt(), "");
-  await f.done;
-  const event = f.store.listEvents(DOCUMENT)[0];
-  assert.equal(event.queueId, QUEUE);
-  assert.equal(event.state, "queued");
-  assert.equal(f.store.getBinding(DOCUMENT).status, "stopped");
-  assert.throws(() => f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD }), /review_inactive/);
-  assert.equal(f.calls.length, 1);
-});
-
-test("stop closes the socket promptly and preserves an in-flight queue outcome", async (t) => {
+test("stop aborts the pending HTTP request promptly and preserves an in-flight queue outcome", async (t) => {
   const f = fixture(t, { autoReceipt: false });
   f.start();
-  f.sockets[0].message(frame());
+  await f.respond([frame()]);
+  await until(() => f.calls.length === 1);
+  const pending = await f.pending();
   f.store.requestStop(DOCUMENT);
-  await until(() => f.sockets[0].closed);
-  f.sockets[0].message(frame("after-stop"));
+  await until(() => pending.aborted);
+  pending.resolve(new Response(JSON.stringify({ events: [JSON.parse(frame("after-stop"))] })));
   assert.equal(f.store.listEvents(DOCUMENT).length, 1);
   f.calls[0].callback(null, receipt(), "");
   const result = await f.done;
@@ -372,52 +336,64 @@ test("stop closes the socket promptly and preserves an in-flight queue outcome",
   assert.equal(f.calls.length, 1);
 });
 
-test("explicit acceptance keeps listening and serializes later feedback through execution and built", async (t) => {
+test("shutdown cancels an in-flight request without marking a transient network gap", async (t) => {
   const f = fixture(t);
   f.start();
-  // Acceptance follows this fixture's submitted version, not the generic frame's fixed date.
+  const pending = await f.pending();
+  f.controller.abort();
+  const result = await f.done;
+  assert.equal(pending.aborted, true);
+  assert.equal(result.reason, "worker_shutdown");
+  assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, false);
+  assert.equal(f.store.getBinding(DOCUMENT).status, "active");
+});
+
+test("explicit acceptance keeps polling through execution and built", async (t) => {
+  const f = fixture(t);
+  f.start();
   const createdAt = new Date(Date.parse(f.store.getBinding(DOCUMENT).planVersionAt) + 1).toISOString();
-  f.sockets[0].message(frame("event-1", { createdAt }));
+  await f.respond([frame("event-1", { createdAt })]);
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   const { operationToken } = f.store.begin(DOCUMENT, "event-1", { expectedThreadId: THREAD });
   f.store.accept(DOCUMENT, "event-1", {
     operationToken, humanCreatedAt: createdAt, humanText: acceptancePhrase(DIGEST), currentDigest: DIGEST, submittedPlanDigest: DIGEST
   });
-  f.sockets[0].message(frame("after-acceptance"));
-  await pause();
+  await f.respond([frame("after-acceptance")]);
   assert.equal(f.calls.length, 1, "acceptance effects must complete before later comments dispatch");
   f.store.complete(DOCUMENT, "event-1", { operationToken, evidence: { replyId: "accepted-reply", planDigest: DIGEST } });
-  await until(() => f.calls.length === 2);
+  await until(() => f.store.listEvents(DOCUMENT)[1].state === "queued");
   const feedback = f.store.begin(DOCUMENT, "after-acceptance", { expectedThreadId: THREAD });
   f.store.complete(DOCUMENT, "after-acceptance", { operationToken: feedback.operationToken, evidence: { replyId: "feedback-reply", planDigest: DIGEST } });
   f.store.transition(DOCUMENT, "execute", { evidence: "Task user requested implementation.", currentDigest: DIGEST });
   f.store.transition(DOCUMENT, "built", { evidence: "Verified all plan tasks and the completed record.", currentDigest: "b".repeat(64), recordNodeId: QUEUE, openTasks: 0 });
-  f.sockets[0].message(frame("record-correction"));
+  await f.respond([frame("record-correction")]);
   await until(() => f.calls.length === 3);
-  assert.equal(Boolean(f.sockets[0].closed), false);
+  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
   assert.equal(f.store.getBinding(DOCUMENT).planPhase, "built");
   assert.equal(f.store.getBinding(DOCUMENT).acceptedDigest, DIGEST);
   assert.equal(f.store.getBinding(DOCUMENT).cleanupRequired, false);
 });
 
-test("worker ownership loss closes stale socket and cannot release the replacement claim", async (t) => {
+test("worker ownership loss aborts stale requests and cannot release the replacement claim", async (t) => {
   const f = fixture(t);
   f.start();
+  const pending = await f.pending();
   const replacement = f.store.claimWorker(DOCUMENT, { pid: 990003, isAlive: () => false });
-  f.sockets[0].message(frame());
   const result = await f.done;
+  pending.resolve(new Response(JSON.stringify({ events: [JSON.parse(frame())] })));
   assert.equal(result.reason, "worker_ownership_lost");
-  assert.equal(f.sockets[0].closed, true);
+  assert.equal(pending.aborted, true);
   assert.equal(f.store.getBinding(DOCUMENT).workerPid, 990003);
   assert.equal(f.store.getBinding(DOCUMENT, { includeSecrets: true }).workerToken, replacement.token);
   assert.equal(f.calls.length, 0);
   assert.equal(f.store.listEvents(DOCUMENT).length, 0);
 });
 
-test("a queue receipt arriving after ownership loss cannot overwrite the replacement's uncertainty", async (t) => {
+test("a queue receipt after ownership loss cannot overwrite the replacement's uncertainty", async (t) => {
   const f = fixture(t, { autoReceipt: false });
   f.start();
-  f.sockets[0].message(frame());
+  await f.respond([frame()]);
+  await until(() => f.calls.length === 1);
   const replacement = f.store.claimWorker(DOCUMENT, { pid: 990003, isAlive: () => false });
   f.calls[0].callback(null, receipt(), "");
   await f.done;
@@ -426,11 +402,128 @@ test("a queue receipt arriving after ownership loss cannot overwrite the replace
   assert.equal(f.store.getBinding(DOCUMENT).workerPid, 990003);
 });
 
-test("a live existing worker prevents a second transport from starting", async (t) => {
+test("a live existing worker prevents a second transport after a raced handover check", async (t) => {
   const f = fixture(t);
   f.store.claimWorker(DOCUMENT, { pid: 990002, isAlive: () => false });
-  const result = await f.start({ isAlive: () => true });
+  const result = await f.start({ prepareHandover: async () => true, isAlive: () => true });
   assert.equal(result.reason, "worker_claim_failed");
-  assert.equal(f.sockets.length, 0);
+  assert.equal(f.requests.length, 0);
   assert.equal(f.store.getBinding(DOCUMENT).workerPid, 990002);
+});
+
+test("a deferred handover leaves the binding and network untouched", async (t) => {
+  const f = fixture(t);
+  const result = await f.start({ prepareHandover: async () => false });
+  assert.equal(result.reason, "worker_handover_deferred");
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.store.getBinding(DOCUMENT).workerPid, null);
+  assert.equal(f.store.getBinding(DOCUMENT).status, "active");
+});
+
+test("HTTP cadence is independent from the queue pump and only new events reset the idle hour", async (t) => {
+  const f = fixture(t);
+  const origin = Date.parse("2026-09-21T00:00:00.000Z");
+  let time = origin;
+  const timers = [];
+  f.start({ now: () => time, pollIntervalMs: 30000, idlePollIntervalMs: 60000,
+    setTimeout: (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; },
+    clearTimeout: (timer) => { if (timer) timer.cancelled = true; }
+  });
+  const next = async (expectedDelay) => {
+    await until(() => timers.length > 0);
+    const timer = timers.shift();
+    assert.equal(timer.delay, expectedDelay);
+    timer.callback();
+    return f.pending();
+  };
+  await f.respond();
+  await until(() => timers.length > 0);
+  assert.equal(f.store.getBinding(DOCUMENT).lastEventAt, null);
+  await pause(40);
+  assert.equal(f.requests.length, 1, "the fast ledger pump does not issue HTTP requests");
+  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
+  assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, false);
+  time = origin + 3599999;
+  await next(30000);
+  await pause(40);
+  assert.equal(timers.length, 0, "there is no overlapping request timer");
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
+  await f.respond();
+  time = origin + 3600000;
+  await next(30000);
+  await f.respond();
+  time += 60000;
+  await next(60000);
+  await f.respond([frame()]);
+  await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
+  const lastActivity = f.store.getBinding(DOCUMENT).lastEventAt;
+  assert.equal(lastActivity, new Date(time).toISOString());
+  time += 3600000;
+  await next(30000);
+  await f.respond([frame()]);
+  await until(() => timers.length > 0);
+  assert.equal(timers[0].delay, 60000);
+  assert.equal(f.store.getBinding(DOCUMENT).lastEventAt, lastActivity);
+  assert.equal(f.calls.length, 1);
+});
+
+test("persisted event activity keeps the idle cadence across worker restarts", async (t) => {
+  const f = fixture(t);
+  const previous = f.store.claimWorker(DOCUMENT, { pid: 990002, isAlive: () => false });
+  const at = "2026-09-21T00:00:00.000Z";
+  f.store.recordPollSuccess(DOCUMENT, previous.token, { at, newEvents: true });
+  f.store.releaseWorker(DOCUMENT, previous.token);
+  let delay;
+  f.start({ now: () => Date.parse(at) + 3600000, idlePollIntervalMs: 60000,
+    setTimeout: (_callback, value) => { delay = value; }, clearTimeout: () => {} });
+  await f.respond();
+  await until(() => delay !== undefined);
+  assert.equal(delay, 60000);
+  assert.equal(f.store.getBinding(DOCUMENT).lastEventAt, at);
+});
+
+test("page cursors advance only on a valid durable batch, survive retries, and wrap", async (t) => {
+  const f = fixture(t);
+  f.start();
+  await f.reply({ events: [JSON.parse(frame())], nextCursor: "page_200" });
+  await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
+  assert.equal((await f.pending()).url, `${POLL_URL}?cursor=page_200`);
+  await f.respond([], 503);
+  assert.equal((await f.pending()).url, `${POLL_URL}?cursor=page_200`);
+  await f.reply({ events: [JSON.parse(frame("foreign", { documentId: THREAD }))], nextCursor: "invalid_advance" });
+  assert.equal((await f.pending()).url, `${POLL_URL}?cursor=page_200`);
+  assert.equal(f.store.listEvents(DOCUMENT).length, 1);
+  await f.reply({ events: [], nextCursor: "page_400" });
+  assert.equal((await f.pending()).url, `${POLL_URL}?cursor=page_400`);
+  await f.reply({ events: [], nextCursor: null });
+  assert.equal((await f.pending()).url, POLL_URL);
+  assert.equal(f.store.getBinding(DOCUMENT).pollUrl, POLL_URL);
+  assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
+});
+
+test("network errors, rate limits and unavailable service retry within sixty seconds using one key", async (t) => {
+  const f = fixture(t);
+  const timers = [];
+  f.start({ pollIntervalMs: 30000, retryBaseMs: 30000, maxRetryMs: 60000,
+    setTimeout: (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; },
+    clearTimeout: () => {}
+  });
+  const first = await f.pending();
+  first.replied = true;
+  first.reject(new Error(`private error ${SECRET}`));
+  for (const [expectedDelay, status] of [[30000, 429], [60000, 503], [60000, 200]]) {
+    await until(() => timers.length > 0);
+    assert.equal(f.store.getBinding(DOCUMENT).connectionState, "reconnecting");
+    const timer = timers.shift();
+    assert.equal(timer.delay, expectedDelay);
+    timer.callback();
+    await f.respond([], status);
+  }
+  await until(() => timers.length > 0);
+  assert.equal(timers.shift().delay, 30000, "a success resets retry backoff");
+  assert.equal(f.store.getBinding(DOCUMENT).connectionState, "connected");
+  assert.equal(f.store.getBinding(DOCUMENT).reconciliationRequired, true);
+  assert.ok(f.requests.every((request) => request.settings.headers.Authorization === `Bearer ${SECRET}`));
+  assert.equal(JSON.stringify(f.store.getBinding(DOCUMENT)).includes(SECRET), false);
 });

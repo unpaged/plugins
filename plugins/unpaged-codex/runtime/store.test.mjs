@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, syml
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ACCEPTANCE_CLOCK_SKEW_MS, Store } from "./store.mjs";
-import { acceptancePhrase, EVENTS_URL } from "./protocol.mjs";
+import { acceptancePhrase, EVENTS_URL, POLL_URL, SUBPROTOCOL } from "./protocol.mjs";
 import { processIdentity } from "./process-identity.mjs";
 
 const doc = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -212,6 +212,283 @@ test("terminal close atomically stops review and requires key cleanup, preventin
     assert.equal(store.getBinding(doc).connectionReason, `terminal_close_${code}`);
     assert.throws(() => store.claimWorker(doc, { pid: 102, isAlive: () => false }), /review_inactive/);
   }
+});
+test("terminal HTTP outcomes stop the same review and retain its key for explicit cleanup", (t) => {
+  for (const code of [401, 409]) {
+    const { store, token } = fixture(t);
+    store.receive(doc, event(), token);
+    store.setConnection(doc, token, "stopped", `terminal_http_${code}`);
+    const terminal = store.getBinding(doc);
+    assert.equal(terminal.status, "stopped");
+    assert.equal(terminal.connectionReason, `terminal_http_${code}`);
+    assert.equal(terminal.cleanupRequired, true);
+    assert.equal(terminal.credentialsPresent, true);
+    assert.equal(terminal.planDigest, digest);
+    assert.equal(terminal.eventCounts.received, 1);
+    assert.throws(() => store.recordPollSuccess(doc, token, { at: new Date().toISOString(), newEvents: false }), /review_inactive/);
+    store.releaseWorker(doc, token);
+    assert.throws(() => store.claimWorker(doc, { pid: 102, isAlive: () => false, transport: "poll-v1" }), /review_inactive/);
+    store.confirmRevoked(doc, { keyId: binding.keyId, evidence: "Exact key revocation confirmed." });
+    assert.equal(store.getBinding(doc).pollUrl, null);
+    assert.equal(store.getBinding(doc).credentialsPresent, false);
+  }
+});
+test("poll success records connection health without inventing activity or clearing an unreconciled gap", (t) => {
+  const { store, token } = fixture(t);
+  assert.equal(store.getBinding(doc).pollUrl, POLL_URL);
+  assert.equal(store.getBinding(doc).lastSuccessfulPollAt, null);
+  assert.equal(store.getBinding(doc).lastEventAt, null);
+  const first = "2026-09-21T10:00:00.000Z", second = "2026-09-21T10:00:30.000Z", third = "2026-09-21T10:01:00.000Z";
+  store.recordPollSuccess(doc, token, { at: first, newEvents: false });
+  assert.equal(store.getBinding(doc).connectionState, "connected");
+  assert.equal(store.getBinding(doc).lastSuccessfulPollAt, first);
+  assert.equal(store.getBinding(doc).lastEventAt, null);
+  assert.equal(store.getBinding(doc).reconciliationRequired, false);
+  store.markReconciliationRequired(doc, token, "poll_failed");
+  store.recordPollSuccess(doc, token, { at: second, newEvents: true });
+  store.recordPollSuccess(doc, token, { at: third, newEvents: false });
+  const healthy = store.getBinding(doc);
+  assert.equal(healthy.connectionState, "connected");
+  assert.equal(healthy.connectionReason, null);
+  assert.equal(healthy.lastSuccessfulPollAt, third);
+  assert.equal(healthy.lastEventAt, second);
+  assert.equal(healthy.reconciliationRequired, true);
+  assert.equal(healthy.planDigest, digest);
+  assert.equal(healthy.planPhase, "proposed");
+});
+test("poll metadata writes require valid evidence, an active review and the current worker token", (t) => {
+  const { store, token } = fixture(t);
+  const at = "2026-09-21T10:00:00.000Z";
+  for (const args of [{}, { at: "2026-09-21", newEvents: false }, { at, newEvents: 1 }, { at, newEvents: null }]) {
+    assert.throws(() => store.recordPollSuccess(doc, token, args), /invalid_poll_/);
+  }
+  const replacement = store.claimWorker(doc, { pid: 102, isAlive: () => false, transport: "poll-v1" });
+  assert.throws(() => store.recordPollSuccess(doc, token, { at, newEvents: true }), { code: "OWNERSHIP_LOST" });
+  assert.throws(() => store.setConnection(doc, token, "stopped", "terminal_http_409"), { code: "OWNERSHIP_LOST" });
+  assert.equal(store.getBinding(doc).status, "active");
+  assert.equal(store.getBinding(doc).lastSuccessfulPollAt, null);
+  store.requestStop(doc);
+  assert.throws(() => store.recordPollSuccess(doc, replacement.token, { at, newEvents: false }), /review_inactive/);
+});
+test("transport identity is paired with the worker claim and an old helper claim invalidates it", (t) => {
+  const { store, token } = fixture(t);
+  assert.equal(store.getBinding(doc).workerTransport, null);
+  assert.throws(() => store.claimWorker(doc, { pid: 102, isAlive: () => false, transport: "socket" }), /invalid_worker_transport/);
+  assert.equal(store.getBinding(doc, { includeSecrets: true }).workerToken, token);
+  const poll = store.claimWorker(doc, { pid: 102, isAlive: () => false, transport: "poll-v1" });
+  assert.equal(store.getBinding(doc).workerTransport, "poll-v1");
+  assert.ok(!JSON.stringify(store.getBinding(doc)).includes(poll.token));
+  // A retained 0.3.2 helper updates only its known columns, leaving the new
+  // marker untouched. It must not inherit the previous polling worker's hint.
+  const oldHelperToken = "old-retained-helper-claim";
+  store.db.prepare("UPDATE bindings SET worker_token=? WHERE document_id=?").run(oldHelperToken, doc);
+  assert.equal(store.getBinding(doc).workerTransport, null);
+  assert.equal(store.db.prepare("SELECT worker_transport FROM bindings WHERE document_id=?").get(doc).worker_transport, "poll-v1");
+  store.releaseWorker(doc, oldHelperToken);
+  const next = store.claimWorker(doc, { pid: 103, isAlive: () => false, transport: "poll-v1" });
+  assert.equal(store.getBinding(doc).workerTransport, "poll-v1");
+  store.releaseWorker(doc, next.token);
+  assert.equal(store.getBinding(doc).workerTransport, null);
+});
+test("upgrade coordinators use one atomic lease, hide its token and fence stale release", (t) => {
+  const { store, path } = fixture(t);
+  const second = new Store(path); t.after(() => second.close());
+  const at = 100_000;
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at });
+  assert.equal(typeof lease, "string");
+  assert.equal(store.getBinding(doc).upgradePending, true);
+  assert.ok(!JSON.stringify(store.getBinding(doc)).includes(lease));
+  const probes = [];
+  assert.equal(second.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", at: at + 120_000,
+    isAlive: (pid, identity) => { probes.push([pid, identity]); return true; } }), null);
+  assert.deepEqual(probes, [[201, "coordinator-one"]]);
+  assert.equal(second.releaseUpgrade(doc, "wrong-token"), false);
+  assert.equal(store.getBinding(doc).upgradePending, true);
+  const replacement = second.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", isAlive: () => false, at: at + 120_000 });
+  assert.notEqual(replacement, lease);
+  assert.equal(store.releaseUpgrade(doc, lease), false);
+  assert.equal(store.getBinding(doc).upgradePending, true);
+  assert.equal(second.releaseUpgrade(doc, replacement), true);
+  assert.equal(store.getBinding(doc).upgradePending, false);
+});
+test("a dead upgrade coordinator retains its lease for exactly the 60-second handover grace", (t) => {
+  const { store } = fixture(t);
+  const at = 100_000;
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "dead-coordinator", isAlive: () => false, at });
+  for (const elapsed of [0, 1, 59_999]) {
+    assert.equal(store.claimUpgrade(doc, { pid: 202, identity: "replacement", isAlive: () => false, at: at + elapsed }), null);
+  }
+  assert.equal(store.db.prepare("SELECT token FROM worker_upgrades WHERE document_id=?").get(doc).token, lease);
+  const replacement = store.claimUpgrade(doc, { pid: 202, identity: "replacement", isAlive: () => false, at: at + 60_000 });
+  assert.equal(typeof replacement, "string");
+  assert.notEqual(replacement, lease);
+});
+test("only a successful worker claim clears an upgrade lease after proving the prior worker gone", (t) => {
+  const { store } = fixture(t);
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator", isAlive: () => false, at: 100_000 });
+  assert.throws(() => store.claimWorker(doc, { pid: 102, isAlive: () => true, transport: "poll-v1" }), /worker_alive/);
+  assert.equal(store.getBinding(doc).upgradePending, true);
+  const next = store.claimWorker(doc, { pid: 102, isAlive: () => false, transport: "poll-v1" });
+  assert.equal(store.getBinding(doc).upgradePending, false);
+  assert.equal(store.getBinding(doc).workerTransport, "poll-v1");
+  assert.equal(store.releaseUpgrade(doc, lease), false);
+  assert.equal(store.getBinding(doc, { includeSecrets: true }).workerToken, next.token);
+});
+test("upgrade leases reject stopped reviews and invalid identities without changing the ledger", (t) => {
+  const { store } = fixture(t);
+  for (const change of [{ pid: 0 }, { identity: null }, { identity: "" }, { at: -1 }, { at: NaN }, { isAlive: null }]) {
+    assert.throws(() => store.claimUpgrade(doc, { pid: 201, identity: "coordinator", at: 100_000, isAlive: () => false, ...change }), /invalid_/);
+  }
+  assert.equal(store.getBinding(doc).upgradePending, false);
+  store.requestStop(doc);
+  assert.throws(() => store.claimUpgrade(doc, { pid: 201, identity: "coordinator", at: 100_000, isAlive: () => false }), /review_inactive/);
+  assert.equal(store.getBinding(doc).upgradePending, false);
+});
+test("the signal reservation survives lease replacement and release and is fenced to both owners", (t) => {
+  const { store, token, path } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  for (const change of [{ workerToken: "stale-worker" }, { pid: 102 }, { identity: "different-birth" }]) {
+    assert.throws(() => store.claimUpgradeSignal(doc, lease, { ...predecessor, ...change }), /worker_fenced/);
+  }
+  assert.throws(() => store.claimUpgradeSignal(doc, "stale-lease", predecessor), /upgrade_fenced/);
+  assert.equal(store.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(doc).upgrade_signaled_token, null);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), true);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), false);
+  assert.ok(!JSON.stringify(store.getBinding(doc)).includes(token));
+  const second = new Store(path); t.after(() => second.close());
+  const replacement = second.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", isAlive: () => false, at: 160000 });
+  assert.throws(() => store.claimUpgradeSignal(doc, lease, predecessor), /upgrade_fenced/);
+  assert.throws(() => store.cancelUnsentUpgradeSignal(doc, lease, predecessor), /upgrade_fenced/);
+  assert.throws(() => second.cancelUnsentUpgradeSignal(doc, replacement, predecessor), /upgrade_signal_fenced/);
+  assert.equal(second.claimUpgradeSignal(doc, replacement, predecessor), false);
+  assert.equal(second.releaseUpgrade(doc, replacement), true);
+  const third = store.claimUpgrade(doc, { pid: 203, identity: "coordinator-three", isAlive: () => false, at: 160001 });
+  assert.equal(store.claimUpgradeSignal(doc, third, predecessor), false, "lease deletion cannot erase signal history");
+});
+test("only a new worker claim after predecessor exit clears the signal reservation", (t) => {
+  const { store, token } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), true);
+  assert.throws(() => store.claimWorker(doc, { pid: 102, identity: "new-birth", isAlive: () => true }), /worker_alive/);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), false);
+  const next = store.claimWorker(doc, { pid: 102, identity: "new-birth", isAlive: () => false });
+  const row = store.db.prepare("SELECT upgrade_signaled_token,upgrade_signaled_pid,upgrade_signaled_identity,upgrade_signaled_lease FROM bindings WHERE document_id=?").get(doc);
+  assert.deepEqual({ ...row }, { upgrade_signaled_token: null, upgrade_signaled_pid: null, upgrade_signaled_identity: null, upgrade_signaled_lease: null });
+  const nextLease = store.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", isAlive: () => false, at: 160000 });
+  assert.throws(() => store.claimUpgradeSignal(doc, nextLease, predecessor), /worker_fenced/);
+  assert.equal(store.claimUpgradeSignal(doc, nextLease, { workerToken: next.token, pid: 102, identity: "new-birth" }), true);
+});
+test("signal reservations reject inactive reviews and malformed identities before mutation", (t) => {
+  const { store, token } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  for (const change of [{ pid: 0 }, { identity: null }, { identity: "" }]) {
+    assert.throws(() => store.claimUpgradeSignal(doc, lease, { ...predecessor, ...change }), /invalid_/);
+  }
+  assert.throws(() => store.claimUpgradeSignal(doc, null, predecessor), /invalid_upgrade_token/);
+  store.requestStop(doc);
+  assert.throws(() => store.claimUpgradeSignal(doc, lease, predecessor), /review_inactive/);
+  assert.equal(store.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(doc).upgrade_signaled_token, null);
+});
+test("unsent signal cancellation requires its original lease and exact worker claim", (t) => {
+  const { store, token } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator", isAlive: () => false, at: 0 });
+  store.claimUpgradeSignal(doc, lease, predecessor);
+  for (const change of [{ workerToken: "stale-worker" }, { pid: 102 }, { identity: "different-birth" }]) {
+    assert.throws(() => store.cancelUnsentUpgradeSignal(doc, lease, { ...predecessor, ...change }), /worker_fenced/);
+  }
+  assert.throws(() => store.cancelUnsentUpgradeSignal(doc, "stale-lease", predecessor), /upgrade_fenced/);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), false);
+  assert.equal(store.cancelUnsentUpgradeSignal(doc, lease, predecessor), true);
+  assert.equal(store.getBinding(doc).upgradePending, true, "cancellation does not release coordination ownership");
+  const row = store.db.prepare("SELECT upgrade_signaled_token,upgrade_signaled_pid,upgrade_signaled_identity,upgrade_signaled_lease FROM bindings WHERE document_id=?").get(doc);
+  assert.deepEqual({ ...row }, { upgrade_signaled_token: null, upgrade_signaled_pid: null, upgrade_signaled_identity: null, upgrade_signaled_lease: null });
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), true, "an unsent reservation may be retried");
+});
+test("an earlier signal reservation without its writer lease migrates without becoming cancellable", (t) => {
+  const { store, token, path } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator", isAlive: () => false, at: 0 });
+  store.claimUpgradeSignal(doc, lease, predecessor);
+  store.db.exec("ALTER TABLE bindings DROP COLUMN upgrade_signaled_lease");
+  store.close();
+  const migrated = new Store(path); t.after(() => migrated.close());
+  assert.throws(() => migrated.cancelUnsentUpgradeSignal(doc, lease, predecessor), /upgrade_signal_fenced/);
+  assert.equal(migrated.claimUpgradeSignal(doc, lease, predecessor), false);
+  assert.equal(migrated.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(doc).upgrade_signaled_token, token);
+});
+test("poll-only binding persists a legacy-readable credential and refuses credential changes on rebind", (t) => {
+  const { store } = fixture(t);
+  const { url, protocols, ...base } = binding;
+  const direct = { ...base, documentId: queueId, keyId: "poll-key", key: "A".repeat(43), pollUrl: POLL_URL };
+  store.bind(direct);
+  const read = store.getBinding(queueId, { includeSecrets: true });
+  assert.equal(read.url, url);
+  assert.equal(read.pollUrl, POLL_URL);
+  assert.deepEqual(read.protocols, [SUBPROTOCOL, direct.key]);
+  assert.equal("key" in read, false);
+  assert.ok(!JSON.stringify(store.getBinding(queueId)).includes(direct.key));
+  assert.deepEqual(store.bind({ ...direct, url, protocols: [SUBPROTOCOL, direct.key] }), store.getBinding(queueId));
+  assert.throws(() => store.bind({ ...direct, key: "B".repeat(43) }), /rebind_refused/);
+  assert.deepEqual(store.getBinding(doc, { includeSecrets: true }).protocols, protocols);
+});
+test("additive poll migration preserves pending work, receipts, lifecycle and legacy field values", (t) => {
+  const { store, token, path } = fixture(t);
+  store.transition(doc, "approve", { currentDigest: digest, evidence: "The task user approved this exact plan." });
+  store.transition(doc, "execute", { currentDigest: digest, evidence: "The task user authorized implementation." });
+  store.transition(doc, "checkpoint", { currentDigest: changedDigest, evidence: "Decision log records the implementation choice." });
+  const started = processing(store, token, "completed");
+  store.complete(doc, "completed", { operationToken: started.operationToken, evidence: { replyId: "reply-completed", planDigest: changedDigest } });
+  processing(store, token, "pending");
+  store.db.exec("PRAGMA user_version=32");
+  for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token", "upgrade_signaled_token", "upgrade_signaled_pid", "upgrade_signaled_identity", "upgrade_signaled_lease"]) {
+    store.db.exec(`ALTER TABLE bindings DROP COLUMN ${column}`);
+  }
+  store.db.exec("DROP TABLE worker_upgrades");
+  const before = store.db.prepare("SELECT * FROM bindings").get();
+  const events = store.db.prepare("SELECT * FROM events ORDER BY event_id").all();
+  const receipts = store.db.prepare("SELECT * FROM acceptance_receipts").all();
+  store.close();
+  const migrated = new Store(path); t.after(() => migrated.close());
+  const after = migrated.db.prepare("SELECT * FROM bindings").get();
+  assert.equal(after.poll_url, POLL_URL);
+  assert.equal(after.last_successful_poll_at, null);
+  assert.equal(after.last_event_at, null);
+  assert.equal(after.worker_transport, null);
+  assert.equal(after.worker_transport_token, null);
+  assert.equal(after.upgrade_signaled_token, null);
+  assert.equal(after.upgrade_signaled_pid, null);
+  assert.equal(after.upgrade_signaled_identity, null);
+  assert.equal(after.upgrade_signaled_lease, null);
+  for (const [key, value] of Object.entries(before)) assert.deepEqual(after[key], value, key);
+  assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY event_id").all(), events);
+  assert.deepEqual(migrated.db.prepare("SELECT * FROM acceptance_receipts").all(), receipts);
+  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 32);
+  assert.equal(migrated.getBinding(doc).upgradePending, false);
+  assert.equal(migrated.getBinding(doc).planPhase, "executing");
+  assert.equal(migrated.getBinding(doc).acceptedDigest, digest);
+  assert.equal(migrated.getBinding(doc).planDigest, changedDigest);
+  assert.equal(migrated.getBinding(doc, { includeSecrets: true }).workerToken, token);
+});
+test("migration never rewrites foreign legacy endpoints or promotes malformed credentials", (t) => {
+  const { store, path } = fixture(t);
+  store.bind({ ...binding, documentId: queueId });
+  store.db.prepare("UPDATE bindings SET url=?,poll_url=NULL WHERE document_id=?").run("wss://other.example/events", doc);
+  store.db.prepare("UPDATE bindings SET protocols=?,poll_url=NULL WHERE document_id=?").run(JSON.stringify([SUBPROTOCOL, "bad\nheader"]), queueId);
+  const before = store.db.prepare("SELECT * FROM bindings ORDER BY document_id").all();
+  store.close();
+  const migrated = new Store(path); t.after(() => migrated.close());
+  assert.deepEqual(migrated.db.prepare("SELECT * FROM bindings ORDER BY document_id").all(), before);
+  assert.equal(migrated.getBinding(doc).pollUrl, null);
+  assert.equal(migrated.getBinding(queueId).pollUrl, null);
 });
 test("interrupted live task requires explicit inspection and fresh operation token before remaining effects continue", (t) => {
   const { store, token } = fixture(t); const first = processing(store, token);

@@ -3,16 +3,18 @@
 Claude parity baseline: `34ebef185dcca4230b7690bfca791904624c6e41` in the
 Unpaged plugin repository, inspected on 2026-09-19.
 The implementation lives in a separate `plugins/unpaged-codex` package.
-The remote Unpaged server and current Claude package are unchanged. The Codex
-workflow adds Decision logs and as-built records to the durable review adapter.
+Version 0.4.0 consumes the server's additive HTTP polling endpoint; the Claude
+package is unchanged by this Codex release. The Codex workflow includes Decision
+logs and as-built records in the durable review adapter.
 Canvas approval is separate from the task user's permission to implement.
 
 ## Ownership and data flow
 
 ```mermaid
 flowchart LR
-  H[Human board comment] --> U[Unpaged event socket]
-  U --> W[One receiver per board]
+  H[Human board comment] --> U[Unpaged inbox]
+  W[One receiver per board] -->|Authenticated HTTP poll| U
+  U -->|Bounded event batch| W
   W --> D[(Private SQLite ledger)]
   D --> Q[Codex queue: exact task ID]
   Q --> A[Assigned Codex task]
@@ -89,8 +91,8 @@ before a revision cannot become acceptance of the newer baseline.
 ## Plan and listener lifecycle
 
 Listener state and plan phase are separate. A new binding stays `active` through
-`proposed → accepted → executing → built`; only an explicit stop, revocation,
-takeover or protocol rejection ends its receiver. `accept` records an owner
+`proposed → accepted → executing → built`; an explicit stop, invalid/revoked key
+or supersession by a newer key ends its receiver. `accept` records an owner
 comment; `approve` records an explicit task-user plan approval. Both require a
 fresh matching digest, no pending events and no reconciliation gap. The canvas
 acceptance event itself must finish its reply and receipt before later work.
@@ -173,10 +175,26 @@ changing `startup|resume` to `startup|resume|compact` exactly reproduced the
 old/new trust hashes. This isolates the pilot's approval reset, but does not
 replace an installed-update trial on each supported host.
 
-WebSocket open is transport readiness, not a server authentication receipt.
-Unpaged may upgrade before closing a rejected listener. Durable work received
-earlier can be queued before that close is observed. A terminal close fences
-new agent begins immediately; the operator's stop command fences locally before
+The worker calls only `https://mcp.unpaged.io/events/poll`, sends the existing
+listener key in the Authorization header and refuses redirects. Requests and
+response parsing are bounded. A non-null `nextCursor` advances the bounded
+pending scan; a failed request retains its cursor, and null wraps to the start.
+The cursor contains only an event ID. A successful authenticated response, including
+`{ "events": [] }`, records `lastSuccessfulPollAt` and sets `connected`.
+`lastEventAt` advances only for newly persisted event IDs; replay does not reset
+the idle clock. The normal interval is 30 seconds and becomes 60 seconds after
+one hour without a new event. Healthy waits do not create reconciliation gaps.
+These intervals are not end-to-end delivery or model-response deadlines.
+
+Transport, service and rate-limit failures report `reconnecting`, mark a gap,
+and retry the same key with bounded backoff. Successful polls do not clear an
+existing reconciliation requirement. HTTP 401 (invalid/revoked) and 409 (a newer
+minted key for the same user and board) stop the receiver without reminting.
+The server's durable winner survives revocation; it does not grant exclusivity
+to two hosts using the same key. Local worker ownership still fences one local
+receiver per binding. Durable work received earlier can be queued before a
+terminal response is observed. That response fences new agent begins
+immediately; the operator's stop command fences locally before
 remote revocation. Zero stale wakeups during a remote-revocation race is not a
 provided guarantee.
 
@@ -186,7 +204,7 @@ and exactly two distinct UUIDs: the expected task and the queue ID. Surrounding
 stdout prose is not a contract; wrong or ambiguous IDs remain uncertain.
 Queue listing alone cannot prove non-delivery because a consumed item disappears. Ambiguous sends stay blocked pending proof.
 
-Unpaged currently marks socket delivery separately from agent completion, offers
+Unpaged marks HTTP delivery separately from agent completion, offers
 limited replay, and can lose event creation on an upstream trigger failure.
 Replies generate new IDs and cannot atomically commit with edits and receipts.
 The adapter records gaps and ambiguous effects; it cannot remove those server
@@ -204,9 +222,30 @@ published atomically, checked before reuse, and never automatically removed;
 plugin cache replacement cannot invalidate a retained queued operation. Tests
 remove the source cache and continue from the retained copy.
 
-This does not retroactively move an older live cache-based receiver or repair an
-already queued legacy path. Those reviews need explicit reconciliation and a
-controlled stop/migration with their old files preserved. The recorded controlled
+Installing 0.4.0 does not itself replace a running socket receiver. Normal
+`resume` and trusted SessionStart recovery can perform a controlled handover
+after verifying the old worker's stored boot and process start identity.
+The detached replacement requests graceful shutdown and waits before claiming
+ownership, so an in-flight queue receipt can settle beyond the hook timeout.
+A transactional local lease coordinates replacements; a durable signal reservation
+fences the exact predecessor token, PID and process identity across lease expiry
+and coordinator restarts. The reservation is committed before SIGTERM, so a crash
+in that narrow interval leaves handover pending until the predecessor exits or
+the situation is explicitly inspected; it never retries a once-only signal.
+Identity is checked immediately before and after reserving the signal. If the
+second check is inconclusive or changed, the original coordinator can cancel
+only its own provably unsent reservation and retry. Cancellation is fenced by
+the reservation's writer lease, current coordination lease and exact worker
+claim; a replacement cannot cancel an earlier coordinator's uncertain signal.
+`upgradePending` reports that handover; it is not a successful poll. Unverifiable identity or a failed shutdown remains a
+blocker; never kill a guessed PID, replace the key or discard the binding.
+
+The additive schema retains legacy `url`/`protocols` for old helpers and adds
+`pollUrl`, `lastSuccessfulPollAt` and `lastEventAt`. Existing credentials produce
+the canonical polling endpoint only from a strictly valid legacy binding.
+Migration preserves task, phase, digests and receipts. Pending queued helpers
+keep their original retained runtime, and uncertain operations still require
+the existing recovery procedure. The recorded controlled
 0.3.0 migration had no unfinished events. A native package update with pending
 feedback still needs an installed-package trial.
 
@@ -249,7 +288,9 @@ across an unchanged-hook update, delivered native SessionStart context and
 automatically restored that same BUILT review after a real app restart/task
 reopen, then handled a fresh human comment with one read-only reply. No manual
 listener start or wake was used for that recovery/comment trial. It was not a
-clean-profile installation or a full 0.3.1 lifecycle rerun.
+clean-profile installation or a full 0.3.1 lifecycle rerun. Both versions used
+sockets; those observations do not verify the installed 0.4.0 polling receiver,
+its handover or its recovery after a native restart.
 
 Release readiness still requires the [maintainer runbook's remaining gates](../../docs/codex-connection-readiness.md):
 public customer availability, clean-profile installation/sign-in, controlled

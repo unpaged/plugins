@@ -141,7 +141,9 @@ export async function ensureWorker(store, documentId, directory, options = {}) {
   const identity = processIdentity(binding.workerPid);
   if (workerIsAlive(binding.workerPid, binding.workerIdentity, () => identity)) {
     if (typeof identity !== "string" || typeof binding.workerIdentity !== "string") fail("worker_identity_unverifiable");
-    return binding;
+    if (binding.workerTransport === "poll-v1") return binding;
+    // A detached replacement owns the graceful legacy handover. Waiting here
+    // could exceed SessionStart's timeout while a queue command settles.
   }
   const workerPath = await retainRuntime(directory);
   const logPath = join(directory, "worker.log");
