@@ -16,16 +16,18 @@ import {
 } from "./listen-core.mjs";
 
 const DOC = "b0d8599c-93e6-4ebd-b63d-e0d0dfc3ce36";
+const KEY = "A".repeat(43);
+const POLL_URL = "https://mcp.unpaged.io/events/poll";
 
 test("parseListenerConfig accepts the per-board shape and rejects the rest", () => {
   const good = JSON.stringify({
     url: "wss://mcp.unpaged.io/events",
-    protocols: [SUBPROTOCOL, "abc"],
+    protocols: [SUBPROTOCOL, KEY],
     documentId: DOC
   });
   assert.deepEqual(parseListenerConfig(good), {
-    url: "wss://mcp.unpaged.io/events",
-    protocols: [SUBPROTOCOL, "abc"],
+    pollUrl: POLL_URL,
+    key: KEY,
     documentId: DOC,
     keyId: null,
     title: "",
@@ -34,8 +36,8 @@ test("parseListenerConfig accepts the per-board shape and rejects the rest", () 
   });
   const full = parseListenerConfig(
     JSON.stringify({
-      url: "wss://x",
-      protocols: [SUBPROTOCOL, "k"],
+      pollUrl: POLL_URL,
+      key: KEY,
       documentId: DOC,
       keyId: "k1",
       title: "acme: plan",
@@ -55,6 +57,30 @@ test("parseListenerConfig accepts the per-board shape and rejects the rest", () 
   assert.equal(parseListenerConfig(JSON.stringify({ url: "wss://x", protocols: [SUBPROTOCOL, "k"], documentId: "../etc" })), null);
 });
 
+test("legacy and direct configurations normalize consistently while mismatched mixed fields fail closed", () => {
+  const direct = { pollUrl: POLL_URL, key: KEY, documentId: DOC };
+  const legacy = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC };
+  const normalize = (value) => parseListenerConfig(JSON.stringify(value));
+  assert.deepEqual(normalize(direct), normalize(legacy));
+  assert.deepEqual(normalize({ ...legacy, key: KEY }), normalize(direct));
+  assert.deepEqual(normalize({ ...legacy, ...direct }), normalize(direct));
+  assert.deepEqual(normalize({ ...direct, pollUrl: "https://MCP.UNPAGED.IO:443/events/poll" }), normalize(direct));
+  for (const config of [
+    { ...legacy, ...direct, key: "B".repeat(43) },
+    { ...legacy, ...direct, pollUrl: "https://mcp.staging.unpaged.io/events/poll" },
+    { ...legacy, url: "wss://user@mcp.unpaged.io/events" },
+    { ...legacy, url: "wss://mcp.unpaged.io/events?key=secret" },
+    { ...legacy, url: "wss://mcp.unpaged.io/events/" },
+    { ...legacy, url: "wss://mcp.unpaged.io:8443/events" },
+    { ...legacy, protocols: [KEY, SUBPROTOCOL] },
+    { ...legacy, protocols: [SUBPROTOCOL, KEY, "extra"] },
+    { ...legacy, protocols: [SUBPROTOCOL, "short"] },
+    { ...direct, key: KEY + "\r\n" },
+    { ...direct, key: "A".repeat(42) + "=" },
+    { ...direct, key: null }, { ...direct, key: undefined }
+  ]) assert.equal(normalize(config), null, JSON.stringify(config));
+});
+
 test("document ids are path-safe before they become file names", () => {
   assert.equal(isDocumentId(DOC), true);
   assert.equal(isDocumentId("short"), false);
@@ -71,21 +97,21 @@ test("backoff doubles from 1s and caps at 60s", () => {
   assert.equal(backoffMs(20), 60000);
 });
 
-test("close policy stops on 4401 (dropping the key file) and 4409, reconnects otherwise", () => {
-  assert.equal(closePolicy(4401, DOC).action, "stop");
-  assert.equal(closePolicy(4401, DOC).deleteKeyFile, true);
-  assert.equal(closePolicy(4401, DOC).line, undefined); // worded by rejectedKeyLine(outcome) only
+test("HTTP policy stops on 401 (retiring the key file) and 409, retries transient failures", () => {
+  assert.equal(closePolicy(401, DOC).action, "stop");
+  assert.equal(closePolicy(401, DOC).deleteKeyFile, true);
+  assert.equal(closePolicy(401, DOC).line, undefined); // worded by rejectedKeyLine(outcome) only
   assert.match(rejectedKeyLine("removed", DOC), new RegExp(`/unpaged:listen arm ${DOC}`));
   assert.match(rejectedKeyLine("absent"), /\/unpaged:visual-plan/);
-  assert.equal(closePolicy(4409, DOC).action, "stop");
-  assert.equal(closePolicy(4409, DOC).deleteKeyFile, undefined);
-  assert.equal(closePolicy(4409, DOC).superseded, true);
-  assert.equal(closePolicy(4401, DOC).superseded, undefined);
-  assert.match(closePolicy(4409, DOC).line, /took over/);
-  assert.match(closePolicy(4409, DOC).line, new RegExp(DOC));
-  assert.equal(closePolicy(1003).action, "stop");
-  assert.deepEqual(closePolicy(1001), { action: "reconnect" });
-  assert.deepEqual(closePolicy(1006), { action: "reconnect" });
+  assert.equal(closePolicy(409, DOC).action, "stop");
+  assert.equal(closePolicy(409, DOC).deleteKeyFile, undefined);
+  assert.equal(closePolicy(409, DOC).superseded, true);
+  assert.equal(closePolicy(401, DOC).superseded, undefined);
+  assert.match(closePolicy(409, DOC).line, /newer Unpaged listener key superseded/);
+  assert.match(closePolicy(409, DOC).line, /check \/unpaged:listen status to see whether a Monitor is listening/);
+  assert.doesNotMatch(closePolicy(409, DOC).line, /Another session took over|that session is listening/);
+  assert.match(closePolicy(409, DOC).line, new RegExp(DOC));
+  for (const status of [429, 503, 500, 502, 504, 0]) assert.deepEqual(closePolicy(status), { action: "reconnect" });
 });
 
 test("frameLine forwards only agent-inbox-event JSON, one line each", () => {
@@ -103,9 +129,12 @@ test("the preamble carries the protocol and the guard on one line", () => {
 });
 
 test("sameListenerConfig compares the key, not the object identity", () => {
-  const a = { url: "wss://x", protocols: [SUBPROTOCOL, "k1"], documentId: DOC, keyId: null };
+  const a = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC, keyId: null };
   assert.equal(sameListenerConfig(a, { ...a }), true);
-  assert.equal(sameListenerConfig(a, { ...a, protocols: [SUBPROTOCOL, "k2"] }), false);
+  assert.equal(sameListenerConfig(a, { pollUrl: POLL_URL, key: KEY, documentId: DOC }), true);
+  assert.equal(sameListenerConfig(a, { ...a, protocols: [SUBPROTOCOL, "B".repeat(43)] }), false);
+  assert.equal(sameListenerConfig(a, { pollUrl: "https://mcp.staging.unpaged.io/events/poll", key: KEY, documentId: DOC }), false);
+  assert.equal(sameListenerConfig(a, {}), false);
   assert.equal(sameListenerConfig(a, null), false);
 });
 
@@ -132,7 +161,7 @@ function memFs(files) {
   };
 }
 
-const cfg = (key, keyId) => ({ url: "wss://x/events", protocols: [SUBPROTOCOL, key], documentId: DOC, keyId });
+const cfg = (key, keyId) => ({ pollUrl: POLL_URL, key: key.padEnd(43, "k"), documentId: DOC, keyId });
 
 test("rejected-key line follows the retire outcome: re-arm only when this session's file is gone", () => {
   for (const outcome of ["removed", "absent"]) {
@@ -162,6 +191,19 @@ test("retireKeyFile removes the rejected config but restores a newer one", async
   assert.deepEqual(JSON.parse(replaced.files["/k"]), fresh);
 
   assert.equal(await retireKeyFile(memFs({}), "/k", loaded), "absent");
+});
+
+test("HTTP 401 retires the same key across old/new file formats without removing a newer key", async () => {
+  const legacy = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC, keyId: "old" };
+  const normalized = parseListenerConfig(JSON.stringify(legacy));
+  const stillLegacy = memFs({ "/k": JSON.stringify(legacy) });
+  assert.equal(await retireKeyFile(stillLegacy, "/k", normalized), "removed");
+  const reformatted = memFs({ "/k": JSON.stringify(normalized) });
+  assert.equal(await retireKeyFile(reformatted, "/k", legacy), "removed");
+  const newer = { ...normalized, key: "B".repeat(43), keyId: "new" };
+  const changed = memFs({ "/k": JSON.stringify(newer) });
+  assert.equal(await retireKeyFile(changed, "/k", legacy), "kept-newer");
+  assert.deepEqual(JSON.parse(changed.files["/k"]), newer);
 });
 
 test("retireKeyFile never clobbers a third key installed while the file was aside", async () => {

@@ -4,6 +4,16 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-21
+
+### Changed
+
+- The Claude Code Monitor now receives review feedback through short authenticated HTTPS polls instead of a held WebSocket. Polls run every 30 seconds, rising to 60 seconds after an idle hour, and return to normal after new feedback.
+- Existing board keys migrate to the polling endpoint without reminting. Keys stay in private files and Authorization headers; bounded cursor pagination and event-ID deduplication preserve the existing event stdout format.
+- Successful empty polls count as connected. Invalid/revoked keys (401) and newer-key takeover (409) stop; rate limiting, temporary service failures and network failures retry the same key.
+- A second Monitor for the same canvas on the same machine takes over after the earlier Monitor stops polling and drains its output; the displaced session receives a notice that it stopped listening. A pre-1.3 Monitor does not participate in local ownership: end it through Claude Code before arming the canvas from the updated session.
+- Installation and command guidance now describe polling intervals and the staged server/client rollout. WebSocket-era release notes below remain historical.
+
 ## [unpaged-codex 0.4.0] - 2026-09-21
 
 ### Changed

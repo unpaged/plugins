@@ -32,6 +32,7 @@ import {
   parseListenerConfig,
   printableKeyId
 } from "./listen-core.mjs";
+import { probeMonitorOwnership } from "./ownership.mjs";
 
 const home = homedir();
 const keyDir = join(home, KEY_DIR_RELATIVE);
@@ -77,9 +78,9 @@ async function loadConfig(documentId) {
   if (!keyFile) return null;
   try {
     const config = parseListenerConfig(await readFile(keyFile, "utf8"));
-    // Same gate listen.mjs applies at load: a file naming a socket that
+    // Same gate listen.mjs applies at load: a file naming an endpoint that
     // is not TLS to an Unpaged host is not armed, whoever wrote it.
-    return config && config.documentId === documentId && isUnpagedListenerUrl(config.url)
+    return config && config.documentId === documentId && isUnpagedListenerUrl(config.pollUrl)
       ? config
       : null;
   } catch {
@@ -134,10 +135,10 @@ async function storeFromStdin(documentId, asHook) {
   const config = listenerConfigFromMint(mint, { cwd, createdAt: new Date().toISOString() });
   if (!config) {
     if (asHook) {
-      process.stderr.write("Unpaged listener key hook: the mint result is not a valid listener config (it must name an Unpaged wss:// socket); nothing was stored. Push is off for this canvas.\n");
+      process.stderr.write("Unpaged listener key hook: the mint result is not a valid listener config (it must name an Unpaged HTTPS polling endpoint); nothing was stored. Push is off for this canvas.\n");
       return 2;
     }
-    say("error mint result is not a valid listener config (it must name an Unpaged wss:// socket)");
+    say("error mint result is not a valid listener config (it must name an Unpaged HTTPS polling endpoint)");
     return 1;
   }
   // The board the caller asked for is the only board this mint may arm:
@@ -211,7 +212,25 @@ async function alive(documentId) {
   }
   try {
     const status = JSON.parse(await readFile(join(statusDir, `${documentId}.json`), "utf8"));
-    say(monitorLine(status, isAlive));
+    if (!status || !Number.isSafeInteger(status.pid) || status.pid <= 0) {
+      say("monitor:absent");
+      return;
+    }
+    const owner = await probeMonitorOwnership({ home, documentId });
+    // A saved PID can belong to another process after restart. Only the live
+    // capability owner can substantiate this polling monitor's status file.
+    if (!owner || typeof owner.ownerId !== "string" || owner.pid !== status.pid || owner.ownerId !== status.ownerId ||
+      status.documentId !== documentId || status.transport !== "poll-v1") {
+      say(owner || isAlive(status.pid) ? "monitor:unverified" : "monitor:dead");
+      return;
+    }
+    const lastPoll = status.lastSuccessfulPollAt;
+    if (status.state === "connected" && (typeof lastPoll !== "string" || !Number.isFinite(Date.parse(lastPoll)) ||
+      new Date(lastPoll).toISOString() !== lastPoll)) {
+      say("monitor:unverified");
+      return;
+    }
+    say(monitorLine(status, () => true));
   } catch {
     say("monitor:absent");
   }
