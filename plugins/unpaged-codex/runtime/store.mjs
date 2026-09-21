@@ -3,7 +3,7 @@ import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, open
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  acceptsPlan, boundedText, requireDigest, requireId, requireUuid,
+  acceptsPlan, boundedText, pollUrlForLegacyBinding, requireDigest, requireId, requireUuid,
   validTime, validateBinding, validateEvidence, validateRoutingEvent
 } from "./protocol.mjs";
 import { processIdentity, workerIsAlive } from "./process-identity.mjs";
@@ -41,11 +41,13 @@ export class Store {
       this.db.exec(`
       CREATE TABLE IF NOT EXISTS bindings (
         document_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, key_id TEXT NOT NULL,
-        url TEXT, protocols TEXT, codex_path TEXT NOT NULL, plan_digest TEXT NOT NULL, plan_version_at TEXT NOT NULL, status_element_ids TEXT NOT NULL DEFAULT '[]',
+        url TEXT, protocols TEXT, poll_url TEXT, last_successful_poll_at TEXT, last_event_at TEXT,
+        codex_path TEXT NOT NULL, plan_digest TEXT NOT NULL, plan_version_at TEXT NOT NULL, status_element_ids TEXT NOT NULL DEFAULT '[]',
         state TEXT NOT NULL DEFAULT 'active', plan_phase TEXT NOT NULL DEFAULT 'proposed', phase_evidence TEXT,
         connection TEXT NOT NULL DEFAULT 'stopped', connection_reason TEXT,
         reconciliation_required INTEGER NOT NULL DEFAULT 0, reconciliation_evidence TEXT,
         worker_pid INTEGER, worker_identity TEXT, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
+        worker_transport TEXT, worker_transport_token TEXT,
         accepted_event_id TEXT, accepted_digest TEXT, accepted_at TEXT,
         revoke_pending INTEGER NOT NULL DEFAULT 0, revocation_evidence TEXT, updated_at TEXT NOT NULL
       );
@@ -59,6 +61,10 @@ export class Store {
         receipt_id INTEGER PRIMARY KEY, document_id TEXT NOT NULL REFERENCES bindings(document_id),
         event_id TEXT, plan_digest TEXT NOT NULL, accepted_at TEXT NOT NULL,
         source TEXT NOT NULL, evidence TEXT
+      );
+      CREATE TABLE IF NOT EXISTS worker_upgrades (
+        document_id TEXT PRIMARY KEY REFERENCES bindings(document_id),
+        token TEXT NOT NULL, pid INTEGER NOT NULL, identity TEXT NOT NULL, requested_at INTEGER NOT NULL
       );`);
       if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "status_element_ids")) {
         this.db.exec("ALTER TABLE bindings ADD COLUMN status_element_ids TEXT NOT NULL DEFAULT '[]'");
@@ -78,6 +84,18 @@ export class Store {
       }
       if (!this._all("PRAGMA table_info(bindings)").some((column) => column.name === "phase_evidence")) {
         this.db.exec("ALTER TABLE bindings ADD COLUMN phase_evidence TEXT");
+      }
+      // Add fields without changing the legacy state enum or credential shape:
+      // queued tasks may still use retained helpers against this same ledger.
+      const bindingColumns = new Set(this._all("PRAGMA table_info(bindings)").map((column) => column.name));
+      for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token"]) {
+        if (!bindingColumns.has(column)) this.db.exec(`ALTER TABLE bindings ADD COLUMN ${column} TEXT`);
+      }
+      for (const binding of this._all("SELECT document_id,url,protocols FROM bindings WHERE poll_url IS NULL")) {
+        let protocols;
+        try { protocols = JSON.parse(binding.protocols); } catch { continue; }
+        const pollUrl = pollUrlForLegacyBinding(binding.url, protocols);
+        if (pollUrl) this._run("UPDATE bindings SET poll_url=? WHERE document_id=?", pollUrl, binding.document_id);
       }
       this._run(`INSERT INTO acceptance_receipts(document_id,event_id,plan_digest,accepted_at,source)
         SELECT document_id,accepted_event_id,accepted_digest,accepted_at,'legacy' FROM bindings b
@@ -141,11 +159,12 @@ export class Store {
       if (old) {
         if (old.thread_id !== binding.threadId || old.key_id !== binding.keyId || old.codex_path !== binding.codexPath ||
           old.protocols !== JSON.stringify(binding.protocols) || old.url !== binding.url ||
+          (old.poll_url ?? pollUrlForLegacyBinding(old.url, JSON.parse(old.protocols))) !== binding.pollUrl ||
           old.status_element_ids !== JSON.stringify(binding.statusElementIds)) fail("rebind_refused");
         return this.getBinding(binding.documentId);
       }
-      this._run("INSERT INTO bindings(document_id,thread_id,key_id,url,protocols,codex_path,plan_digest,plan_version_at,status_element_ids,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-        binding.documentId, binding.threadId, binding.keyId, binding.url, JSON.stringify(binding.protocols), binding.codexPath, binding.planDigest, now(), JSON.stringify(binding.statusElementIds), now());
+      this._run("INSERT INTO bindings(document_id,thread_id,key_id,url,protocols,poll_url,codex_path,plan_digest,plan_version_at,status_element_ids,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        binding.documentId, binding.threadId, binding.keyId, binding.url, JSON.stringify(binding.protocols), binding.pollUrl, binding.codexPath, binding.planDigest, now(), JSON.stringify(binding.statusElementIds), now());
       return this.getBinding(binding.documentId);
     });
   }
@@ -160,6 +179,10 @@ export class Store {
     }
     if (!["connecting", "connected", "reconnecting", "stopped"].includes(b.connection)) fail("unknown_connection_state");
     const result = { documentId: id, threadId: b.thread_id, keyId: b.key_id, codexPath: b.codex_path,
+      pollUrl: b.poll_url ?? pollUrlForLegacyBinding(b.url, b.protocols ? JSON.parse(b.protocols) : null),
+      lastSuccessfulPollAt: b.last_successful_poll_at, lastEventAt: b.last_event_at,
+      workerTransport: b.worker_token && b.worker_transport_token === b.worker_token ? b.worker_transport : null,
+      upgradePending: Boolean(this._get("SELECT document_id FROM worker_upgrades WHERE document_id=?", id)),
       planDigest: b.plan_digest, planVersionAt: b.plan_version_at, statusElementIds: JSON.parse(b.status_element_ids), status: b.state, connectionState: b.connection, connectionReason: b.connection_reason,
       reconciliationRequired: Boolean(b.reconciliation_required), workerPid: b.worker_pid, workerIdentity: b.worker_identity,
       acceptedEventId: b.accepted_event_id, acceptedDigest: b.accepted_digest, acceptedAt: b.accepted_at,
@@ -171,10 +194,32 @@ export class Store {
   }
   listBindings() { return this._all("SELECT document_id FROM bindings ORDER BY document_id").map((row) => this.getBinding(row.document_id)); }
   listEvents(id) { this._binding(id); return this._all("SELECT * FROM events WHERE document_id=? ORDER BY rowid", id).map((row) => this._eventView(row)); }
-  claimWorker(id, { pid, identity = processIdentity(pid), isAlive: alive } = {}) {
+  claimUpgrade(id, { pid, identity = processIdentity(pid), isAlive: alive = workerIsAlive, at = Date.now() } = {}) {
+    if (!Number.isSafeInteger(pid) || pid <= 0) fail("invalid_pid");
+    if (typeof identity !== "string" || !identity || identity.length > 1000) fail("invalid_worker_identity");
+    if (!Number.isSafeInteger(at) || at < 0) fail("invalid_upgrade_time");
+    if (typeof alive !== "function") fail("invalid_worker_probe");
+    return this._tx(() => {
+      this._active(this._binding(id));
+      const old = this._get("SELECT * FROM worker_upgrades WHERE document_id=?", id);
+      // A crashed coordinator may already have sent SIGTERM while an old
+      // worker's queue call is settling. Give that handover a full minute.
+      if (old && (alive(old.pid, old.identity) || at - old.requested_at < 60_000)) return null;
+      const token = randomUUID();
+      this._run("INSERT INTO worker_upgrades(document_id,token,pid,identity,requested_at) VALUES(?,?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET token=excluded.token,pid=excluded.pid,identity=excluded.identity,requested_at=excluded.requested_at", id, token, pid, identity, at);
+      return token;
+    });
+  }
+  releaseUpgrade(id, token) {
+    requireUuid(id);
+    if (typeof token !== "string" || !token) fail("invalid_upgrade_token");
+    return this._tx(() => this._run("DELETE FROM worker_upgrades WHERE document_id=? AND token=?", id, token).changes === 1);
+  }
+  claimWorker(id, { pid, identity = processIdentity(pid), isAlive: alive, transport } = {}) {
     if (!Number.isSafeInteger(pid) || pid <= 0) fail("invalid_pid");
     if (identity !== null && identity !== undefined && (typeof identity !== "string" || !identity || identity.length > 1000)) fail("invalid_worker_identity");
     if (!alive && !identity) fail("worker_identity_unavailable");
+    if (transport !== undefined && transport !== "poll-v1") fail("invalid_worker_transport");
     return this._tx(() => {
       const b = this._binding(id); this._active(b);
       if (!b.protocols) fail("credentials_missing");
@@ -185,7 +230,8 @@ export class Store {
         this._run("UPDATE events SET state='effect_uncertain',updated_at=? WHERE document_id=? AND state='processing'", now(), id);
       }
       const token = randomUUID();
-      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, now(), id);
+      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_transport=?,worker_transport_token=?,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, transport ?? null, transport ? token : null, now(), id);
+      this._run("DELETE FROM worker_upgrades WHERE document_id=?", id);
       return { token, recovered };
     });
   }
@@ -195,8 +241,19 @@ export class Store {
     if (reason !== null) boundedText(reason, 200);
     return this._tx(() => {
       this._fence(id, token);
-      const terminal = state === "stopped" && ["terminal_close_4401", "terminal_close_4409", "terminal_close_1003"].includes(reason);
+      const terminal = state === "stopped" && ["terminal_close_4401", "terminal_close_4409", "terminal_close_1003", "terminal_http_401", "terminal_http_409"].includes(reason);
       this._run("UPDATE bindings SET connection=?,connection_reason=?,state=CASE WHEN ? THEN 'stopped' ELSE state END,revoke_pending=CASE WHEN ? AND protocols IS NOT NULL THEN 1 ELSE revoke_pending END,updated_at=? WHERE document_id=?", state, reason, Number(terminal), Number(terminal), now(), id);
+    });
+  }
+  recordPollSuccess(id, token, { at, newEvents } = {}) {
+    if (!validTime(at)) fail("invalid_poll_time");
+    if (typeof newEvents !== "boolean") fail("invalid_poll_activity");
+    return this._tx(() => {
+      this._active(this._fence(id, token));
+      // Successful reads do not prove that an earlier gap was reconciled, and
+      // empty/replayed batches do not fabricate new human activity.
+      this._run("UPDATE bindings SET connection='connected',connection_reason=NULL,last_successful_poll_at=?,last_event_at=CASE WHEN ? THEN ? ELSE last_event_at END,updated_at=? WHERE document_id=?", at, Number(newEvents), at, now(), id);
+      return this.getBinding(id);
     });
   }
   markReconciliationRequired(id, token, reason) {
@@ -390,7 +447,7 @@ export class Store {
     return this._tx(() => {
       const b = this._binding(id);
       if (keyId !== b.key_id || b.state === "active") fail("revocation_confirmation_refused");
-      this._run("UPDATE bindings SET protocols=NULL,url=NULL,revoke_pending=0,revocation_evidence=?,updated_at=? WHERE document_id=?", evidence, now(), id);
+      this._run("UPDATE bindings SET protocols=NULL,url=NULL,poll_url=NULL,revoke_pending=0,revocation_evidence=?,updated_at=? WHERE document_id=?", evidence, now(), id);
       return this.getBinding(id);
     });
   }

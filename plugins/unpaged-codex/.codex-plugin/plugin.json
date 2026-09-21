@@ -1,6 +1,6 @@
 {
   "name": "unpaged-codex",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Create and review visual Unpaged plans, record implementation decisions, and compile as-built canvases in the same Codex task.",
   "author": {
     "name": "Unpaged",

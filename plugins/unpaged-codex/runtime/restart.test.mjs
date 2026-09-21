@@ -5,10 +5,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "./store.mjs";
+import { POLL_URL } from "./protocol.mjs";
 
 const DOC = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const QUEUE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const POLLED_AT = "2026-01-01T00:00:01.000Z";
 const storeModule = new URL("./store.mjs", import.meta.url).href;
 const childCode = `
   import { Store } from ${JSON.stringify(storeModule)};
@@ -16,8 +18,9 @@ const childCode = `
     let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>resolve(s));
   }));
   const store=new Store(path);store.bind(binding);
-  const {token}=store.claimWorker(binding.documentId,{pid:process.pid});
+  const {token}=store.claimWorker(binding.documentId,{pid:process.pid,transport:'poll-v1'});
   store.receive(binding.documentId,event,token);
+  store.recordPollSuccess(binding.documentId,token,{at:${JSON.stringify(POLLED_AT)},newEvents:true});
   if(boundary!=='received') store.markDispatching(binding.documentId,event.id,token);
   if(boundary==='processing') {
     store.markQueued(binding.documentId,event.id,token,${JSON.stringify(QUEUE)});
@@ -31,8 +34,8 @@ for (const [boundary, expected] of [["received", "received"], ["dispatching", "q
     const directory = mkdtempSync(join(tmpdir(), "unpaged-crash-test-"));
     try {
       const path = join(directory, "reviews.sqlite");
-      const binding = { documentId: DOC, threadId: TASK, keyId: "testkey", url: "wss://mcp.unpaged.io/events",
-        protocols: ["unpaged-listener.v1", "fake-test-credential"], codexPath: process.execPath, planDigest: "a".repeat(64) };
+      const binding = { documentId: DOC, threadId: TASK, keyId: "testkey", pollUrl: POLL_URL,
+        key: "K".repeat(43), codexPath: process.execPath, planDigest: "a".repeat(64) };
       const event = { id: "durable-event", documentId: DOC, nodeId: "node", threadId: "comment-thread", commentId: "comment",
         reason: "mention", authorRole: "owner", resolved: false, createdAt: "2026-01-01T00:00:00.000Z" };
       const child = spawnSync(process.execPath, ["--input-type=module", "-e", childCode], {
@@ -42,10 +45,13 @@ for (const [boundary, expected] of [["received", "received"], ["dispatching", "q
       assert.equal(child.stdout, "");
       const restored = new Store(path);
       try {
-        const { token, recovered } = restored.claimWorker(DOC, { pid: process.pid });
+        const { token, recovered } = restored.claimWorker(DOC, { pid: process.pid, transport: "poll-v1" });
         assert.equal(recovered, true);
         assert.equal(restored.listEvents(DOC)[0].state, expected);
         assert.equal(restored.getBinding(DOC).threadId, TASK);
+        assert.equal(restored.getBinding(DOC).pollUrl, POLL_URL);
+        assert.equal(restored.getBinding(DOC).lastSuccessfulPollAt, POLLED_AT);
+        assert.equal(restored.getBinding(DOC).lastEventAt, POLLED_AT);
         assert.equal(restored.getBinding(DOC).reconciliationRequired, true);
         assert.equal(restored.receive(DOC, event, token).inserted, false);
         if (expected !== "received") assert.equal(restored.nextEvent(DOC, token), null);

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptancePhrase, acceptsPlan, EVENTS_URL, parseEvent, validateBinding, validateEvidence } from "./protocol.mjs";
+import { acceptancePhrase, acceptsPlan, EVENTS_URL, POLL_URL, SUBPROTOCOL, parseEvent, pollUrlForLegacyBinding, validateBinding, validateEvidence } from "./protocol.mjs";
 
 const binding = { documentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", threadId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   keyId: "listener-key", url: EVENTS_URL, protocols: ["unpaged-listener.v1", "TEST_SECRET"], codexPath: "/test/bin/codex", planDigest: "a".repeat(64) };
@@ -12,6 +12,7 @@ const frame = { type: "agent-inbox-event", id: "event-1", documentId: binding.do
 test("bindings require exact endpoints, UUID board/task, private protocol shape and a version digest", () => {
   const normalized = validateBinding(binding);
   assert.notEqual(normalized.protocols, binding.protocols);
+  assert.equal(normalized.pollUrl, POLL_URL);
   for (const change of [{ threadId: "name" }, { documentId: "../board" }, { keyId: undefined },
     { url: EVENTS_URL + "?key=secret" }, { url: "wss://evil.example/events" }, { codexPath: "relative/codex" },
     { codexPath: "/bin/codex\n--injected" }, { codexPath: "/bin/codex\0" },
@@ -20,6 +21,42 @@ test("bindings require exact endpoints, UUID board/task, private protocol shape 
     assert.throws(() => validateBinding({ ...binding, ...change }));
   }
   assert.equal(validateBinding({ ...binding, codexPath: "/verified/other-install/codex" }).codexPath, "/verified/other-install/codex");
+});
+test("poll-only mint responses retain one credential in the legacy shape without requiring server socket fields", () => {
+  const { url, protocols, ...base } = binding;
+  const key = "A".repeat(41) + "_-";
+  const normalized = validateBinding({ ...base, pollUrl: POLL_URL, key });
+  assert.equal(normalized.pollUrl, POLL_URL);
+  assert.equal(normalized.url, EVENTS_URL);
+  assert.deepEqual(normalized.protocols, [SUBPROTOCOL, key]);
+  assert.equal("key" in normalized, false, "do not create a second stored credential representation");
+  assert.deepEqual(validateBinding({ ...base, url, protocols: [SUBPROTOCOL, key], pollUrl: POLL_URL, key }), normalized);
+  assert.equal(pollUrlForLegacyBinding(url, protocols), POLL_URL);
+});
+test("binding validation refuses mismatched transports, duplicated credentials and malformed direct keys", () => {
+  const { url, protocols, ...base } = binding;
+  const direct = { ...base, pollUrl: POLL_URL, key: "A".repeat(43) };
+  for (const change of [
+    { pollUrl: undefined }, { pollUrl: "https://evil.example/events/poll" },
+    { pollUrl: POLL_URL + "?key=secret" }, { pollUrl: POLL_URL + "#fragment" },
+    { pollUrl: POLL_URL.replace("https:", "http:") }, { pollUrl: POLL_URL + "/" },
+    { key: undefined }, { key: "A".repeat(42) }, { key: "A".repeat(44) },
+    { key: "A".repeat(42) + "=" }, { key: "A".repeat(42) + "\n" }, { key: null },
+    { url }, { protocols }, { url: "wss://evil.example/events", protocols },
+    { url, protocols: [SUBPROTOCOL, "B".repeat(43)] }
+  ]) assert.throws(() => validateBinding({ ...direct, ...change }), JSON.stringify(change));
+  assert.throws(() => validateBinding({ ...binding, pollUrl: "https://evil.example/events/poll" }), /invalid_endpoint/);
+  assert.throws(() => validateBinding({ ...binding, key: binding.protocols[1] }), /invalid_listener_key/);
+});
+test("legacy polling derivation preserves only the exact canonical endpoint and valid existing protocols", () => {
+  assert.equal(pollUrlForLegacyBinding(EVENTS_URL, binding.protocols), POLL_URL);
+  for (const [url, protocols] of [
+    ["wss://evil.example/events", binding.protocols],
+    [EVENTS_URL + "?key=secret", binding.protocols],
+    [EVENTS_URL, [SUBPROTOCOL, "bad\nheader"]],
+    [EVENTS_URL, [SUBPROTOCOL, SUBPROTOCOL]],
+    [EVENTS_URL, null], [null, binding.protocols]
+  ]) assert.equal(pollUrlForLegacyBinding(url, protocols), null);
 });
 test("event parsing strips every collaborator-controlled prose field and rejects unsupported contracts", () => {
   const result = parseEvent(JSON.stringify(frame), binding);

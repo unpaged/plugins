@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { cp, lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,11 +31,17 @@ async function until(predicate) {
   }
 }
 
-async function fixture(t) {
+async function fixture(t, { historical = false } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "unpaged-upgrade-test-")));
   const data = join(root, "private-data");
   const cache = join(root, "plugin-cache");
-  const store = new Store(join(data, "reviews.sqlite"));
+  let StoreType = Store;
+  if (historical) {
+    await mkdir(cache, { recursive: true });
+    execFileSync("tar", ["-xzf", join(pluginSource, "runtime/fixtures/codex-0.3.2.tar.gz"), "-C", cache]);
+    StoreType = (await import(pathToFileURL(join(cache, "runtime/store.mjs")).href)).Store;
+  }
+  let store = new StoreType(join(data, "reviews.sqlite"));
   const workers = [];
   t.after(async () => {
     for (const worker of workers) worker.controller.abort();
@@ -43,16 +49,17 @@ async function fixture(t) {
     store.close();
     await rm(root, { recursive: true, force: true });
   });
-  await cp(pluginSource, cache, { recursive: true });
+  if (!historical) await cp(pluginSource, cache, { recursive: true });
   store.bind({ documentId: DOCUMENT, threadId: TASK, keyId: "upgrade-test-key",
     url: "wss://mcp.unpaged.io/events", protocols: ["unpaged-listener.v1", SECRET],
     codexPath: process.execPath, planDigest: DIGEST });
 
-  async function start(workerPath) {
+  async function start(workerPath, { legacy = false } = {}) {
     // Execute the actual copied worker and its copied dependencies. Only the
-    // socket and Codex queue boundary are fake; no network or model is started.
+    // HTTP/socket and Codex queue boundaries are fake; no network/model starts.
     const { runWorker } = await import(pathToFileURL(workerPath).href);
     const sockets = [];
+    const inbox = [];
     const calls = [];
     const controller = new AbortController();
     class Socket extends EventTarget {
@@ -72,11 +79,14 @@ async function fixture(t) {
       return { kill() {} };
     };
     const done = runWorker(DOCUMENT, { dataDir: data, Socket, execFile,
-      signal: controller.signal, pollMs: 10 });
-    const worker = { controller, done, calls, sockets };
+      fetch: async () => new Response(JSON.stringify({ events: inbox.splice(0) }),
+        { headers: { "Content-Type": "application/json" } }),
+      signal: controller.signal, pollMs: 10, pollIntervalMs: 10, idlePollIntervalMs: 10 });
+    const worker = { controller, done, calls, sockets,
+      deliver(raw) { if (legacy) sockets[0].message(raw); else inbox.push(JSON.parse(raw)); } };
     workers.push(worker);
-    assert.equal(sockets.length, 1);
-    sockets[0].open();
+    if (legacy) { assert.equal(sockets.length, 1); sockets[0].open(); }
+    await until(() => store.getBinding(DOCUMENT).connectionState === "connected");
     return worker;
   }
 
@@ -109,7 +119,8 @@ async function fixture(t) {
     assert.ok(worker, "normal startup must launch the retained worker");
     return { ...worker, workerPath };
   }
-  return { root, data, cache, store, start, newerCache, launch };
+  return { root, data, cache, get store() { return store; }, start, newerCache, launch,
+    upgradeStore() { store.close(); store = new Store(join(data, "reviews.sqlite")); return store; } };
 }
 
 function queuedPaths(message) {
@@ -145,7 +156,7 @@ test("queued snapshot CLI and all linked skills survive deletion of the installe
   const worker = await f.launch();
   const { workerPath } = worker;
   assert.ok(workerPath.startsWith(join(f.data, "runtimes") + "/"));
-  worker.sockets[0].message(frame("old-event"));
+  worker.deliver(frame("old-event"));
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   const paths = queuedPaths(worker.calls[0].message);
   assert.equal(paths.begin[0], join(dirname(workerPath), "cli.mjs"));
@@ -157,30 +168,35 @@ test("queued snapshot CLI and all linked skills survive deletion of the installe
   const completed = finishQueued(paths, f.data, "old-event");
   assert.equal(completed.state, "completed");
   assert.equal(completed.queueId, worker.calls[0].queueId);
-  worker.sockets[0].message(frame("old-event"));
+  worker.deliver(frame("old-event"));
   await pause();
   assert.equal(worker.calls.length, 1);
 });
 
 test("a newer snapshot preserves an older queued receipt and lets its original CLI finish before dispatching again", async (t) => {
-  const f = await fixture(t);
-  const oldPath = await retainRuntime(f.data, f.cache);
-  const old = await f.start(oldPath);
-  old.sockets[0].message(frame("old-event"));
+  const f = await fixture(t, { historical: true });
+  const oldRetainer = await import(pathToFileURL(join(f.cache, "runtime/snapshot.mjs")).href);
+  const oldPath = await oldRetainer.retainRuntime(f.data, f.cache);
+  const old = await f.start(oldPath, { legacy: true });
+  old.deliver(frame("old-event"));
   await until(() => f.store.listEvents(DOCUMENT)[0]?.state === "queued");
   const paths = queuedPaths(old.calls[0].message);
   const queueId = old.calls[0].queueId;
   old.controller.abort();
   await old.done;
 
+  const beforeUpgrade = f.store.getBinding(DOCUMENT);
+  f.upgradeStore();
+  assert.equal(f.store.getBinding(DOCUMENT).planDigest, beforeUpgrade.planDigest);
+  assert.equal(f.store.getBinding(DOCUMENT).keyId, beforeUpgrade.keyId);
   const nextCache = await f.newerCache();
   const nextPath = await retainRuntime(f.data, nextCache);
   assert.notEqual(nextPath, oldPath);
   await rm(f.cache, { recursive: true });
   await rm(nextCache, { recursive: true });
   const next = await f.start(nextPath);
-  next.sockets[0].message(frame("old-event"));
-  next.sockets[0].message(frame("next-event"));
+  next.deliver(frame("old-event"));
+  next.deliver(frame("next-event"));
   await pause();
   assert.equal(next.calls.length, 0);
   assert.equal(f.store.listEvents(DOCUMENT)[0].state, "queued");
@@ -194,7 +210,7 @@ test("a newer snapshot preserves an older queued receipt and lets its original C
   assert.equal(old.calls.length, 1);
 });
 
-test("a live legacy worker remains on its cache paths and is not silently replaced by ensureWorker", async (t) => {
+test("a live polling worker keeps its runtime during a later package update", async (t) => {
   const f = await fixture(t);
   const legacy = await f.start(join(f.cache, "runtime/worker.mjs"));
   const nextCache = await f.newerCache();
@@ -208,7 +224,7 @@ test("a live legacy worker remains on its cache paths and is not silently replac
   assert.equal(after.threadId, TASK);
   assert.equal(after.keyId, before.keyId);
   await assert.rejects(lstat(join(f.data, "runtimes")), { code: "ENOENT" });
-  legacy.sockets[0].message(frame("legacy-event"));
+  legacy.deliver(frame("legacy-event"));
   await until(() => legacy.calls.length === 1);
   const paths = queuedPaths(legacy.calls[0].message);
   assert.equal(paths.begin[0], join(f.cache, "runtime/cli.mjs"));
