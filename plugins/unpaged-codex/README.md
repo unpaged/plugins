@@ -145,9 +145,20 @@ not an upgrade pause. A stopped legacy binding with unreconciled events remains
 blocked instead of being silently repaired.
 
 A receiver already running from an older cache path is **not migrated by
-installation**. Keep its original code available until its pending work has been
-reconciled and it is deliberately stopped or migrated. Do not uninstall to update,
-replace its listener key, or start a competing receiver. Local cache-deletion tests
+installation**. Version 0.4.0 uses the deployed HTTP polling endpoint. Normal
+`resume` or trusted SessionStart recovery can hand over an active socket receiver:
+verify its recorded boot and process start identity, request graceful
+shutdown, and wait for it to exit before starting the polling receiver. If the
+identity or shutdown cannot be verified, preserve the binding and report the
+blocker. `upgradePending` identifies an in-progress detached handover; wait for
+a recent `lastSuccessfulPollAt` before claiming polling is working. The CLI `stop` command remains a permanent review stop.
+
+The additive migration derives the canonical polling URL from the validated
+stored socket binding and preserves the same credential, task, plan phase,
+digests and event receipts. Keep original and retained helpers available for
+queued operations; the transport handover does not retry or acknowledge their
+effects. Do not uninstall to update, replace the listener key, or start a
+competing receiver. Local cache-deletion tests
 cover retained runtime behavior; a native installed-package update with pending
 feedback remains a release trial.
 
@@ -229,6 +240,11 @@ pending/recovery state. The adapter never starts a second model process or
 creates a replacement task. It does not install a login service or wake a
 sleeping computer.
 
+The receiver polls every 30 seconds, slowing to 60 seconds after an hour without
+a new event. New feedback returns it to the normal interval. These are polling
+intervals, not maximum response times: network availability and the assigned
+task's state also affect delivery and processing.
+
 On macOS, worker ownership needs OS process inspection. If the command sandbox
 blocks that inspection, run the adapter launch/recovery command through the
 host's normal approval mechanism outside that sandbox. Do not weaken worker
@@ -238,13 +254,17 @@ identity checks or bypass hook trust to work around it.
 
 - A private SQLite ledger saves an event before enqueueing it and preserves
   board/task identity, queue IDs, operation tokens, and completion receipts.
-  One event per board runs at a time. Duplicate socket events are ignored.
-- Reconnects use bounded exponential backoff. Revocation, takeover, and protocol
-  rejection stop the receiver. They do not silently mint new keys.
-- `connected` means the WebSocket transport opened. The server has no explicit
-  authentication-ready frame and can open a socket before rejecting its key.
-  Previously received work may already be queued when that rejection arrives.
-  The adapter blocks new board work as soon as it observes the terminal close;
+  One event per board runs at a time. Replayed event IDs are ignored.
+- Failed polls retry with bounded exponential backoff using the same key.
+  Invalid or revoked keys (401) and supersession by a newer key (409) stop the
+  receiver. They do not silently mint new keys. Rate limiting (429) and service
+  failures (503) are retryable, not proof that a key is invalid.
+- `connected` means an authenticated poll succeeded, including an empty result.
+  `lastSuccessfulPollAt` records that response; `lastEventAt` records the latest
+  newly received event. Normal waits between healthy polls remain connected.
+  A failed poll reports reconnecting and a reconciliation gap. Previously
+  received work may already be queued when a terminal response arrives.
+  The adapter blocks new board work as soon as it observes that response;
   use the local stop command first when cancelling the whole review.
 - An interrupted enqueue becomes `queue_uncertain`; interrupted board work
   becomes `effect_uncertain`. Neither is blindly retried. Inspect Codex's task
@@ -254,11 +274,11 @@ identity checks or bypass hook trust to work around it.
   limited replay window, and event creation is not guaranteed. Compare the
   actual unresolved comments with the ledger and get owner confirmation for
   feedback whose role cannot be established. Clear the flag only after that
-  evidence is recorded. It is not a claim that the socket caught everything.
+  evidence is recorded. A successful poll alone does not establish complete history.
 - Unpaged does not currently support an atomic idempotent edit/reply/receipt.
   The adapter prevents automatic repeated effects after uncertainty but cannot
-  promise exactly-once board writes. Cross-host ownership is also not globally
-  fenced by the present server. Use one assigned agent per board.
+  promise exactly-once board writes. The server's newer-key rule does not fence
+  two machines sharing the same key. Use one assigned agent per board.
 - Legacy 0.2 bindings whose listener state is already terminal `accepted` stay
   terminal after upgrade. Updating the package does not resurrect their keys or
   transfer them to another task. Reconcile and finish their exact cleanup first.
@@ -302,7 +322,7 @@ node --test plugins/unpaged/monitors/*.test.mjs
 node --test scripts/*.test.mjs
 ```
 
-The automated tests use temporary databases and fake sockets/queue commands.
+The automated tests use temporary databases and injected HTTP/queue fixtures.
 They do not spend model tokens or write to a live board.
 
 The [September 19 installed trial](../../docs/codex-installed-trial-2026-09-19.md)
@@ -313,7 +333,8 @@ complete as-built records. Version 0.3.1 retained native approval across an
 unchanged-hook update, automatically restored the same BUILT review after an
 app restart and task reopen, and handled a fresh comment with one read-only
 reply. This was neither a clean-profile installation/sign-in trial nor a full
-0.3.1 rerun of the earlier lifecycle.
+0.3.1 rerun of the earlier lifecycle. Those versions used sockets; the trial does
+not prove installed 0.4.0 polling, socket-to-poll handover or restart recovery.
 
 The package test builds a real artifact with a synthetic connection ID and
 executes its CLI, including a symlink-path invocation. Runtime tests cover cache removal, PID

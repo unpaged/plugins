@@ -3,9 +3,10 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Store } from "./store.mjs";
-import { EVENTS_URL, UUID, parseEvent } from "./protocol.mjs";
+import { UUID } from "./protocol.mjs";
+import { pollInbox, POLL_TIMEOUT_MS } from "./poll.mjs";
+import { prepareHandover } from "./handover.mjs";
 
-const TERMINAL_CLOSES = new Set([4401, 4409, 1003]);
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
 function absolutePath(value) {
@@ -81,38 +82,48 @@ export function enqueue(binding, event, options = {}) {
 // starts a Codex model; the public queue command only records pending input.
 export async function runWorker(documentId, options = {}) {
   if (!UUID.test(documentId) || !absolutePath(options.dataDir)) throw new Error("worker_configuration_invalid");
+  const duration = (value, fallback, maximum) => {
+    const result = value ?? fallback;
+    if (!Number.isInteger(result) || result < 1 || result > maximum) throw new Error("worker_configuration_invalid");
+    return result;
+  };
+  const pollMs = duration(options.pollMs, 500, 1000);
+  const intervalMs = duration(options.pollIntervalMs, 30000, 60000);
+  const idleIntervalMs = duration(options.idlePollIntervalMs, 60000, 60000);
+  const idleAfterMs = duration(options.idleAfterMs, 3600000, 3600000);
+  const retryBaseMs = duration(options.retryBaseMs, 30000, 60000);
+  const maxRetryMs = duration(options.maxRetryMs, 60000, 60000);
+  const timeoutMs = duration(options.requestTimeoutMs, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
+  const now = options.now ?? Date.now;
+  const schedule = options.setTimeout ?? setTimeout;
+  const cancelTimer = options.clearTimeout ?? clearTimeout;
+  const startedAt = now();
   const store = options.store ?? new Store(join(options.dataDir, "reviews.sqlite"));
   const ownsStore = !options.store;
-  const Socket = options.Socket ?? WebSocket;
-  const pollMs = Math.max(10, Math.min(1000, options.pollMs ?? 500));
-  const reconnectBaseMs = Math.max(1, Math.min(1000, options.reconnectBaseMs ?? 1000));
   let token;
   let binding;
-  let socket;
-  let pollTimer;
-  let reconnectTimer;
-  let reconnectAttempt = 0;
+  let pumpTimer;
+  let requestTimer;
+  let requestController;
+  let transport;
+  let retryAttempt = 0;
+  let cursor = null;
   let finished = false;
   let finishing;
   let dispatch;
   let resolveDone;
   const done = new Promise((resolveResult) => { resolveDone = resolveResult; });
 
-  const closeSocket = () => {
-    const old = socket;
-    socket = undefined;
-    try { old?.close(); } catch { /* Never retain or log transport errors. */ }
-  };
-
   const finish = (state, reason) => {
     if (finishing) return finishing;
     finished = true;
-    clearInterval(pollTimer);
-    clearTimeout(reconnectTimer);
-    closeSocket();
+    clearInterval(pumpTimer);
+    cancelTimer(requestTimer);
+    requestController?.abort();
     finishing = (async () => {
-      // An in-flight command may already have inserted a queue item. Let it
-      // report its receipt or uncertainty rather than discarding its outcome.
+      await transport;
+      // A queue command can already have inserted input. Preserve its eventual
+      // receipt or uncertainty even after shutdown or terminal rejection.
       await dispatch;
       try { if (token) store.setConnection(documentId, token, "stopped", reason); } catch { /* Ownership may have changed. */ }
       try { if (token) store.releaseWorker(documentId, token); } catch { /* Never release another worker's claim. */ }
@@ -143,14 +154,13 @@ export async function runWorker(documentId, options = {}) {
     try {
       binding = currentBinding();
       if (!binding) return;
-      // Wait for a live transport before dispatching persisted backlog. The
-      // server can reject a listener after upgrading: open is not an auth
-      // acknowledgment. An observed terminal close fences further agent work.
+      // A successful authenticated poll gates persisted backlog. Between polls,
+      // connected describes that last result; idle time is not a transport gap.
       if (dispatch || binding.connectionState !== "connected") return;
       const event = store.nextEvent(documentId, token);
       if (!event) return;
-      // This durable boundary precedes invoking the child. A restart after this
-      // transaction must reconcile it as uncertain, never retry it blindly.
+      // This durable boundary precedes invoking the child. A restart after it
+      // must reconcile uncertainty instead of repeating the queue command.
       store.markDispatching(documentId, event.id, token);
       dispatch = enqueue(binding, event, {
         execFile: options.execFile,
@@ -164,70 +174,73 @@ export async function runWorker(documentId, options = {}) {
     } catch { failStore(); }
   };
 
-  const scheduleReconnect = () => {
+  const interval = (current) => {
+    const activity = current.lastEventAt ? Date.parse(current.lastEventAt) : startedAt;
+    return now() - activity >= idleAfterMs ? idleIntervalMs : intervalMs;
+  };
+  const later = (delay) => {
+    if (!finished) requestTimer = schedule(poll, delay);
+  };
+  const retry = () => {
     if (finished) return;
     try {
+      const current = currentBinding();
+      if (!current) return;
       store.markReconciliationRequired(documentId, token, "connection_gap");
       store.setConnection(documentId, token, "reconnecting", "connection_gap");
-    } catch { failStore(); return; }
-    const delay = Math.min(60000, reconnectBaseMs * 2 ** Math.min(reconnectAttempt++, 16));
-    reconnectTimer = setTimeout(connect, delay);
+      later(Math.min(maxRetryMs, Math.max(interval(current), retryBaseMs * 2 ** Math.min(retryAttempt++, 16))));
+    } catch { failStore(); }
   };
 
-  const connect = () => {
-    if (finished) return;
+  const poll = () => {
+    if (finished || transport) return;
     try {
       binding = currentBinding();
       if (!binding) return;
-      store.setConnection(documentId, token, "connecting");
-      const activeSocket = new Socket(EVENTS_URL, binding.protocols);
-      socket = activeSocket;
-      activeSocket.addEventListener("open", () => {
-        if (finished || socket !== activeSocket) return;
-        try {
-          if (!currentBinding()) return;
-          reconnectAttempt = 0;
-          store.setConnection(documentId, token, "connected");
-          pump();
-        } catch { failStore(); }
-      });
-      activeSocket.addEventListener("message", (message) => {
-        if (finished || socket !== activeSocket) return;
+      requestController = new AbortController();
+      transport = pollInbox(binding, { fetch: options.fetch, signal: requestController.signal, cursor, timeoutMs }).then((result) => {
+        if (finished) return;
         try {
           const current = currentBinding();
           if (!current) return;
-          const event = parseEvent(message.data, current);
-          if (!event) return;
-          store.receive(documentId, event, token);
-          pump();
-        } catch { failStore(); }
-      });
-      activeSocket.addEventListener("error", () => {
-        // The WebSocket close event owns reconnect policy; error text may
-        // contain a URL or credential and must never enter status or logs.
-      });
-      activeSocket.addEventListener("close", (event) => {
-        if (finished || socket !== activeSocket) return;
-        socket = undefined;
-        if (TERMINAL_CLOSES.has(event.code)) {
-          const reason = `terminal_close_${event.code}`;
-          try {
-            // Fence new agent work immediately. finish waits for any in-flight
-            // queue receipt, which can arrive up to 45 seconds after revocation
-            // or ownership rejection. That receipt must not keep review active.
+          if (result.terminal) {
+            const reason = `terminal_http_${result.terminal}`;
+            // Fence agent begin immediately, before waiting for an existing
+            // queue command's receipt, which may take up to 45 seconds.
             store.setConnection(documentId, token, "stopped", reason);
-          } catch { failStore(); return; }
-          void finish("terminal", reason);
-          return;
-        }
-        scheduleReconnect();
-      });
-    } catch { scheduleReconnect(); }
+            void finish("terminal", reason);
+            return;
+          }
+          let newEvents = false;
+          for (const event of result.events) {
+            if (store.receive(documentId, event, token).inserted) newEvents = true;
+          }
+          store.recordPollSuccess(documentId, token, { at: new Date(now()).toISOString(), newEvents });
+          // The cursor is a temporary scan position, never a receipt. Restart
+          // from the first page and let the durable event journal deduplicate.
+          cursor = result.nextCursor;
+          retryAttempt = 0;
+          binding = currentBinding();
+          if (!binding) return;
+          pump();
+          later(interval(binding));
+        } catch { failStore(); }
+      }, retry).finally(() => { transport = undefined; requestController = undefined; });
+    } catch { failStore(); }
   };
 
   try {
+    const ready = await (options.prepareHandover ?? prepareHandover)(documentId, {
+      store, signal: options.signal, pid: options.pid ?? process.pid,
+      ...(options.isAlive ? { isAlive: options.isAlive } : {})
+    });
+    if (!ready) {
+      await finish("stopped", "worker_handover_deferred");
+      return done;
+    }
     const claim = store.claimWorker(documentId, {
       pid: options.pid ?? process.pid,
+      transport: "poll-v1",
       ...(options.isAlive ? { isAlive: options.isAlive } : {})
     });
     token = claim.token;
@@ -236,9 +249,9 @@ export async function runWorker(documentId, options = {}) {
       return done;
     }
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    connect();
+    poll();
     if (!finished) {
-      pollTimer = setInterval(pump, pollMs);
+      pumpTimer = setInterval(pump, pollMs);
       pump();
     }
   } catch {

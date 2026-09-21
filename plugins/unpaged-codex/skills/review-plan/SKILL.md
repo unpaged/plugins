@@ -136,7 +136,7 @@ an already approved Unpaged hook. Never echo raw diagnostics from other plugins.
    bounds/readback, and inspect the rendered board.
    A supplied existing board must be explicitly assigned to this task. Before
    attaching it, read its unresolved comments and identify existing unhandled
-   feedback; the socket's retained events are not a complete history. Record
+   feedback; retained events are not a complete history. Record
    that review and require owner confirmation where author role is unknown.
 3. Use one dedicated root status text element with the exact `**Status:**`
    prefix. Record its ID in the task. Read the full
@@ -155,14 +155,21 @@ an already approved Unpaged hook. Never echo raw diagnostics from other plugins.
    agents reply and leave threads open; humans resolve and explicitly accept.
 5. After the setup check passes, mint a board-bound key via
    `agent_listener_key_create`. Call `arm` with stdin:
-   `{ "documentId", "threadId": <current CODEX_THREAD_ID>, "keyId", "url",
-      "protocols", "planDigest": <full digest>, "statusElementIds": [<status ID>] }`.
+   `{ "documentId", "threadId": <current CODEX_THREAD_ID>, "keyId", "key",
+      "pollUrl", "planDigest": <full digest>, "statusElementIds": [<status ID>] }`.
+   Use the exact mint values; the key travels only through private stdin and the
+   Authorization header, never a URL or process argument. The legacy `url` and
+   `protocols` fields remain accepted for existing mint responses; retain them
+   when provided. The helper validates the canonical endpoint and derives a
+   missing polling URL only from a valid legacy binding, without reminting.
    The helper rechecks native setup before opening state, verifies the installed
    Codex binary and persists the exact binding.
    It refuses implicit takeover/rebinding. If arming fails, revoke the newly
    minted key through MCP; do not leave an orphaned credential.
-6. Inspect `status` and confirm `connectionState: "connected"` plus a live worker
-   before saying the board is listening. Give the edit link and invite an
+6. Inspect `status` and confirm `connectionState: "connected"`, a recent
+   `lastSuccessfulPollAt`, and a live worker before saying the board is listening.
+   An authenticated empty poll counts as success. `lastEventAt` records new
+   events only; a null value is normal before the first event. Give the edit link and invite an
    `@agent` comment. End the turn so idle wakeup can occur. Explain that the task
    must be reopened after a Codex restart; the adapter does not load closed tasks.
 
@@ -353,10 +360,14 @@ plan phase; no transition proves that delivery is connected.
 
 ## Status, interruption, and stop
 
-The receiver keeps running across idle periods. It persists each received event
-before attempting `codex queue`, serializes review rounds, and reconnects after
-transient failures. It never calls `exec resume`, creates a task, or starts a
-model. On supported macOS/Linux hosts, stored boot and process start identity
+The receiver polls every 30 seconds, or every 60 seconds after an hour without
+a new event. New feedback returns it to the normal interval. Do not promise a
+30-second maximum response time. It persists each received event before
+attempting `codex queue`, serializes review rounds, and retries transient
+failures with the same key. Healthy waits remain connected; failures report
+reconnecting and a reconciliation gap. An empty successful poll updates
+`lastSuccessfulPollAt` without clearing that gap. It never calls `exec resume`,
+creates a task, or starts a model. On supported macOS/Linux hosts, stored boot and process start identity
 distinguish PID reuse. An unknown identity or live legacy PID without a recorded
 identity raises `worker_identity_unverifiable`; preserve the process and report
 the recovery blocker. Windows is unsupported.
@@ -369,10 +380,15 @@ explicitly authorized upgrade gracefully stop that plugin-owned receiver while
 preserving the binding. The CLI `stop` command is permanent, not an upgrade
 pause. Never clear the ledger, replace keys, or change task ownership to defeat
 these migration guards; report an unrecoverable old stopped binding as blocked.
-An older live worker running from a plugin cache is not migrated by a new
-installation: preserve its original paths until deliberately reconciled and
-stopped or migrated. The native SessionStart hook repairs only already-authorized bindings for
-this same root task; it must be trusted through Codex's normal hook review.
+Installing a new package does not itself migrate a live worker. For a compatible
+active socket binding, normal `resume` or trusted SessionStart recovery can
+verify the stored boot and process start identity, request graceful shutdown,
+and wait for exit before starting polling. If identity or exit cannot be
+verified, preserve the existing process and report the blocker. Keep original
+and retained paths for pending helpers; handover preserves the key, task, phase,
+digests and receipts and never retries uncertain effects. The native SessionStart
+hook repairs only already-authorized bindings for this same root task; it must
+be trusted through Codex's normal hook review.
 
 For setup, update, or recovery checks, inspect existing `status`/`pending` and run
 `doctor` from the current installed plugin. Keep event handling on its trusted
@@ -405,11 +421,14 @@ that retry is appropriate. Never retry because the pending queue is empty.
 After reconnect/restart, `reconciliationRequired` is deliberately visible.
 Compare unresolved board feedback with known events/receipts. Missing author-role
 evidence requires owner confirmation before edits. Record a completed review via
-`reconcile`; never clear the flag simply because the socket reconnected. Current
+`reconcile`; never clear the flag simply because polling succeeded again. Current
 server replay and reply contracts prevent a full exactly-once recovery guarantee.
 
 On a user stop, use `stop documentId`, revoke its exact key through MCP, verify
 revocation, then use `revoked` with `{ "keyId", "evidence": <revocation evidence> }`.
-Do not revoke every user's key or delete another board's state. Revocation,
-takeover (4409), or protocol rejection stops the receiver; never defeat it by
-automatically issuing a replacement key.
+Do not revoke every user's key or delete another board's state. HTTP 401 means
+the key is invalid or revoked; HTTP 409 means a newer key owns this canvas.
+Both stop the receiver. Never defeat either result by automatically issuing a
+replacement key. HTTP 429 and 503 are retryable and do not justify revocation
+or replacement. Two hosts sharing the same key are not fenced by the newer-key
+rule; keep one assigned agent per canvas.

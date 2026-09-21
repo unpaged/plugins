@@ -1,10 +1,22 @@
 import { isAbsolute } from "node:path";
 
 export const EVENTS_URL = "wss://mcp.unpaged.io/events";
+export const POLL_URL = "https://mcp.unpaged.io/events/poll";
 export const SUBPROTOCOL = "unpaged-listener.v1";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN = /^[!#$%&'*+\-.^_`|~A-Za-z0-9]+$/;
+const LISTENER_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+function validProtocols(protocols) {
+  return Array.isArray(protocols) && protocols.length === 2 && protocols[0] === SUBPROTOCOL &&
+    typeof protocols[1] === "string" && protocols[1].length <= 4096 && protocols[1] !== SUBPROTOCOL && TOKEN.test(protocols[1]);
+}
+// Only a validated legacy endpoint may gain polling without a new key. Never
+// reinterpret a foreign endpoint or malformed credential as the production one.
+export function pollUrlForLegacyBinding(url, protocols) {
+  return url === EVENTS_URL && validProtocols(protocols) ? POLL_URL : null;
+}
 
 export function requireId(value) {
   if (typeof value !== "string" || !ID.test(value)) throw new Error("invalid_id");
@@ -30,19 +42,31 @@ export function validTime(value) {
 }
 export function validateBinding(value) {
   if (!value || typeof value !== "object") throw new Error("invalid_binding");
-  const { documentId, threadId, keyId, url, protocols, codexPath, planDigest } = value;
+  const { documentId, threadId, keyId, codexPath, planDigest } = value;
+  let { url, protocols } = value;
   requireUuid(documentId); requireUuid(threadId); requireId(keyId); requireDigest(planDigest);
   // The trusted arm command has already verified this executable's version and
   // queue capability; persist its absolute path without a platform-specific default.
-  if (url !== EVENTS_URL || typeof codexPath !== "string" || codexPath.length > 4096 ||
+  if (typeof codexPath !== "string" || codexPath.length > 4096 ||
     !isAbsolute(codexPath) || /[\0\r\n]/.test(codexPath)) throw new Error("invalid_endpoint");
-  if (!Array.isArray(protocols) || protocols.length !== 2 || protocols[0] !== SUBPROTOCOL ||
-    typeof protocols[1] !== "string" || protocols[1].length > 4096 || protocols[1] === SUBPROTOCOL ||
-    !TOKEN.test(protocols[1])) throw new Error("invalid_protocols");
+  if (value.pollUrl !== undefined && value.pollUrl !== POLL_URL) throw new Error("invalid_endpoint");
+  if (value.key !== undefined && (typeof value.key !== "string" || !LISTENER_KEY.test(value.key))) throw new Error("invalid_listener_key");
+  if (url !== undefined || protocols !== undefined) {
+    if (url !== EVENTS_URL) throw new Error("invalid_endpoint");
+    if (!validProtocols(protocols)) throw new Error("invalid_protocols");
+    if (value.key !== undefined && value.key !== protocols[1]) throw new Error("listener_key_mismatch");
+  } else {
+    if (value.pollUrl !== POLL_URL) throw new Error("invalid_endpoint");
+    if (value.key === undefined) throw new Error("invalid_listener_key");
+    // Retained helpers still read this shape. Poll-only mint responses do not
+    // require a socket endpoint to remain part of the server's future contract.
+    url = EVENTS_URL;
+    protocols = [SUBPROTOCOL, value.key];
+  }
   const statusElementIds = value.statusElementIds ?? [];
   if (!Array.isArray(statusElementIds) || statusElementIds.length > 128 || new Set(statusElementIds).size !== statusElementIds.length) throw new Error("invalid_status_elements");
   for (const id of statusElementIds) requireUuid(id);
-  return { documentId, threadId, keyId, url, protocols: [...protocols], codexPath, planDigest, statusElementIds: [...statusElementIds].sort() };
+  return { documentId, threadId, keyId, url, pollUrl: POLL_URL, protocols: [...protocols], codexPath, planDigest, statusElementIds: [...statusElementIds].sort() };
 }
 
 // Current AgentInboxFrame has no required schemaVersion. Store only routing

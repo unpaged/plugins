@@ -29,7 +29,7 @@ test("concurrent publishers retain one complete private runtime without connecti
   assert.equal((await lstat(results[0])).mode & 0o077, 0);
   assert.deepEqual((await readdir(join(data, "runtimes"))), [root.split("/").at(-1)]);
   assert.deepEqual((await readdir(root)).sort(), ["runtime", "skills"]);
-  assert.deepEqual((await readdir(join(root, "runtime"))).sort(), ["cli.mjs", "process-identity.mjs", "protocol.mjs", "setup.mjs", "snapshot.mjs", "store.mjs", "worker.mjs"]);
+  assert.deepEqual((await readdir(join(root, "runtime"))).sort(), ["cli.mjs", "handover.mjs", "poll.mjs", "process-identity.mjs", "protocol.mjs", "setup.mjs", "snapshot.mjs", "store.mjs", "worker.mjs"]);
   assert.equal(await readFile(join(root, "skills/review-plan/SKILL.md"), "utf8"), await readFile(join(plugin, "skills/review-plan/SKILL.md"), "utf8"));
   assert.equal(await readFile(join(root, "skills/as-built/SKILL.md"), "utf8"), await readFile(join(plugin, "skills/as-built/SKILL.md"), "utf8"));
 });
