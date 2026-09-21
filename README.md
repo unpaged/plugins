@@ -18,23 +18,29 @@ adds visual plans, same-task comment review, implementation Decision logs, and
 as-built canvases. It requires macOS or Linux, Node.js 24+ available to Codex's
 hooks, and Codex 0.153.1+ with the public `queue` command and `hooks/list` support.
 
-Once the Codex catalog is available on `main`, use a supported Codex CLI:
+Use a supported Codex CLI:
 
 ```sh
 codex plugin marketplace add unpaged/plugins
 codex plugin add unpaged-codex@unpaged
+codex mcp login unpaged
 ```
 
-Complete Unpaged sign-in when prompted, then start a fresh Codex task and invoke
-`visual-plan`. Listening also requires native approval of the SessionStart hook;
-follow the [setup instructions](plugins/unpaged-codex/README.md#hook-approval-before-listening).
+Complete Unpaged sign-in through the last command; plugin installation does not
+complete this step. Then start Codex, open `/hooks`, and review and trust the
+Unpaged plugin's **SessionStart** hook before listening. Keep the hook enabled,
+then invoke `visual-plan` in a fresh task. Desktop users can instead use the
+[hook settings](plugins/unpaged-codex/README.md#hook-approval-before-listening).
 The repository package includes its direct MCP connection; no personal
 registration ID or artifact build is required.
 
 **Installation smoke passed; full workflow pending:** a [fresh CLI trial](docs/codex-repository-install-trial-2026-09-20.md)
 installed the GitHub package and discovered its bundled server as not signed in.
-Native sign-in, hook approval, the plan lifecycle and restart recovery remain
-untested for this route. The successful [earlier pilot](docs/codex-installed-trial-2026-09-19.md)
+A later user-reported fresh Ubuntu installation of 0.4.0 confirmed that the
+explicit login command is required. The user confirmed sign-in and native hook
+trust; a screenshot showed `visual-plan` and `review-plan` loading. Canvas
+creation, comment delivery and restart recovery remain unproven for that trial.
+The successful [earlier pilot](docs/codex-installed-trial-2026-09-19.md)
 used a different registered-connection artifact. The [readiness runbook](docs/codex-connection-readiness.md)
 keeps those results and the remaining release gates separate.
 
@@ -43,7 +49,7 @@ keeps those results and the remaining release gates separate.
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
-| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. CLI repository installation passed; sign-in and the complete first-use workflow remain pending validation. |
+| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed. The complete first-use workflow remains pending validation. |
 
 ## Support
 

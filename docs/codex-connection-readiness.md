@@ -1,18 +1,20 @@
 # Codex connection and visual-plan readiness
 
-Maintainer runbook, refreshed on September 20, 2026 after the Codex adapter and
-setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
+Maintainer runbook, setup guidance refreshed on September 21, 2026. The Codex
+adapter and setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
 documents the observed 0.3.0 plan lifecycle and 0.3.1 setup, update and native
 recovery results. The runtime is on `main`; this runbook records release
 criteria and evidence, not another implementation. For current setup and use,
-follow the [Codex package README](../plugins/unpaged-codex/README.md).
+follow the [repository installation steps](../README.md#install-for-codex--preview)
+and the [Codex package README](../plugins/unpaged-codex/README.md) for usage.
 
 The local registered-connection pilot passed real comment review, explicit
 approval and implementation, partial/complete as-built records, native restart
 recovery, and a fresh post-recovery comment. This does not establish clean-profile
 installation/sign-in, OAuth expiry/revocation recovery, public availability,
 or unrestricted comment-identity and exactly-once guarantees. The matrices below
-keep those remaining gates visible; no new live trial is implied by this doc update.
+keep those remaining gates visible, with each result attributed to its host,
+version and scenario.
 
 The customer requirement is: install Unpaged through the native interface,
 sign in, review the startup-hook approval once, and continue working. A deliberate
@@ -30,7 +32,24 @@ the visual-plan skills, local receiver, hooks, or as-built workflow. Full
 Claude-equivalent visual planning requires the separate lifecycle and
 installed-host criteria below. Neither delivery gate substitutes for the other.
 
-For an approved, published listing available to the intended customer:
+For the current repository marketplace, use a supported Codex CLI in this order:
+
+```sh
+codex plugin marketplace add unpaged/plugins
+codex plugin add unpaged-codex@unpaged
+codex mcp login unpaged
+```
+
+Complete Unpaged sign-in through the explicit login command, then review the
+SessionStart hook before listening. The installer returning successfully, or its
+`ON_INSTALL` authentication policy, does not establish sign-in. A user-reported
+fresh Ubuntu installation of 0.4.0 confirmed the separate login step is needed.
+The user then confirmed sign-in and native hook trust; a screenshot showed
+`visual-plan` and `review-plan` loading. These observations do not establish
+canvas creation, comment delivery or restart recovery. See
+[Codex MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands).
+
+For a separately approved, published listing available to the intended customer:
 
 1. Open the native Plugins directory and select the verified Unpaged listing.
 2. Install it and complete its requested service sign-in.
@@ -38,10 +57,12 @@ For an approved, published listing available to the intended customer:
 
 For a listening visual plan, the current installed helper checks native setup
 before a listener key is created; `arm` repeats the check before opening state.
-When trust is missing or changed, give the user one action: **Settings → Hooks →
-From Plugins → Unpaged for Codex → Trust** on the hook row under **SessionStart**;
-**⌘,** opens Settings on macOS. Keep the hook enabled, then recheck. Other setup
-failures have their own action; a folder-wide configuration warning is not a
+When trust is missing or changed, give the user the action for their host: in the
+CLI, open `/hooks` and review and trust the Unpaged plugin's **SessionStart** hook;
+in the desktop app, use **Settings → Hooks → From Plugins → Unpaged for Codex →
+Trust** on that hook row. **⌘,** opens Settings on macOS. Keep the hook enabled,
+then recheck. See [native hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+Other setup failures have their own action; a folder-wide configuration warning is not a
 request to trust Unpaged again. Do not make log inspection, manual ledger repair,
 or repeated restarts part of customer setup. Render-only canvases skip this gate.
 See the [implemented setup check](../plugins/unpaged-codex/runtime/setup.mjs).
@@ -65,9 +86,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | The `unpaged` catalog targets the source package; fresh CLI Git installation and bundled-server discovery passed | Native sign-in, hook approval, lifecycle and recovery are untested for this route; public-directory availability is separate |
+| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot | Canvas creation, comment delivery, lifecycle and recovery remain unproven for the Ubuntu trial; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; this package passed a fresh CLI installation smoke | A published connection or validated sign-in, hook approval, lifecycle and recovery for this route |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup evidence described above | A published connection or verified canvas, delivery, lifecycle and recovery results for the Ubuntu trial |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can
@@ -75,8 +96,8 @@ add a GitHub marketplace and install its listed plugins without a public-directo
 listing. The [Codex catalog](../.agents/plugins/marketplace.json) is named
 `unpaged` and lists `unpaged-codex` at `./plugins/unpaged-codex`.
 `.claude-plugin/marketplace.json` remains the separate Claude Code catalog;
-the Codex package is absent there by design. The [customer preview instructions](../plugins/unpaged-codex/README.md#install-from-the-repository-preview)
-target the repository's `main` branch once this catalog is available there.
+the Codex package is absent there by design. The [customer preview instructions](../README.md#install-for-codex--preview)
+target the repository's `main` branch, where the catalog is available.
 The [September 20 CLI smoke](codex-repository-install-trial-2026-09-20.md) verified
 local and Git installation, installed-file identity and bundled-server discovery
 in fresh CLI state. It did not sign in or exercise a desktop profile. Before

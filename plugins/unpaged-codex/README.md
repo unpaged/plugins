@@ -28,17 +28,19 @@ Both live in the same plugin repository. The app monorepo contains neither.
 
 **Installation smoke passed; full workflow pending:** a [fresh CLI trial](../../docs/codex-repository-install-trial-2026-09-20.md)
 installed this package from GitHub, verified its files and discovered its bundled
-direct MCP server as `not_logged_in`. Native sign-in, hook approval, the
-visual-plan lifecycle and restart recovery remain untested for this route. The
+direct MCP server as `not_logged_in`. In a later fresh Ubuntu setup with 0.4.0,
+the user confirmed explicit sign-in and native hook trust, and a screenshot
+showed `visual-plan` and `review-plan` loading. Canvas creation, comment delivery
+and restart recovery remain unproven for that trial. The
 [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
-Once the Codex catalog is available on `main`, run these commands with a supported
-Codex CLI:
+Run these commands with a supported Codex CLI:
 
 ```sh
 codex plugin marketplace add unpaged/plugins
 codex plugin add unpaged-codex@unpaged
+codex mcp login unpaged
 ```
 
 The [Codex catalog](../../.agents/plugins/marketplace.json) is named `unpaged`
@@ -47,9 +49,11 @@ the local runtime and the connection to `https://mcp.unpaged.io/mcp`. You do not
 need a personal registration ID or a generated artifact. Do not add a separate
 manual MCP connection alongside the bundled one.
 
-Complete the native Unpaged service sign-in when prompted. Start a fresh Codex
-task and invoke `visual-plan`; the agent verifies the tools actually available
-before using them. If sign-in or required tools are unavailable, report that
+Complete Unpaged sign-in through the explicit `codex mcp login unpaged` command;
+plugin installation does not complete this step. Then review and trust the
+SessionStart hook as described below before listening. Start a fresh Codex task
+and invoke `visual-plan`; the agent verifies the tools actually available before
+using them. If sign-in or required tools are unavailable, report that
 setup blocker rather than treating installation as a successful connection.
 The CLI smoke returned without completing sign-in even though the catalog's
 authentication policy is `ON_INSTALL`; that policy is not proof of authentication.
@@ -57,9 +61,11 @@ authentication policy is `ON_INSTALL`; that policy is not proof of authenticatio
 ## Hook approval before listening
 
 Before creating a listener, the agent runs the installed helper's read-only
-`doctor` check. If approval is missing or the hook changed, it gives one action:
-open **Settings → Hooks → From Plugins → Unpaged for Codex**, review the hook
-row beneath **SessionStart**, and click **Trust**. On macOS, **⌘,** opens Settings.
+`doctor` check. If approval is missing or the hook changed, use the native
+approval surface: in the CLI, open `/hooks` and review and trust the Unpaged
+plugin's **SessionStart** hook. In the desktop app, open **Settings → Hooks →
+From Plugins → Unpaged for Codex**, review that hook row and click **Trust**.
+On macOS, **⌘,** opens Settings.
 Keep the hook enabled. The agent rechecks after approval; it does not ask the customer to
 inspect logs, edit trust files, or repeatedly reinstall/restart. Other setup
 problems return their own next action. Folder-wide hook configuration warnings
@@ -79,7 +85,8 @@ explicit publication and intended-customer availability. Neither a repository
 catalog nor a working personal registration establishes a public-directory listing.
 
 Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
-[installation](https://learn.chatgpt.com/docs/plugins), and
+[installation](https://learn.chatgpt.com/docs/plugins),
+[MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands), and
 [hook trust](https://learn.chatgpt.com/docs/hooks).
 
 ## Advanced: build for a registered connection

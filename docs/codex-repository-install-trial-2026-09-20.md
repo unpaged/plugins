@@ -3,7 +3,7 @@
 This redacted record covers native CLI installation and server discovery for the
 repository package. It does not establish clean desktop onboarding, service
 sign-in or the visual-plan lifecycle. See the [readiness runbook](codex-connection-readiness.md)
-for those gates and the [customer preview instructions](../plugins/unpaged-codex/README.md#install-from-the-repository-preview).
+for those gates and the [current customer preview instructions](../README.md#install-for-codex--preview).
 
 ## Candidate and isolation
 
@@ -63,11 +63,11 @@ validation, the Plugin Creator package validator and whitespace checks passed.
 These checks validate packaging and existing runtime behavior, not a native
 authenticated review session.
 
-The repository route is **PARTIAL**: CLI installation and bundled-server discovery
-passed. Fresh desktop installation/sign-in, native hook approval, comment
+For the recorded 0.3.1 smoke, the repository route was **PARTIAL**: CLI installation
+and bundled-server discovery passed. Fresh desktop installation/sign-in, native hook approval, comment
 delivery, acceptance and separately authorized implementation, as-built records,
 restart/reopen recovery, credential-expiry recovery and exact listener cleanup
-remain **NOT RUN** for this route. The [registered-connection pilot](codex-installed-trial-2026-09-19.md)
+were **NOT RUN** in that smoke. The [registered-connection pilot](codex-installed-trial-2026-09-19.md)
 does not fill those gaps. Its existing installation and live review were not used
 or modified by these smoke tests.
 
@@ -85,3 +85,22 @@ installed files matched the source. This is a fresh installation, not an upgrade
 or approval-preservation trial. The original Git trial above remains attributed
 to its actual 0.3.1 commit; no authentication or desktop lifecycle result is added
 by this follow-up.
+
+## Ubuntu installation follow-up — September 21, 2026
+
+The user supplied successful marketplace-add and installation output for version
+`0.4.0` on a fresh Ubuntu installation, then identified the missing next step:
+`codex mcp login unpaged`. Plugin installation had not completed Unpaged sign-in.
+The customer sequence is marketplace add, plugin add, explicit service login,
+then native approval of the SessionStart hook before listening.
+
+The user then explicitly confirmed completing Unpaged sign-in and native hook
+trust. A supplied screenshot showed the `visual-plan` and `review-plan` skills
+loading. These are user-reported setup results and visually observed skill
+loading, separate from the isolated macOS smoke above; they are not
+machine-verified comment-delivery evidence.
+
+The repository route remains **PARTIAL**. Canvas creation, comment delivery,
+the full plan lifecycle and restart recovery have not yet been demonstrated for
+the Ubuntu trial. These observations concern 0.4.0; the 0.4.1 documentation
+correction is not a new installed-version trial.

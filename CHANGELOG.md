@@ -4,6 +4,11 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- Unpaged for Codex 0.4.1: installation guides now require `codex mcp login unpaged` after plugin installation, followed by native SessionStart hook approval before listening. The guides include the CLI `/hooks` path and distinguish user-confirmed Ubuntu setup from unproven canvas, delivery and restart behavior.
+- This Codex package update changes documentation and its manifest version only; runtime, hooks and skills are unchanged from 0.4.0.
+
 ## [1.3.0] - 2026-09-21
 
 ### Changed
