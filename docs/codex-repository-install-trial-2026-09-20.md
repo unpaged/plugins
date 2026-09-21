@@ -101,20 +101,29 @@ loading, separate from the isolated macOS smoke above; they are not
 machine-verified comment-delivery evidence.
 
 The user subsequently reported creating an **Ubuntu plugin trial** canvas in
-**Visual plans**, marked **PROPOSED**, with a Decision log and successful content
-readback and digest verification. These are reported results, not independently
-verified canvas or digest evidence. Visual inspection remained blocked by the
+**Visual plans**, with successful content readback and digest verification. An
+independent MCP read from the maintainer's task confirmed the canvas's
+**PROPOSED** state, fictional assumptions and Decision log. Digest verification
+remains user-reported. Visual inspection in the VM remained blocked by the
 browser's sign-in requirement.
 
 **Listener setup is blocked.** No listener was started and no listener key was
-minted. The installed helper's read-only `doctor` check reportedly returned
-`query_failed` / `early_exit` even when using the installed Codex CLI. The VM
-agent also reported a read-only Codex SQLite error and sandbox failures after
-file-level grants attempted to create a directory inside a SQLite file;
-granting the containing directory reportedly left the earlier entries in place,
-and subsequent commands failed before starting. The exact raw error and CLI
-version have been requested. This diagnostic account and its proposed cause
-remain unverified; no runtime repair is established by this record.
+minted. The installed helper's `doctor` check in the affected task returned
+`query_failed` / `early_exit`. Approved read-only guest diagnostics independently
+verified Node `24.21.0`, shell Codex `0.155.1`, and desktop-bundled Codex
+`0.155.0-alpha.9.2`. They also verified the raw Codex SQLite initialization error
+and `bwrap` directory-creation failures beneath SQLite file paths, with exit
+code `101`; the user corroborated those errors. Both the file-level grants and
+the later containing-directory grant returned `scope: session`. Task commands
+remained blocked before startup; the underlying runtime diagnosis is separate.
+
+An explicitly approved, one-off read-only `doctor` run outside the affected
+task's sandbox, in the same working directory with installed plugin `0.4.0` and
+the desktop-bundled CLI, returned `setupReady: true`, `current_hook_trusted` and
+an enabled hook. This independently verifies the persisted native hook
+inventory. It does not repair the failing task commands or prove listener
+startup, comment delivery or recovery. No SQLite or trust records were edited,
+and no listener key or worker was created by these diagnostics.
 
 The repository route remains **PARTIAL**, with listener setup **BLOCKED**.
 Comment delivery, the full plan lifecycle and restart recovery remain unproven
