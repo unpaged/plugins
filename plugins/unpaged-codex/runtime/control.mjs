@@ -1,6 +1,5 @@
 import { isAbsolute } from "node:path";
 import { Readable } from "node:stream";
-import { executeCli, findCodex } from "./cli.mjs";
 import { UUID, boundedText, requireDigest, requireId, requireUuid, validTime, validateBinding, validateEvidence } from "./protocol.mjs";
 import { processIdentity } from "./process-identity.mjs";
 
@@ -147,7 +146,9 @@ export async function executeControl(args, context, options = {}) {
   const env = { ...(options.env ?? process.env), CODEX_THREAD_ID: context.threadId };
   const run = async (command, body = encoded) => {
     try {
-      return await (options.executeCli ?? executeCli)(command, {
+      // Discovery must work before loading the Node 24 native/storage dependencies.
+      const execute = options.executeCli ?? (await import("./cli.mjs")).executeCli;
+      return await execute(command, {
         env: { ...env }, cwd: context.cwd, input: Readable.from([body])
       });
     } catch (error) {
@@ -158,7 +159,8 @@ export async function executeControl(args, context, options = {}) {
     }
   };
   if (["doctor", "arm", "resume"].includes(args.operation)) {
-    const codexPath = await (options.resolveCodex ?? (() => findCodex(undefined, env)))();
+    const resolveCodex = options.resolveCodex ?? (async () => (await import("./cli.mjs")).findCodex(undefined, env));
+    const codexPath = await resolveCodex();
     if (typeof codexPath !== "string" || !isAbsolute(codexPath) || /[\0\r\n]/.test(codexPath)) fail("native_codex_path_required");
     if (args.operation === "resume") {
       const bindings = await run(["status", args.documentId], "{}");

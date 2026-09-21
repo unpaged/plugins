@@ -7,6 +7,7 @@ import { UUID } from "./protocol.mjs";
 // Control payloads remain capped at 2 MiB; allow bounded native context/envelope overhead.
 const MAX_MESSAGE_BYTES = 2 * 1024 * 1024 + 256 * 1024;
 const VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const NODE_ACTION = "Make Node.js 24 or newer available in the environment used to launch Codex, then restart the Unpaged review connection. Reinstalling the plugin or changing hook trust does not change its Node runtime.";
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (code) => { throw new Error(code); };
 
@@ -32,7 +33,7 @@ const tool = {
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
 };
 
-export function createHandler({ control = executeControl, env = process.env } = {}) {
+export function createHandler({ control = executeControl, env = process.env, nodeVersion = process.versions.node } = {}) {
   let initialized = false;
   let ready = false;
   const error = (id, code, message) => ({ jsonrpc: "2.0", id, error: { code, message } });
@@ -64,12 +65,14 @@ export function createHandler({ control = executeControl, env = process.env } = 
     if (method !== "tools/call") return error(id, -32601, "Method not found");
     if (!object(params) || params.name !== "review" || !object(params.arguments)) return error(id, -32602, "Invalid tool call");
     try {
+      if (!(Number(nodeVersion.split(".")[0]) >= 24)) fail("node_24_required");
       const context = nativeContext(params._meta);
       const output = await control(params.arguments, context, { env });
       return result(id, { content: [{ type: "text", text: JSON.stringify(output) }] });
     } catch (cause) {
       const code = /^[a-z][a-z0-9_]{2,80}$/.test(cause.message ?? "") ? cause.message : "review_operation_failed";
       return result(id, { isError: true, content: [{ type: "text", text: JSON.stringify({ error: code,
+        ...(code === "node_24_required" ? { action: NODE_ACTION } : {}),
         ...(code === "setup_not_ready" ? { setup: cause.setup } : {}) }) }] });
     }
   };

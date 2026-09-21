@@ -194,6 +194,12 @@ It does not parse a request ID from the oversized frame: the error has a null
 ID, so the host may time out that tool call. Do not report success or retry a
 mutation automatically; inspect the relevant status or receipts first.
 
+On Node versions below 24, the server still supports initialization and tool
+discovery. Every review operation returns `node_24_required` with guidance to
+make Node 24 or newer available in Codex's launch environment. The native CLI
+and SQLite dependency closure is loaded only when an operation executes, so
+an older host can receive this diagnosis without loading unsupported storage.
+
 `doctor` calls the verified native binary through a bounded temporary public
 `app-server --stdio` connection: initialize, initialized, then `hooks/list` for
 the metadata-derived current folder. It starts no task, invokes no hook, changes

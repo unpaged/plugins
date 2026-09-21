@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -41,6 +44,60 @@ test("handshake and fixed tool inventory precede operations; unsupported clients
   assert.equal(calls, 0);
   assert.equal((await handler(request(4, "shell", {}))).error.code, -32601);
   assert.equal((await handler(request(5, "initialize", { protocolVersion: "2025-06-18" }))).error.code, -32602);
+});
+
+test("unsupported Node versions keep discovery available and refuse every operation before native execution", async () => {
+  for (const nodeVersion of ["18.20.8", "20.18.2", "22.13.1", "23.7.0"]) {
+    const handler = createHandler({ nodeVersion, control: () => assert.fail("unsupported Node must not execute") });
+    await ready(handler);
+    const tool = (await handler(request(2, "tools/list"))).result.tools[0];
+    assert.equal(tool.name, "review");
+    for (const operation of tool.inputSchema.properties.operation.enum) {
+      const output = await handler(request(3, "tools/call", { name: "review", _meta: meta, arguments: { operation } }));
+      assert.equal(output.result.isError, true);
+      const diagnosis = JSON.parse(output.result.content[0].text);
+      assert.equal(diagnosis.error, "node_24_required");
+      assert.match(diagnosis.action, /Node\.js 24 or newer/);
+      assert.match(diagnosis.action, /environment used to launch Codex/);
+    }
+  }
+});
+
+test("unsupported Node stdio discovery never imports the unavailable native CLI dependency", async () => {
+  const root = mkdtempSync(join(tmpdir(), "unpaged-mcp-node-"));
+  let child;
+  let timeout;
+  try {
+    // Deliberately omit cli.mjs and SQLite. The real stdio startup must not import
+    // that dependency closure before returning the supported runtime diagnosis.
+    for (const file of ["mcp.mjs", "control.mjs", "protocol.mjs", "process-identity.mjs"]) {
+      copyFileSync(new URL(file, import.meta.url), join(root, file));
+    }
+    child = spawn(process.execPath, ["--input-type=module", "--eval",
+      'Object.defineProperty(process.versions, "node", { value: "20.18.2" }); await (await import("./mcp.mjs")).serve();'],
+    { cwd: root, stdio: ["pipe", "pipe", "pipe"], shell: false });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    timeout = setTimeout(() => child.kill("SIGKILL"), 5000);
+    child.stdin.end([
+      request(1, "initialize", { protocolVersion: "2025-11-25" }),
+      { jsonrpc: "2.0", method: "notifications/initialized" }, request(2, "tools/list"),
+      request(3, "tools/call", { name: "review", _meta: meta, arguments: { operation: "doctor" } })
+    ].map((value) => JSON.stringify(value) + "\n").join(""));
+    const code = await new Promise((resolve, reject) => { child.once("close", resolve); child.once("error", reject); });
+    assert.equal(code, 0, stderr);
+    const replies = stdout.trim().split("\n").map(JSON.parse);
+    assert.equal(replies[0].result.serverInfo.name, "unpaged_review");
+    assert.equal(replies[1].result.tools[0].name, "review");
+    assert.equal(replies[2].result.isError, true);
+    assert.equal(JSON.parse(replies[2].result.content[0].text).error, "node_24_required");
+    assert.equal(stderr, "");
+  } finally {
+    clearTimeout(timeout);
+    if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("requests pass independent native context; errors do not echo payloads or raw diagnostics", async () => {
