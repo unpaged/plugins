@@ -14,11 +14,11 @@ export async function prepareHandover(documentId, options) {
   const now = options.now ?? Date.now;
   const deadline = now() + (options.timeoutMs ?? 150000);
   let lease;
-  let signaled = false;
+  let signalRecorded = false;
   let predecessor;
   try {
     while (!signal?.aborted && now() < deadline) {
-      const binding = store.getBinding(documentId);
+      const binding = store.getBinding(documentId, { includeSecrets: true });
       if (binding.status !== "active") return false;
       if (!alive(binding.workerPid, binding.workerIdentity)) return true;
       // Any already-running polling receiver keeps ownership. A runtime update
@@ -33,15 +33,19 @@ export async function prepareHandover(documentId, options) {
         if (typeof identity !== "string") throw new Error("worker_identity_unverifiable");
         lease = store.claimUpgrade(documentId, { pid, identity, isAlive: alive, at: now() });
         if (!lease) { await sleep(250); continue; }
-        predecessor = { pid: binding.workerPid, identity: binding.workerIdentity };
+        predecessor = { pid: binding.workerPid, identity: binding.workerIdentity, workerToken: binding.workerToken };
         // Re-read both the private claim and kernel birth identity immediately
         // before signalling; a recycled PID or a replacement is never killed.
-        const current = store.getBinding(documentId);
+        const current = store.getBinding(documentId, { includeSecrets: true });
         if (current.workerPid !== predecessor.pid || current.workerIdentity !== predecessor.identity ||
+            current.workerToken !== predecessor.workerToken ||
             current.workerTransport === "poll-v1" || current.status !== "active") return false;
-        if (identify(predecessor.pid) !== predecessor.identity) continue;
-        try { kill(predecessor.pid, "SIGTERM"); signaled = true; }
-        catch (error) { if (error.code !== "ESRCH") throw new Error("worker_handover_unavailable"); }
+        const shouldSignal = store.claimUpgradeSignal(documentId, lease, predecessor);
+        signalRecorded = true;
+        if (shouldSignal && identify(predecessor.pid) === predecessor.identity) {
+          try { kill(predecessor.pid, "SIGTERM"); }
+          catch (error) { if (error.code !== "ESRCH") throw new Error("worker_handover_unavailable"); }
+        }
       }
       // Do not send SIGTERM twice: old runtimes use a once-only handler, and a
       // second signal could cut off their pending queue receipt.
@@ -50,9 +54,9 @@ export async function prepareHandover(documentId, options) {
     }
     return false;
   } finally {
-    // A crash/abort after the signal leaves a short durable grace period. A
-    // later receiver waits for the predecessor instead of signalling it again.
-    if (lease && (!signaled || !alive(predecessor.pid, predecessor.identity))) {
+    // A later coordinator may reclaim this lease, but the signal reservation
+    // remains on the exact worker claim until a new worker can safely take over.
+    if (lease && (!signalRecorded || !alive(predecessor.pid, predecessor.identity))) {
       store.releaseUpgrade(documentId, lease);
     }
   }

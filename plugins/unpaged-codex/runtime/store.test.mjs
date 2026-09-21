@@ -344,6 +344,55 @@ test("upgrade leases reject stopped reviews and invalid identities without chang
   assert.throws(() => store.claimUpgrade(doc, { pid: 201, identity: "coordinator", at: 100_000, isAlive: () => false }), /review_inactive/);
   assert.equal(store.getBinding(doc).upgradePending, false);
 });
+test("the signal reservation survives lease replacement and release and is fenced to both owners", (t) => {
+  const { store, token, path } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  for (const change of [{ workerToken: "stale-worker" }, { pid: 102 }, { identity: "different-birth" }]) {
+    assert.throws(() => store.claimUpgradeSignal(doc, lease, { ...predecessor, ...change }), /worker_fenced/);
+  }
+  assert.throws(() => store.claimUpgradeSignal(doc, "stale-lease", predecessor), /upgrade_fenced/);
+  assert.equal(store.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(doc).upgrade_signaled_token, null);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), true);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), false);
+  assert.ok(!JSON.stringify(store.getBinding(doc)).includes(token));
+  const second = new Store(path); t.after(() => second.close());
+  const replacement = second.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", isAlive: () => false, at: 160000 });
+  assert.throws(() => store.claimUpgradeSignal(doc, lease, predecessor), /upgrade_fenced/);
+  assert.equal(second.claimUpgradeSignal(doc, replacement, predecessor), false);
+  assert.equal(second.releaseUpgrade(doc, replacement), true);
+  const third = store.claimUpgrade(doc, { pid: 203, identity: "coordinator-three", isAlive: () => false, at: 160001 });
+  assert.equal(store.claimUpgradeSignal(doc, third, predecessor), false, "lease deletion cannot erase signal history");
+});
+test("only a new worker claim after predecessor exit clears the signal reservation", (t) => {
+  const { store, token } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), true);
+  assert.throws(() => store.claimWorker(doc, { pid: 102, identity: "new-birth", isAlive: () => true }), /worker_alive/);
+  assert.equal(store.claimUpgradeSignal(doc, lease, predecessor), false);
+  const next = store.claimWorker(doc, { pid: 102, identity: "new-birth", isAlive: () => false });
+  const row = store.db.prepare("SELECT upgrade_signaled_token,upgrade_signaled_pid,upgrade_signaled_identity FROM bindings WHERE document_id=?").get(doc);
+  assert.deepEqual({ ...row }, { upgrade_signaled_token: null, upgrade_signaled_pid: null, upgrade_signaled_identity: null });
+  const nextLease = store.claimUpgrade(doc, { pid: 202, identity: "coordinator-two", isAlive: () => false, at: 160000 });
+  assert.throws(() => store.claimUpgradeSignal(doc, nextLease, predecessor), /worker_fenced/);
+  assert.equal(store.claimUpgradeSignal(doc, nextLease, { workerToken: next.token, pid: 102, identity: "new-birth" }), true);
+});
+test("signal reservations reject inactive reviews and malformed identities before mutation", (t) => {
+  const { store, token } = fixture(t);
+  store.db.prepare("UPDATE bindings SET worker_identity=? WHERE document_id=?").run("old-birth", doc);
+  const predecessor = { workerToken: token, pid: 101, identity: "old-birth" };
+  const lease = store.claimUpgrade(doc, { pid: 201, identity: "coordinator-one", isAlive: () => false, at: 0 });
+  for (const change of [{ pid: 0 }, { identity: null }, { identity: "" }]) {
+    assert.throws(() => store.claimUpgradeSignal(doc, lease, { ...predecessor, ...change }), /invalid_/);
+  }
+  assert.throws(() => store.claimUpgradeSignal(doc, null, predecessor), /invalid_upgrade_token/);
+  store.requestStop(doc);
+  assert.throws(() => store.claimUpgradeSignal(doc, lease, predecessor), /review_inactive/);
+  assert.equal(store.db.prepare("SELECT upgrade_signaled_token FROM bindings WHERE document_id=?").get(doc).upgrade_signaled_token, null);
+});
 test("poll-only binding persists a legacy-readable credential and refuses credential changes on rebind", (t) => {
   const { store } = fixture(t);
   const { url, protocols, ...base } = binding;
@@ -368,7 +417,7 @@ test("additive poll migration preserves pending work, receipts, lifecycle and le
   store.complete(doc, "completed", { operationToken: started.operationToken, evidence: { replyId: "reply-completed", planDigest: changedDigest } });
   processing(store, token, "pending");
   store.db.exec("PRAGMA user_version=32");
-  for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token"]) {
+  for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token", "upgrade_signaled_token", "upgrade_signaled_pid", "upgrade_signaled_identity"]) {
     store.db.exec(`ALTER TABLE bindings DROP COLUMN ${column}`);
   }
   store.db.exec("DROP TABLE worker_upgrades");
@@ -383,6 +432,9 @@ test("additive poll migration preserves pending work, receipts, lifecycle and le
   assert.equal(after.last_event_at, null);
   assert.equal(after.worker_transport, null);
   assert.equal(after.worker_transport_token, null);
+  assert.equal(after.upgrade_signaled_token, null);
+  assert.equal(after.upgrade_signaled_pid, null);
+  assert.equal(after.upgrade_signaled_identity, null);
   for (const [key, value] of Object.entries(before)) assert.deepEqual(after[key], value, key);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY event_id").all(), events);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM acceptance_receipts").all(), receipts);

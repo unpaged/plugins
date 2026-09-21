@@ -48,6 +48,7 @@ export class Store {
         reconciliation_required INTEGER NOT NULL DEFAULT 0, reconciliation_evidence TEXT,
         worker_pid INTEGER, worker_identity TEXT, worker_token TEXT, worker_started INTEGER NOT NULL DEFAULT 0,
         worker_transport TEXT, worker_transport_token TEXT,
+        upgrade_signaled_token TEXT, upgrade_signaled_pid INTEGER, upgrade_signaled_identity TEXT,
         accepted_event_id TEXT, accepted_digest TEXT, accepted_at TEXT,
         revoke_pending INTEGER NOT NULL DEFAULT 0, revocation_evidence TEXT, updated_at TEXT NOT NULL
       );
@@ -88,9 +89,10 @@ export class Store {
       // Add fields without changing the legacy state enum or credential shape:
       // queued tasks may still use retained helpers against this same ledger.
       const bindingColumns = new Set(this._all("PRAGMA table_info(bindings)").map((column) => column.name));
-      for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token"]) {
+      for (const column of ["poll_url", "last_successful_poll_at", "last_event_at", "worker_transport", "worker_transport_token", "upgrade_signaled_token", "upgrade_signaled_identity"]) {
         if (!bindingColumns.has(column)) this.db.exec(`ALTER TABLE bindings ADD COLUMN ${column} TEXT`);
       }
+      if (!bindingColumns.has("upgrade_signaled_pid")) this.db.exec("ALTER TABLE bindings ADD COLUMN upgrade_signaled_pid INTEGER");
       for (const binding of this._all("SELECT document_id,url,protocols FROM bindings WHERE poll_url IS NULL")) {
         let protocols;
         try { protocols = JSON.parse(binding.protocols); } catch { continue; }
@@ -202,8 +204,8 @@ export class Store {
     return this._tx(() => {
       this._active(this._binding(id));
       const old = this._get("SELECT * FROM worker_upgrades WHERE document_id=?", id);
-      // A crashed coordinator may already have sent SIGTERM while an old
-      // worker's queue call is settling. Give that handover a full minute.
+      // This grace limits coordination retries. The separate signal reservation
+      // survives lease takeover so expiry never permits a second SIGTERM.
       if (old && (alive(old.pid, old.identity) || at - old.requested_at < 60_000)) return null;
       const token = randomUUID();
       this._run("INSERT INTO worker_upgrades(document_id,token,pid,identity,requested_at) VALUES(?,?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET token=excluded.token,pid=excluded.pid,identity=excluded.identity,requested_at=excluded.requested_at", id, token, pid, identity, at);
@@ -214,6 +216,21 @@ export class Store {
     requireUuid(id);
     if (typeof token !== "string" || !token) fail("invalid_upgrade_token");
     return this._tx(() => this._run("DELETE FROM worker_upgrades WHERE document_id=? AND token=?", id, token).changes === 1);
+  }
+  claimUpgradeSignal(id, leaseToken, { workerToken, pid, identity } = {}) {
+    if (typeof leaseToken !== "string" || !leaseToken) fail("invalid_upgrade_token");
+    if (!Number.isSafeInteger(pid) || pid <= 0) fail("invalid_pid");
+    if (typeof identity !== "string" || !identity || identity.length > 1000) fail("invalid_worker_identity");
+    return this._tx(() => {
+      const b = this._fence(id, workerToken); this._active(b);
+      if (this._get("SELECT token FROM worker_upgrades WHERE document_id=?", id)?.token !== leaseToken) fail("upgrade_fenced");
+      if (b.worker_pid !== pid || b.worker_identity !== identity) fail("worker_fenced");
+      if (b.upgrade_signaled_token === workerToken && b.upgrade_signaled_pid === pid && b.upgrade_signaled_identity === identity) return false;
+      // Commit intent before the OS signal. A crash between these two actions
+      // must leave handover pending, not risk replaying a once-only signal.
+      this._run("UPDATE bindings SET upgrade_signaled_token=?,upgrade_signaled_pid=?,upgrade_signaled_identity=? WHERE document_id=?", workerToken, pid, identity, id);
+      return true;
+    });
   }
   claimWorker(id, { pid, identity = processIdentity(pid), isAlive: alive, transport } = {}) {
     if (!Number.isSafeInteger(pid) || pid <= 0) fail("invalid_pid");
@@ -230,7 +247,7 @@ export class Store {
         this._run("UPDATE events SET state='effect_uncertain',updated_at=? WHERE document_id=? AND state='processing'", now(), id);
       }
       const token = randomUUID();
-      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_transport=?,worker_transport_token=?,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, transport ?? null, transport ? token : null, now(), id);
+      this._run("UPDATE bindings SET worker_pid=?,worker_identity=?,worker_token=?,worker_transport=?,worker_transport_token=?,upgrade_signaled_token=NULL,upgrade_signaled_pid=NULL,upgrade_signaled_identity=NULL,worker_started=1,reconciliation_required=CASE WHEN worker_started=1 THEN 1 ELSE reconciliation_required END,connection='connecting',updated_at=? WHERE document_id=?", pid, identity ?? null, token, transport ?? null, transport ? token : null, now(), id);
       this._run("DELETE FROM worker_upgrades WHERE document_id=?", id);
       return { token, recovered };
     });

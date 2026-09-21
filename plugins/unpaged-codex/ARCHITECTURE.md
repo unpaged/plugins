@@ -227,9 +227,12 @@ Installing 0.4.0 does not itself replace a running socket receiver. Normal
 after verifying the old worker's stored boot and process start identity.
 The detached replacement requests graceful shutdown and waits before claiming
 ownership, so an in-flight queue receipt can settle beyond the hook timeout.
-A transactional local lease prevents concurrent replacements from signalling
-the same predecessor twice. `upgradePending` reports that handover; it is not
-a successful poll. Unverifiable identity or a failed shutdown remains a
+A transactional local lease coordinates replacements; a durable signal reservation
+fences the exact predecessor token, PID and process identity across lease expiry
+and coordinator restarts. The reservation is committed before SIGTERM, so a crash
+in that narrow interval leaves handover pending until the predecessor exits or
+the situation is explicitly inspected; it never retries a once-only signal.
+`upgradePending` reports that handover; it is not a successful poll. Unverifiable identity or a failed shutdown remains a
 blocker; never kill a guessed PID, replace the key or discard the binding.
 
 The additive schema retains legacy `url`/`protocols` for old helpers and adds
