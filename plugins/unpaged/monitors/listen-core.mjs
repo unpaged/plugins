@@ -8,14 +8,14 @@ export const LEGACY_KEY_FILE_RELATIVE = ".claude/unpaged/listener.json";
 /** Where a running monitor reports itself, one file per board, so commands can tell "armed" from "listening". */
 export const STATUS_DIR_RELATIVE = ".claude/unpaged/monitors";
 export const SUBPROTOCOL = "unpaged-listener.v1";
-export const CLOSE_INVALID_KEY = 4401;
-export const CLOSE_SUPERSEDED = 4409;
-export const CLOSE_RECEIVE_ONLY = 1003;
+export const CLOSE_INVALID_KEY = 401;
+export const CLOSE_SUPERSEDED = 409;
 export const BACKOFF_MIN_MS = 1000;
 export const BACKOFF_MAX_MS = 60000;
 
 /** Document ids are UUID-shaped; anything else is refused before it becomes a path segment. */
 const DOCUMENT_ID_SHAPE = /^[A-Za-z0-9_-]{8,128}$/;
+const LISTENER_KEY_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 
 export function isDocumentId(value) {
   return typeof value === "string" && DOCUMENT_ID_SHAPE.test(value);
@@ -29,12 +29,13 @@ export function keyFileFor(keyDir, documentId) {
 
 /** Two stored configs are the same listener when they carry the same key. */
 export function sameListenerConfig(a, b) {
-  return Boolean(a && b) && a.url === b.url && a.protocols[1] === b.protocols[1];
+  const left = normalizeListenerConfig(a), right = normalizeListenerConfig(b);
+  return Boolean(left && right) && left.pollUrl === right.pollUrl && left.key === right.key;
 }
 
 /**
  * Parses a stored per-board listener config. Returns null for anything
- * that is not `{ url, protocols: [SUBPROTOCOL, key], documentId }` — the
+ * that is not a board-bound polling or supported legacy socket config — the
  * monitor then exits silently, exactly as when the file is missing.
  * `title`, `cwd`, `keyId` and `createdAt` are optional bookkeeping.
  */
@@ -45,20 +46,38 @@ export function parseListenerConfig(raw) {
   } catch {
     return null;
   }
-  if (typeof value !== "object" || value === null) return null;
+  return normalizeListenerConfig(value);
+}
+
+function normalizeListenerConfig(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const { url, protocols, documentId } = value;
-  if (typeof url !== "string" || !/^wss?:\/\//.test(url)) return null;
-  if (!Array.isArray(protocols) || protocols.length < 2) return null;
-  if (!protocols.every((entry) => typeof entry === "string" && entry.length > 0)) {
-    return null;
-  }
-  if (!protocols.includes(SUBPROTOCOL)) return null;
   if (!isDocumentId(documentId)) return null;
+  let pollUrl, key;
+  if (url !== undefined || protocols !== undefined) {
+    const legacy = unpagedEndpoint(url, true);
+    if (!legacy || !Array.isArray(protocols) || protocols.length !== 2 ||
+      protocols[0] !== SUBPROTOCOL || typeof protocols[1] !== "string" || !LISTENER_KEY_SHAPE.test(protocols[1])) return null;
+    legacy.protocol = "https:";
+    legacy.pathname = "/events/poll";
+    pollUrl = legacy.href;
+    key = protocols[1];
+  }
+  if (value.pollUrl !== undefined) {
+    const endpoint = unpagedEndpoint(value.pollUrl);
+    if (!endpoint || (pollUrl && pollUrl !== endpoint.href)) return null;
+    pollUrl = endpoint.href;
+  }
+  if (value.key !== undefined) {
+    if (typeof value.key !== "string" || !LISTENER_KEY_SHAPE.test(value.key) || (key && key !== value.key)) return null;
+    key = value.key;
+  }
+  if (!pollUrl || !key) return null;
   const keyId = typeof value.keyId === "string" ? value.keyId : null;
   const title = typeof value.title === "string" ? value.title : "";
   const cwd = typeof value.cwd === "string" ? value.cwd : null;
   const createdAt = typeof value.createdAt === "string" ? value.createdAt : null;
-  return { url, protocols, documentId, keyId, title, cwd, createdAt };
+  return { pollUrl, key, documentId, keyId, title, cwd, createdAt };
 }
 
 /** Exponential backoff, capped: 1s, 2s, 4s … 60s. */
@@ -67,49 +86,41 @@ export function backoffMs(attempt) {
 }
 
 /**
- * The line printed after a 4401, chosen by what retireKeyFile did with the
- * key file. Neither branch asks the model to mint: every 4401 is a
- * deliberate revoke (this session, another session on the machine, or
- * Unpaged itself), so the user turns push back on. `removed`/`absent`:
+ * The line printed after HTTP 401, chosen by what retireKeyFile did with the
+ * key file. Neither branch asks the model to mint: a rejected key may have
+ * been deliberately revoked, so the user turns push back on. `removed`/`absent`:
  * this session's key is gone — say push is off and name the arm command.
- * `kept-newer`/`superseded`: the file now holds ANOTHER session's valid
- * key, which is listening — say nothing that could lead to a write over it.
+ * `kept-newer`/`superseded`: the file now holds ANOTHER session's key;
+ * preserve it and check status rather than claiming it is already listening.
  */
 export function rejectedKeyLine(outcome, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
   const id = documentId || "<documentId>";
   if (outcome === "kept-newer" || outcome === "superseded") {
-    return `Unpaged listener key rejected${board} (close 4401): this session's key was revoked, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — that session is listening; /unpaged:listen status shows it.`;
+    return `Unpaged listener key rejected${board} (HTTP 401): this session's key is no longer valid, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — leave that key in place and check /unpaged:listen status.`;
   }
-  return `Unpaged listener key rejected${board} (close 4401): the key was revoked — by /unpaged:listen revoke in another session, or removed in Unpaged — so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (a later /unpaged:visual-plan arms only the canvas it creates, not this one).`;
+  return `Unpaged listener key rejected${board} (HTTP 401): the key was revoked or is no longer valid, so the stored key file was retired. Push is off for this canvas: do not mint a key here — say so, and let the user turn it back on with /unpaged:listen arm ${id} (a later /unpaged:visual-plan arms only the canvas it creates, not this one).`;
 }
 
 /**
- * What to do after a close: `stop` with a line for the model, or
- * `reconnect` (silently). 4401 = the key is gone (re-arm via the command);
- * 4409 = a newer listener took over THIS board — reconnecting would only
- * fight it, so this session stops listening to it.
+ * What to do after an HTTP failure: `stop` with a line for the model, or
+ * `reconnect` (silently). 401 = the key is gone (re-arm via the command);
+ * 409 = a newer key was minted for THIS board, so this key stops. That
+ * does not establish whether a replacement Monitor is running.
  */
 export function closePolicy(code, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
   if (code === CLOSE_INVALID_KEY) {
     // No `line` here on purpose: only the caller knows what retireKeyFile
     // did with the file, and rejectedKeyLine(outcome) words it. A caller that
-    // prints policy.line for 4401 prints nothing rather than a wrong claim.
+    // prints policy.line for 401 prints nothing rather than a wrong claim.
     return { action: "stop", deleteKeyFile: true };
   }
   if (code === CLOSE_SUPERSEDED) {
     return {
       action: "stop",
       superseded: true,
-      line: `Another session took over the Unpaged listener${board}; this session stops listening to it.`
-    };
-  }
-  if (code === CLOSE_RECEIVE_ONLY) {
-    // This monitor never sends, so this is a bug signal, not a retry case.
-    return {
-      action: "stop",
-      line: `Unpaged closed the listener${board} because data was sent on the receive-only socket; this session stops listening to it.`
+      line: `A newer Unpaged listener key superseded this session's key${board} (HTTP 409); this session stops listening to it. Leave stored keys in place and check /unpaged:listen status to see whether a Monitor is listening.`
     };
   }
   return { action: "reconnect" };
@@ -166,7 +177,7 @@ export async function retireKeyFile(fs, keyFile, loadedConfig) {
 /**
  * Whether this process may overwrite the board's status file. Two
  * listeners can briefly share a board (the newer one connects before the
- * displaced one has handled its 4409): a `connected` report always wins,
+ * displaced one has handled its 409): a `connected` report always wins,
  * but a non-connected report must never paint over another LIVE process's
  * `connected` — that would make the board look silent while it is not.
  */
@@ -178,7 +189,7 @@ export function shouldWriteStatus(existing, myPid, state, isAlive) {
   return !isAlive(existing.pid);
 }
 
-/** The monitor's self-report: `connected` while the socket is open, else why not. */
+/** The monitor's self-report: `connected` after a successful poll, else why not. */
 export function monitorStatus(state, reason, script, documentId) {
   return {
     pid: process.pid,
@@ -212,7 +223,7 @@ export function frameLine(data) {
 
 /**
  * The mint result of `agent_listener_key_create`, dug out of whatever
- * carries it: the raw tool result (an object with url + protocols), or a
+ * carries it: the raw pollUrl + key or legacy url + protocols result, or a
  * PostToolUse hook input whose `tool_response` is that object, its JSON
  * text, or MCP content blocks wrapping that text. Returns null when no
  * mint is there (a refused mint, another tool, a parse failure) so a hook
@@ -241,7 +252,8 @@ export function extractMint(value) {
       }
       return null;
     }
-    if (typeof candidate.url === "string" && Array.isArray(candidate.protocols)) {
+    if ((typeof candidate.pollUrl === "string" && typeof candidate.key === "string") ||
+      (typeof candidate.url === "string" && Array.isArray(candidate.protocols))) {
       return candidate;
     }
     for (const key of ["tool_response", "content", "text", "result", "structuredContent"]) {
@@ -256,32 +268,37 @@ export function extractMint(value) {
 }
 
 /**
- * The only sockets a stored key may ever be sent to: TLS, on Unpaged's own
- * hosts. listen.mjs opens `config.url` with the key in the subprotocol
- * list, and the hook stores a mint with nobody reading it first, so a mint
- * can never downgrade the transport or redirect the key to another host.
+ * A credential can travel only to the exact TLS endpoint on an Unpaged host.
+ * The separate legacy path is accepted only for in-memory key migration.
  */
-export function isUnpagedListenerUrl(url) {
-  if (typeof url !== "string" || !url.startsWith("wss://")) return false;
-  let hostname;
+function unpagedEndpoint(url, legacy = false) {
+  const shape = legacy ? /^wss:\/\/[^/?#]+\/events$/ : /^https:\/\/[^/?#]+\/events\/poll$/;
+  if (typeof url !== "string" || !shape.test(url) || /[\s\\@]/.test(url)) return null;
   try {
-    hostname = new URL(url).hostname.toLowerCase();
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash ||
+      (hostname !== "unpaged.io" && !hostname.endsWith(".unpaged.io"))) return null;
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
-  return hostname === "unpaged.io" || hostname.endsWith(".unpaged.io");
+}
+export function isUnpagedListenerUrl(url) {
+  return unpagedEndpoint(url) !== null;
 }
 
 /**
  * The per-board config to store for a mint result, or null when the mint
  * is not a valid listener (it must pass parseListenerConfig and point at
- * an Unpaged wss:// socket). `title` comes from the mint's documentTitle;
+ * an Unpaged HTTPS polling endpoint). `title` comes from the mint's documentTitle;
  * `cwd` and `createdAt` are the caller's bookkeeping.
  */
 export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = {}) {
   if (!mint || typeof mint !== "object") return null;
-  if (!isUnpagedListenerUrl(mint.url)) return null;
   const candidate = {
+    pollUrl: mint.pollUrl,
+    key: mint.key,
     url: mint.url,
     protocols: mint.protocols,
     documentId: mint.documentId,
@@ -293,8 +310,8 @@ export function listenerConfigFromMint(mint, { cwd = null, createdAt = null } = 
   const parsed = parseListenerConfig(JSON.stringify(candidate));
   if (!parsed) return null;
   return {
-    url: parsed.url,
-    protocols: parsed.protocols,
+    pollUrl: parsed.pollUrl,
+    key: parsed.key,
     documentId: parsed.documentId,
     keyId: parsed.keyId ?? undefined,
     title: parsed.title,

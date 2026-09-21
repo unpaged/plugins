@@ -42,7 +42,7 @@ keeps those results and the remaining release gates separate.
 
 | Plugin | What it does |
 | --- | --- |
-| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are pushed straight back to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
+| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
 | [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. CLI repository installation passed; sign-in and the complete first-use workflow remain pending validation. |
 
 ## Support

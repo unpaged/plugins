@@ -57,11 +57,11 @@ jobs:
                       contracts the code and prompts must keep. Review the PR
                       diff for:
 
-                      1. Correctness bugs in the listener: close-code handling
-                         (4401 retires the key file only if it is still the
-                         loaded config, 4409 stops without touching the newer
-                         listener's status file, everything else reconnects
-                         with backoff), atomic key/status file writes, and
+                      1. Correctness bugs in the listener: HTTP result handling
+                         (401 retires the key file only if it is still the
+                         loaded config, 409 stops without touching the newer
+                         listener's status file, transient failures retry the
+                         same key with backoff), atomic key/status file writes, and
                          anything that could print key material to stdout.
                       2. Prompt contracts in the commands: the listener key is
                          never echoed, cat'ed, or repeated in a reply; key files

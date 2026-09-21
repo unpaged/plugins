@@ -21,7 +21,7 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 
 ## Short description
 
-Turn Claude Code plans into whiteboards on Unpaged: review on the canvas, comment on the pieces, and the session hears @agent comments within seconds and answers on the canvas; approving the plan flips it to EXECUTING, and when the code is done /unpaged:as-built writes the record of what shipped and why under the plan.
+Turn Claude Code plans into whiteboards on Unpaged: review on the canvas, comment on the pieces, and the session receives @agent comments automatically through its background listener and answers on the canvas; approving the plan flips it to EXECUTING, and when the code is done /unpaged:as-built writes the record of what shipped and why under the plan.
 
 ## What it does (long)
 
@@ -30,13 +30,13 @@ Turn Claude Code plans into whiteboards on Unpaged: review on the canvas, commen
 ## Working prompts
 
 1. `/unpaged:visual-plan add a --json output flag to the arcscope CLI` — as the first command of a session in any repo: drafts a phased plan grounded in the code, renders it, returns the link, arms push.
-2. On the canvas, right-click a note → Comment → `@agent is fail-open really safe for the auth routes? Add a per-route fail-closed task to Phase 2.` — the session edits the checklist and replies in the thread within seconds.
+2. On the canvas, right-click a note → Comment → `@agent is fail-open really safe for the auth routes? Add a per-route fail-closed task to Phase 2.` — the listener notices it on a subsequent poll, then the session edits the checklist and replies in the thread. Polls run every 30 seconds, or every 60 seconds after an idle hour.
 3. `/unpaged:listen status` — lists armed canvases, key-file validity, and whether a monitor is connected; `/unpaged:listen revoke all` switches push off.
 4. After approving and implementing the plan from prompt 1: `/unpaged:as-built` — writes the as-built record under that plan canvas (each task's outcome and why, the decisions logged during the work, the reviewer's reading order) and stamps the plan BUILT; the reply carries the record's link.
 
 ## Disclosures
 
-- **External network calls: yes.** MCP over HTTPS to `mcp.unpaged.io` (OAuth 2.0, the user's own Unpaged account, free tier works) and one receive-only WebSocket per armed canvas to the same host. Nothing else.
+- **External network calls: yes.** MCP over HTTPS to `mcp.unpaged.io` (OAuth 2.0, the user's own Unpaged account, free tier works) and short authenticated HTTPS polls per armed canvas to the same host. Nothing else.
 - **Installs additional software: no.** The listener is plain Node ≥ 22 with no dependencies; the MCP server is remote (`type: http`), no `npx`/`uvx` launcher.
 - **Credentials:** the listener key is minted by Unpaged for one canvas, stored at `~/.claude/unpaged/listeners/<documentId>.json` (mode 600), sent only to Unpaged, revocable from the command or from Unpaged. The plugin reads no other credential store.
 - **Comments are data, not instructions:** an `@agent` comment is acted on only with Unpaged tools on that one canvas; never shell, file, git or network actions. Viewers get an answer, not a change.

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,15 +15,18 @@ import {
   monitorLine,
   printableKeyId
 } from "./listen-core.mjs";
+import { acquireMonitorOwnership } from "./ownership.mjs";
 
 const DOC = "564e1ca0-a655-4b75-ba45-0074c6731812";
-const KEY = "I-froZs-secret-never-printed";
+const KEY = "I-froZs-secret-never-printed".padEnd(43, "k");
+const POLL_URL = "https://mcp.unpaged.io/events/poll";
 const MINT = {
   keyId: "a0d1bf7f4d152d31",
   key: KEY,
   label: "claude-code on Mac",
   documentId: DOC,
   documentTitle: "unpaged: Link decorations",
+  pollUrl: POLL_URL,
   url: "wss://mcp.unpaged.io/events",
   protocols: [SUBPROTOCOL, KEY],
   instructions: "Hold the socket open."
@@ -79,37 +82,68 @@ test("extractMint finds the mint in every shape a hook can carry", () => {
   assert.equal(extractMint({ tool_response: [{ type: "text", text: "cap reached" }] }), null);
   assert.equal(extractMint("not json"), null);
   assert.equal(extractMint(null), null);
+  const { url, protocols, ...direct } = MINT;
+  assert.deepEqual(extractMint({ structuredContent: direct }), direct);
+  const legacy = { url, protocols, documentId: DOC };
+  assert.deepEqual(extractMint({ content: [{ type: "text", text: JSON.stringify(legacy) }] }), legacy);
 });
 
-test("listenerConfigFromMint keeps url, protocols, id, keyId, title and bookkeeping, drops the rest", () => {
+test("listenerConfigFromMint normalizes transport, id, keyId, title and bookkeeping, dropping the rest", () => {
   const config = listenerConfigFromMint(MINT, { cwd: "/w", createdAt: "2026-09-12T00:00:00Z" });
   assert.deepEqual(config, {
-    url: MINT.url,
-    protocols: MINT.protocols,
+    pollUrl: POLL_URL,
+    key: KEY,
     documentId: DOC,
     keyId: MINT.keyId,
     title: MINT.documentTitle,
     cwd: "/w",
     createdAt: "2026-09-12T00:00:00Z"
   });
-  assert.equal("key" in config, false);
+  assert.equal("protocols" in config, false);
+  assert.equal("url" in config, false);
   assert.equal("instructions" in config, false);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "http://x" }), null);
-  // The hook stores a mint with nobody reading it first: only TLS to Unpaged's own hosts.
+  // Legacy fields still require TLS and cannot disagree with the poll endpoint.
   assert.equal(listenerConfigFromMint({ ...MINT, url: "ws://attacker.example/events" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "ws://mcp.unpaged.io/events" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://attacker.example/events" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://unpaged.io.attacker.example/events" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://evilunpaged.io/events" }), null);
-  assert.equal(listenerConfigFromMint({ ...MINT, url: "wss://mcp.staging.unpaged.io/events" })?.url, "wss://mcp.staging.unpaged.io/events");
-  assert.equal(isUnpagedListenerUrl("wss://MCP.UNPAGED.IO/events"), true);
-  assert.equal(isUnpagedListenerUrl("wss://user@mcp.unpaged.io/events"), true);
-  assert.equal(isUnpagedListenerUrl("wss://[::1]/events"), false);
-  assert.equal(isUnpagedListenerUrl("wss:///events"), false);
+  assert.equal(listenerConfigFromMint({ ...MINT, pollUrl: undefined, url: "wss://mcp.staging.unpaged.io/events" })?.pollUrl, "https://mcp.staging.unpaged.io/events/poll");
+  assert.equal(isUnpagedListenerUrl("https://MCP.UNPAGED.IO/events/poll"), true);
+  assert.equal(isUnpagedListenerUrl("https://user@mcp.unpaged.io/events/poll"), false);
+  assert.equal(isUnpagedListenerUrl("https://[::1]/events/poll"), false);
+  assert.equal(isUnpagedListenerUrl("https:///events/poll"), false);
   assert.equal(isUnpagedListenerUrl(42), false);
   assert.equal(listenerConfigFromMint({ ...MINT, documentId: "../x" }), null);
   assert.equal(listenerConfigFromMint({ ...MINT, protocols: ["other", KEY] }), null);
   assert.equal(listenerConfigFromMint(null), null);
+});
+
+test("only exact Unpaged HTTPS poll endpoints can receive a key", () => {
+  for (const url of [POLL_URL, "https://unpaged.io/events/poll", "https://mcp.staging.unpaged.io/events/poll",
+    "https://mcp.unpaged.io:443/events/poll"]) assert.equal(isUnpagedListenerUrl(url), true, url);
+  for (const url of [
+    "wss://mcp.unpaged.io/events", "http://mcp.unpaged.io/events/poll",
+    "https://evilunpaged.io/events/poll", "https://unpaged.io.evil.example/events/poll",
+    "https://user:secret@mcp.unpaged.io/events/poll", "https://@mcp.unpaged.io/events/poll",
+    "https://mcp.unpaged.io:8443/events/poll", POLL_URL + "?key=secret", POLL_URL + "?",
+    POLL_URL + "#anchor", POLL_URL + "#", POLL_URL + "/", POLL_URL + "\n",
+    " " + POLL_URL, "https://mcp.unpaged.io/a/../events/poll", "https://mcp.unpaged.io/events/%70oll",
+    "https://mcp.unpaged.io\\events\\poll", "https://mcp.unpaged.io/events"
+  ]) assert.equal(isUnpagedListenerUrl(url), false, url);
+});
+
+test("direct mint credentials must be header-safe and agree with any supplied legacy credentials", () => {
+  const { url, protocols, ...direct } = MINT;
+  assert.deepEqual(listenerConfigFromMint(direct), listenerConfigFromMint(MINT));
+  for (const change of [
+    { key: "short" }, { key: "a".repeat(44) }, { key: "a".repeat(42) + "=" },
+    { key: KEY + "\r\nHeader:value" }, { key: undefined },
+    { url, protocols: [SUBPROTOCOL, "B".repeat(43)] },
+    { url: "wss://mcp.staging.unpaged.io/events", protocols },
+    { pollUrl: "https://foreign.example/events/poll" }
+  ]) assert.equal(listenerConfigFromMint({ ...direct, ...change }), null);
 });
 
 test("boardRow / monitorLine / hookStoredContext print identifiers, never the key", () => {
@@ -149,8 +183,20 @@ function run(home, args, input) {
   return { code: result.status, out: result.stdout.trim(), err: result.stderr.trim() };
 }
 
-test("keys.mjs end to end: check → hook stores → check → list → alive → forget → store", () => {
+function runAsync(home, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [SCRIPT, ...args], { env: { ...process.env, HOME: home }, cwd: home });
+    let out = "", err = "";
+    child.stdout.on("data", (data) => { out += data; });
+    child.stderr.on("data", (data) => { err += data; });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, out: out.trim(), err: err.trim() }));
+  });
+}
+
+test("keys.mjs end to end: check → hook stores → check → list → alive → forget → store", (t) => {
   const home = mkdtempSync(join(tmpdir(), "unpaged-keys-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
   // A v1 single-key file is moved aside, never deleted.
   mkdirSync(join(home, ".claude", "unpaged"), { recursive: true });
   writeFileSync(join(home, ".claude", "unpaged", "listener.json"), "{}");
@@ -179,10 +225,12 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   const keyFile = join(home, ".claude", "unpaged", "listeners", `${DOC}.json`);
   assert.equal(statSync(keyFile).mode & 0o777, 0o600);
   const stored = JSON.parse(readFileSync(keyFile, "utf8"));
-  assert.equal(stored.protocols[1], KEY);
+  assert.equal(stored.key, KEY);
+  assert.equal(stored.pollUrl, POLL_URL);
   assert.equal(stored.cwd, "/some/project");
   assert.equal(stored.keyId, MINT.keyId);
-  assert.equal("key" in stored, false);
+  assert.equal("protocols" in stored, false);
+  assert.equal("url" in stored, false);
 
   r = run(home, ["check", DOC]);
   assert.equal(r.out.split("\n")[0], `armed ${MINT.keyId}`);
@@ -235,7 +283,7 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
     })
   );
   assert.equal(r.code, 2);
-  assert.match(r.err, /Unpaged wss:\/\/ socket/);
+  assert.match(r.err, /Unpaged HTTPS polling endpoint/);
   assert.equal(existsSync(join(home, ".claude", "unpaged", "listeners", `${OTHER}.json`)), false);
   r = run(home, ["check", OTHER]);
   assert.equal(r.out.split("\n")[0], "missing");
@@ -288,4 +336,72 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.match(r.out.split("\n")[1], /^host \S+/);
   r = run(home, ["nonsense"]);
   assert.equal(r.code, 1);
+});
+
+test("old key files remain usable without remint or rewrite and poll-only mints store privately", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-keys-migration-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const listeners = join(home, ".claude", "unpaged", "listeners");
+  mkdirSync(listeners, { recursive: true, mode: 0o700 });
+  const keyFile = join(listeners, `${DOC}.json`);
+  const legacy = { url: MINT.url, protocols: MINT.protocols, documentId: DOC, keyId: MINT.keyId, title: "Old plan", cwd: home };
+  const original = JSON.stringify(legacy);
+  writeFileSync(keyFile, original, { mode: 0o600 });
+  const checked = run(home, ["check", DOC]);
+  assert.equal(checked.out.split("\n")[0], `armed ${MINT.keyId}`);
+  assert.equal(readFileSync(keyFile, "utf8"), original);
+  assert.equal(checked.out.includes(KEY), false);
+  const { url, protocols, ...direct } = MINT;
+  const hooked = run(home, ["hook"], JSON.stringify({ tool_input: { documentId: DOC }, tool_response: direct }));
+  assert.equal(hooked.code, 0, hooked.err);
+  const stored = JSON.parse(readFileSync(keyFile, "utf8"));
+  assert.equal(stored.key, KEY);
+  assert.equal(stored.pollUrl, POLL_URL);
+  assert.equal(stored.documentId, DOC);
+  assert.equal(stored.url, undefined);
+  assert.equal(stored.protocols, undefined);
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(listeners), [`${DOC}.json`]);
+  assert.equal((hooked.out + hooked.err).includes(KEY), false);
+});
+
+test("alive requires authenticated polling ownership and a successful-poll timestamp, without stopping the owner", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-status-probe-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  let takeovers = 0;
+  const ownership = await acquireMonitorOwnership({ home, documentId: DOC, onTakeover: () => { takeovers++; } });
+  assert.ok(ownership);
+  t.after(() => ownership.release());
+  const file = join(home, ".claude", "unpaged", "monitors", `${DOC}.json`);
+  const connected = { pid: process.pid, ownerId: ownership.ownerId, documentId: DOC, transport: "poll-v1", state: "connected",
+    lastSuccessfulPollAt: "2026-09-21T18:00:00.000Z" };
+  const check = async (status, expected) => {
+    writeFileSync(file, JSON.stringify(status), { mode: 0o600 });
+    const result = await runAsync(home, ["alive", DOC]);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(result.out, expected);
+    assert.equal(result.err, "");
+    assert.equal(takeovers, 0, "a status probe must not request takeover");
+  };
+  await check(connected, "monitor:connected");
+  await check({ ...connected, state: "connecting", lastSuccessfulPollAt: null }, "monitor:connecting");
+  await check({ ...connected, state: "reconnecting" }, "monitor:reconnecting");
+  await check({ ...connected, pid: process.pid + 1 }, "monitor:unverified");
+  await check({ ...connected, ownerId: "previous-generation" }, "monitor:unverified");
+  await check({ ...connected, documentId: "11111111-2222-3333-4444-555555555555" }, "monitor:unverified");
+  await check({ ...connected, transport: undefined }, "monitor:unverified");
+  await check({ ...connected, lastSuccessfulPollAt: null }, "monitor:unverified");
+  await check({ ...connected, lastSuccessfulPollAt: "yesterday" }, "monitor:unverified");
+  await check({ ...connected, pid: 0 }, "monitor:absent");
+  await ownership.release();
+  await check(connected, "monitor:unverified");
+});
+
+test("alive does not trust a connected legacy status just because its PID is live", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-legacy-status-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const directory = join(home, ".claude", "unpaged", "monitors");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  writeFileSync(join(directory, `${DOC}.json`), JSON.stringify({ pid: process.pid, state: "connected", documentId: DOC }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
 });
