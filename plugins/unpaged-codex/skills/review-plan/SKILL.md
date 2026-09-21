@@ -156,7 +156,10 @@ an older retained event path. `doctor` queries native hook configuration without
 opening the review ledger, running hooks, or starting a listener; its native
 child may write Codex runtime storage as described above. Continue only if
 `setupReady` is true. Otherwise give the returned
-`action` in plain language and preserve the canvas. For missing/changed approval,
+`action` in plain language and preserve the canvas. Even when `setupReady` is
+true, the ordinary Codex 0.155 Linux `bwrap` path cannot keep a detached receiver
+alive after launch: report that blocker and preserve the canvas instead of
+minting a listener key. For missing/changed approval,
 direct the user to **Settings → Hooks → From Plugins → Unpaged for Codex**:
 review the hook row beneath **SessionStart** and click **Trust**, leaving its
 enable switch on. On macOS, **⌘,** opens Settings.
@@ -198,7 +201,8 @@ an already approved Unpaged hook. Never echo raw diagnostics from other plugins.
    MCP write. The adapter retains the full digest internally; do not ask the
    owner to type its hash. Explain that
    agents reply and leave threads open; humans resolve and explicitly accept.
-5. After the setup check passes, mint a board-bound key via
+5. After the setup check passes and the host's native execution path supports a
+   persistent receiver, mint a board-bound key via
    `agent_listener_key_create`. Call `arm` with stdin:
    `{ "documentId", "threadId": <current CODEX_THREAD_ID>, "keyId", "key",
       "pollUrl", "planDigest": <full digest>, "statusElementIds": [<status ID>] }`.

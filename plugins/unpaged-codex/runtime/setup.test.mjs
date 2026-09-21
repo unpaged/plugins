@@ -245,6 +245,37 @@ test("an exited native child with open inherited pipes remains deadline-bounded"
   for (const stream of ["stdin", "stdout", "stderr"]) assert.equal(fixture.child[stream].destroyed, true);
 });
 
+test("the deadline preserves a native SQLite diagnosis when the child exits without close or hangs", async () => {
+  for (const exited of [true, false]) {
+    const fixture = processFixture((_message, child) => {
+      child.stderr.write(`failed to initialize sqlite state runtime under /private/${SECRET}: readonly database`);
+      if (exited) child.emit("exit", 1);
+    });
+    const result = await inspectSetup({ ...options(fixture, { timeoutMs: 5 }), pluginRoot });
+    assert.equal(result.setupReady, false);
+    assert.equal(result.status, "query_failed");
+    assert.equal(result.reason, "native_state_initialization_failed");
+    assert.match(result.action, /native approval/);
+    assert.match(result.action, /directories.*database files/);
+    assert.equal(JSON.stringify(result).includes(SECRET), false);
+    assert.equal(JSON.stringify(result).includes("readonly database"), false);
+    assert.deepEqual(fixture.signals, exited ? [] : ["SIGTERM"]);
+    for (const stream of ["stdin", "stdout", "stderr"]) assert.equal(fixture.child[stream].destroyed, true);
+  }
+});
+
+test("unconfirmed cleanup takes precedence over a diagnosed native SQLite failure", async () => {
+  const fixture = processFixture((_message, child) => {
+    child.stderr.write(`failed to initialize sqlite state runtime under /private/${SECRET}`);
+  }, { ignoreTerm: true, ignoreKill: true });
+  const result = await inspectSetup({ ...options(fixture, { timeoutMs: 5 }), pluginRoot });
+  assert.equal(result.setupReady, false);
+  assert.equal(result.reason, "cleanup_unconfirmed");
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.deepEqual(fixture.signals, ["SIGTERM", "SIGKILL"]);
+  for (const stream of ["stdin", "stdout", "stderr"]) assert.equal(fixture.child[stream].destroyed, true);
+});
+
 test("stdout and stderr share a raw byte budget including unterminated lines", async () => {
   for (const stream of ["stdout", "stderr"]) {
     const fixture = processFixture((_message, child) => child[stream].write("é".repeat(33)));

@@ -128,7 +128,7 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
             if (line.length) receive(line);
           }
         });
-        timer = setTimeout(() => fail("timeout"), timeoutMs);
+        timer = setTimeout(() => fail(nativeStateFailed ? "native_state_initialization_failed" : "timeout"), timeoutMs);
         send({ id: 0, method: "initialize", params: {
           clientInfo: { name: "unpaged_setup_check", title: "Unpaged setup check", version: "0.1.0" }
         } });
