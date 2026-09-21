@@ -9,7 +9,7 @@
       "command": "node",
       "args": ["runtime/mcp.mjs"],
       "cwd": ".",
-      "env_vars": ["CODEX_HOME"]
+      "env_vars": ["CODEX_HOME", "UNPAGED_CODEX_PATH"]
     }
   }
 }

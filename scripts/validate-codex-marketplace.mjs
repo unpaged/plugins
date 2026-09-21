@@ -35,7 +35,7 @@ export async function validateUnpagedPackage(source, manifest) {
   assert.equal(connection.mcpServers.unpaged.url, "https://mcp.unpaged.io/mcp",
     "Unpaged MCP URL must be the documented production endpoint");
   assert.deepEqual(connection.mcpServers.unpaged_review, {
-    type: "stdio", command: "node", args: ["runtime/mcp.mjs"], cwd: ".", env_vars: ["CODEX_HOME"]
+    type: "stdio", command: "node", args: ["runtime/mcp.mjs"], cwd: ".", env_vars: ["CODEX_HOME", "UNPAGED_CODEX_PATH"]
   }, "Unpaged local adapter must use the fixed package entry point and profile environment");
   await component(source, "./runtime/mcp.mjs");
   await component(source, "./runtime/control.mjs");

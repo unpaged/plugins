@@ -93,6 +93,12 @@ metadata or the local tool is unavailable, listening remains blocked before a
 key is minted. After an update, reload the plugin through Codex and rediscover
 its tools; repeated installation is not a repair procedure.
 
+For a Codex binary outside the standard locations and launch `PATH`, set
+`UNPAGED_CODEX_PATH` to its absolute path in the environment that launches Codex.
+The local server forwards this trusted host setting and verifies the binary's
+version and queue capability. It never accepts an executable path in tool
+arguments. Reload the local tools after changing that launch environment.
+
 The CLI remains available for retained legacy helpers and explicitly approved
 host maintenance. Pure `digest` and `info` operations remain safe in an ordinary
 command sandbox; they open no ledger, inspect no process and start no native

@@ -100,6 +100,9 @@ test("local review adapter cannot change its executable, profile, working folder
     (value) => { value.mcpServers.unpaged_review.cwd = "/tmp"; },
     (value) => { value.mcpServers.unpaged_review.args = ["another-script.mjs"]; },
     (value) => { value.mcpServers.unpaged_review.env = { CODEX_HOME: "/tmp/foreign-profile" }; },
+    (value) => { value.mcpServers.unpaged_review.env = { UNPAGED_CODEX_PATH: "/tmp/foreign-codex" }; },
+    (value) => { value.mcpServers.unpaged_review.env_vars = ["CODEX_HOME"]; },
+    (value) => { value.mcpServers.unpaged_review.env_vars = ["UNPAGED_CODEX_PATH"]; },
     (value) => { value.mcpServers.unpaged_review.env_vars = []; }
   ]) {
     const root = await fixture(t);

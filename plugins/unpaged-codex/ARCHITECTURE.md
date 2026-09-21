@@ -166,8 +166,11 @@ See [official Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
 The bundled `.mcp.json` contains the remote `unpaged` HTTP connection and a
 local `unpaged_review` stdio server. The local server runs `node runtime/mcp.mjs`
-with package-relative `cwd: "."` and explicitly forwards `CODEX_HOME`; native
-stdio defaults omit that variable. The server keeps the same data-home rule as
+with package-relative `cwd: "."` and explicitly forwards `CODEX_HOME` and
+`UNPAGED_CODEX_PATH`; native stdio defaults omit these variables. The optional
+binary override comes from the trusted host launch environment and still passes
+the resolver's executable, version and queue checks. Model arguments cannot set
+it. The server keeps the same data-home rule as
 the unchanged SessionStart hook. The model cannot choose another profile or
 ledger. A registered-connection artifact replaces only the remote connection;
 it must retain the local review server.
