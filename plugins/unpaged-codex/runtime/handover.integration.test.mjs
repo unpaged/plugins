@@ -14,10 +14,10 @@ const TASK = "22222222-2222-4222-8222-222222222222";
 const QUEUE = "33333333-3333-4333-8333-333333333333";
 const DIGEST = "a".repeat(64);
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function until(check) {
+async function until(check, progress) {
   const deadline = Date.now() + 10000;
   while (!check()) {
-    if (Date.now() >= deadline) throw new Error("handover condition timed out");
+    if (Date.now() >= deadline) throw new Error(`handover condition timed out: ${progress()}`);
     await pause(20);
   }
 }
@@ -40,7 +40,14 @@ test("real legacy receiver settles its queue receipt before the polling receiver
   const script = `
     import { runWorker } from ${JSON.stringify(pathToFileURL(join(legacy, "runtime/worker.mjs")).href)};
     const controller = new AbortController();
-    process.once("SIGTERM", () => controller.abort());
+    process.once("SIGTERM", () => {
+      process.send("shutdown-requested");
+      controller.abort();
+    });
+    let settleQueue;
+    process.on("message", (message) => {
+      if (message === "settle-queue") settleQueue();
+    });
     class Socket extends EventTarget {
       constructor() { super(); queueMicrotask(() => {
         this.dispatchEvent(new Event("open"));
@@ -51,8 +58,8 @@ test("real legacy receiver settles its queue receipt before the polling receiver
     const result = await runWorker(${JSON.stringify(DOCUMENT)}, {
       dataDir: ${JSON.stringify(data)}, Socket, signal: controller.signal, pollMs: 10,
       execFile(_binary, _args, _options, callback) {
+        settleQueue = () => callback(null, ${JSON.stringify(`Queued message ${QUEUE} for thread ${TASK}.\n`)}, "");
         process.send("dispatching");
-        setTimeout(() => callback(null, ${JSON.stringify(`Queued message ${QUEUE} for thread ${TASK}.\n`)}, ""), 750);
       }
     });
     process.send({ settled: result.reason });
@@ -69,6 +76,11 @@ test("real legacy receiver settles its queue receipt before the polling receiver
   const controller = new AbortController();
   let store;
   let receiver;
+  let receiverResult;
+  let polls = 0;
+  const progress = () => JSON.stringify({ childExitCode: child.exitCode, childSignalCode: child.signalCode,
+    messages, receiver: receiverResult ?? null, polls });
+  const receiverStillWaiting = () => assert.equal(receiverResult, undefined, `replacement receiver finished early: ${progress()}`);
   t.after(async () => {
     controller.abort();
     await receiver;
@@ -77,17 +89,29 @@ test("real legacy receiver settles its queue receipt before the polling receiver
     store?.close();
     await rm(root, { recursive: true, force: true });
   });
-  await until(() => messages.includes("dispatching") || child.exitCode !== null);
+  await until(() => messages.includes("dispatching") || child.exitCode !== null || child.signalCode !== null, progress);
   assert.equal(child.exitCode, null, stderr);
+  assert.equal(child.signalCode, null, progress());
   store = new Store(join(data, "reviews.sqlite"));
   assert.equal(store.listEvents(DOCUMENT)[0].state, "dispatching");
   const before = store.getBinding(DOCUMENT);
-  let polls = 0;
   receiver = runWorker(DOCUMENT, { store, dataDir: data, signal: controller.signal,
     pollIntervalMs: 10, idlePollIntervalMs: 20, pollMs: 10,
     fetch: async () => { polls++; return new Response(JSON.stringify({ events: [] })); },
-    execFile() { assert.fail("the historical event already has a queue outcome"); } });
-  await until(() => store.getBinding(DOCUMENT).workerTransport === "poll-v1" && polls > 0);
+    execFile() { assert.fail("the historical event already has a queue outcome"); } })
+    .then((result) => { receiverResult = result; return result; }, () => {
+      receiverResult = { state: "rejected", reason: "unhandled_worker_failure" };
+      return receiverResult;
+    });
+  await until(() => { receiverStillWaiting(); return messages.includes("shutdown-requested"); }, progress);
+  // Hold the historical receipt until shutdown was observed. This proves the
+  // overlap on loaded runners before allowing the receipt to settle.
+  assert.equal(polls, 0);
+  assert.equal(store.getBinding(DOCUMENT).workerPid, child.pid);
+  assert.equal(store.getBinding(DOCUMENT).upgradePending, true);
+  assert.equal(store.listEvents(DOCUMENT)[0].state, "dispatching");
+  child.send("settle-queue");
+  await until(() => { receiverStillWaiting(); return store.getBinding(DOCUMENT).workerTransport === "poll-v1" && polls > 0; }, progress);
   await exited;
   assert.equal(child.exitCode, 0, stderr);
   assert.deepEqual(messages.at(-1), { settled: "worker_shutdown" });
