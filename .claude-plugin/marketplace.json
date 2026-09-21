@@ -9,7 +9,7 @@
     {
       "name": "unpaged",
       "source": "./plugins/unpaged",
-      "description": "Turn Claude Code plans into whiteboards on Unpaged — review on the canvas, comment on the pieces (@agent comments are pushed back to the session), approval flips the canvas to executing; the session keeps a Decision log while it builds, and /unpaged:as-built compiles the record of what shipped and why under the plan. Every plan is filed in a Visual plans folder."
+      "description": "Turn Claude Code plans into whiteboards on Unpaged — review on the canvas, comment on the pieces (@agent comments are delivered automatically to the session by its background listener), approval flips the canvas to executing; the session keeps a Decision log while it builds, and /unpaged:as-built compiles the record of what shipped and why under the plan. Every plan is filed in a Visual plans folder."
     }
   ]
 }
