@@ -223,7 +223,7 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.equal(r.out.includes(KEY), false);
 
   const keyFile = join(home, ".claude", "unpaged", "listeners", `${DOC}.json`);
-  assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(keyFile).mode & 0o777, 0o600);
   const stored = JSON.parse(readFileSync(keyFile, "utf8"));
   assert.equal(stored.key, KEY);
   assert.equal(stored.pollUrl, POLL_URL);
@@ -360,7 +360,7 @@ test("old key files remain usable without remint or rewrite and poll-only mints 
   assert.equal(stored.documentId, DOC);
   assert.equal(stored.url, undefined);
   assert.equal(stored.protocols, undefined);
-  assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(keyFile).mode & 0o777, 0o600);
   assert.deepEqual(readdirSync(listeners), [`${DOC}.json`]);
   assert.equal((hooked.out + hooked.err).includes(KEY), false);
 });
