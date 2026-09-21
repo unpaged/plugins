@@ -45,6 +45,50 @@ newer, the tested support floor, not the first Node version with SQLite.
 `node <cli> info` reports the default data directory. Use that same directory
 throughout this review. The hook repairs only bindings in the default directory.
 
+The setup helper starts a temporary native Codex app-server in the current
+profile. Its hook-inventory request does not change hook settings, but native
+startup can create or migrate Codex's SQLite runtime state. A filesystem
+read-only command sandbox can therefore block `doctor` before it inspects hooks.
+For `native_state_initialization_failed`, use the host's native approval flow
+for the exact command in the same task and folder. Prefer approved execution of
+that command when available; do not request a broader directory grant merely
+to avoid that approval. If the host instead requires path permissions, request
+**directory roots** for the actual Codex home and configured SQLite state home
+(`sqlite_home`, otherwise `CODEX_SQLITE_HOME`, otherwise Codex home), and the
+private Unpaged data directory when needed. Request only uncovered roots, never
+individual `.sqlite`, `-wal`, or `-shm` files. Preserve the real profile and
+`CODEX_THREAD_ID`; do not substitute a temporary state home or copy native state.
+Do not edit hook trust, request Trust again, or reinstall for this diagnostic.
+
+Approval for `doctor` does not authorize or verify a background receiver.
+`arm` and `resume` launch a detached worker that inherits the launch environment
+and sandbox; its ledger writes, HTTPS polling and native `codex queue` calls
+must remain permitted after the launch command returns. Use the host's native
+approval flow for that launch, with the same required directory roots and
+network access if path/network permissions are required. Do not weaken sandbox
+policy programmatically. A successful setup check or launch command is not
+proof of worker survival or queue delivery; verify the live worker and status,
+then actual comment delivery. If the host cannot support a persistent receiver
+through its approved flow, report the blocker and preserve the canvas.
+In Codex 0.155's ordinary Linux `bwrap` execution path, the command's PID
+namespace ends with that command, so a detached worker cannot survive it.
+Directory/network grants alone do not change this lifetime. Do not arm through
+that path; listening remains blocked until the host provides a native supported
+persistent launch. Do not recommend all-access mode or build a launcher to
+bypass this restriction. Report the blocker before minting a key.
+
+For the observed Codex 0.155 Linux failure only: if a previously granted database
+file causes a verified `bwrap` “Not a directory” or mkdir error beneath that
+file, adding its parent directory does not remove the old session grant. Stop
+retrying commands. Ask the user to fully quit and reopen Codex, then reopen the
+**same saved task**. This is a source-supported recovery attempt, not a verified
+fix for every host. Verify that a fresh native session was created and the error
+cleared before retrying the setup check through its native approval flow.
+Session grants are in-memory; ending a turn or closing a tab alone does not
+establish that they were cleared.
+Do not repeat restarts if the same error remains, or attempt to reset permissions
+by editing native state. This attempt does not enable the blocked Linux receiver.
+
 On macOS, a Codex command sandbox can prevent the OS process inspection needed
 to verify worker identity. In a known sandboxed host context (for example
 `CODEX_SANDBOX=seatbelt`), run worker launch and manual `arm`/`resume` recovery
@@ -108,9 +152,10 @@ report that no listener was armed.
 
 For a listening review, run `doctor` from the **current installed plugin** before
 minting a key. Resolve that helper from the current installed skill entry, not
-an older retained event path. `doctor` is read-only: it queries native hook
-configuration without opening the review ledger, running hooks, or starting a
-listener. Continue only if `setupReady` is true. Otherwise give the returned
+an older retained event path. `doctor` queries native hook configuration without
+opening the review ledger, running hooks, or starting a listener; its native
+child may write Codex runtime storage as described above. Continue only if
+`setupReady` is true. Otherwise give the returned
 `action` in plain language and preserve the canvas. For missing/changed approval,
 direct the user to **Settings → Hooks → From Plugins → Unpaged for Codex**:
 review the hook row beneath **SessionStart** and click **Trust**, leaving its

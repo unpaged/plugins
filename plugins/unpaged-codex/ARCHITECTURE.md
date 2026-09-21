@@ -155,6 +155,15 @@ See [official Codex hooks](https://learn.chatgpt.com/docs/hooks).
 the current folder. It starts no task, invokes no hook, changes no trust, and
 does not open the ledger. Output and duration are bounded, the owned query
 process is terminated, and only sanitized Unpaged setup facts leave the helper.
+The metadata request is read-only, but startup of the native child is not a
+filesystem read-only operation: it can create or migrate runtime SQLite state
+in the current Codex profile. Since 0.4.1, an exact native SQLite-initialization
+failure marker on stderr produces `query_failed` with reason
+`native_state_initialization_failed` and constant approval guidance. The helper
+retains only a marker-sized overlap between chunks, counts stderr against the
+existing shared output budget, and waits for stdio closure to classify an early
+exit. Raw stderr and state paths are never returned. Other early exits remain
+unclassified; no permission, trust or state changes are attempted automatically.
 Select the current installed source path before checking ambiguity, so another
 marketplace's copy cannot block this one. Readiness requires the exact current installed SessionStart command and matcher,
 enabled and trusted. Missing, disabled, modified, untrusted, unsupported and
@@ -164,6 +173,27 @@ action, not misleading Unpaged approval advice. Native warnings are unstructured
 strings and are not attributed to a plugin by guessing their text. `arm` repeats
 the check before opening/migrating state or binding; the skill checks before key
 creation and revokes a newly minted key if arming subsequently fails.
+
+Approval must use the host's native mechanism and preserve the actual profile,
+folder and task. Prefer approved command execution when available; path-based
+permissions, when required, must name the actual state/data directory roots,
+not database files. `--data` redirects only the Unpaged ledger, not native Codex
+storage. A detached receiver inherits the launch environment and sandbox; its
+native queue child inherits those restrictions in turn. Queue implementations
+may connect to a daemon or use an embedded app-server. The runtime does not
+promise that filesystem grants alone preserve a host's background processes,
+PID visibility or network access. Setup, receiver survival and delivery are
+separate gates. No temporary native state home, copied databases or sandbox
+bypass is part of this adapter.
+Codex 0.155's ordinary Linux `bwrap` execution uses a per-command PID namespace
+that ends when the command completes. Detaching a child does not escape that
+namespace, and directory/network grants do not extend its lifetime. Listening
+remains blocked there until a native supported persistent launch is available;
+all-access mode is not a customer workaround. This source-level boundary does
+not identify which execution paths a particular managed host permits.
+The inspected native sources are [SQLite startup in 0.155.1](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/app-server/src/lib.rs#L642),
+[Linux namespace setup in 0.155.0-alpha.9.2](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/linux-sandbox/src/bwrap.rs#L332),
+and [in-memory session permission grants](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/state/session.rs#L418).
 
 Setup evidence is persisted configuration, not desktop in-memory state or a
 live recovery receipt. Queued work keeps its retained runtime; setup inspection

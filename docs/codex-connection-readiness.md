@@ -45,8 +45,9 @@ SessionStart hook before listening. The installer returning successfully, or its
 `ON_INSTALL` authentication policy, does not establish sign-in. A user-reported
 fresh Ubuntu installation of 0.4.0 confirmed the separate login step is needed.
 The user then confirmed sign-in and native hook trust; a screenshot showed
-`visual-plan` and `review-plan` loading. These observations do not establish
-canvas creation, comment delivery or restart recovery. See
+`visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log were
+subsequently verified independently. Native sandbox failures blocked listener
+setup; comment delivery, plan lifecycle and restart recovery remain unproven. See
 [Codex MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands).
 
 For a separately approved, published listing available to the intended customer:
@@ -67,6 +68,32 @@ request to trust Unpaged again. Do not make log inspection, manual ledger repair
 or repeated restarts part of customer setup. Render-only canvases skip this gate.
 See the [implemented setup check](../plugins/unpaged-codex/runtime/setup.mjs).
 
+The 0.4.1 setup diagnostic also distinguishes a confirmed native SQLite startup
+failure from a generic query exit. `doctor` starts a temporary native app-server
+in the current profile; querying hook metadata can require native runtime
+storage writes even though the request changes no hook settings. For
+`native_state_initialization_failed`, use the host's native approval mechanism
+for the exact command in the same task. Prefer approved command execution when
+available; if path permissions are required, request the actual Codex state/home
+and private review **directories**, never SQLite files or their sidecars.
+Do not change trust, copy state to a temporary profile, or reinstall for this
+storage diagnostic. The [skill's permission guidance](../plugins/unpaged-codex/skills/review-plan/SKILL.md#runtime-and-tools)
+includes a one-time same-task restart attempt only for the verified Codex 0.155
+Linux error caused by stale session grants on database files. Source indicates
+that a fresh native session drops those grants; this is not yet a verified
+Ubuntu recovery result.
+
+This correction does not establish that a host permits detached listeners.
+The worker inherits launch restrictions, and both network access and native
+queue access must remain usable after the command ends. An approved setup check
+cannot stand in for a live receiver and comment-delivery test. If the host's
+native approval flow cannot support that lifetime, preserve the canvas and
+report that gate as blocked. In Codex 0.155's ordinary Linux `bwrap` path, the
+command's PID namespace ends with the command, so a detached worker cannot
+survive; directory/network permissions alone do not remove that restriction.
+Listening remains blocked there until a native supported persistent launch is
+available. Do not prescribe all-access mode as a customer workaround.
+
 Setup readiness establishes persisted hook configuration, not a running listener
 or proven recovery. Reopen the same existing task after an app restart; the
 trusted SessionStart hook restores only that task's authorized reviews. Complete
@@ -86,9 +113,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot | Canvas creation, comment delivery, lifecycle and recovery remain unproven for the Ubuntu trial; public-directory availability is separate |
+| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified | Listener setup is blocked in the Ubuntu trial; comment delivery, lifecycle and recovery remain unproven; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup evidence described above | A published connection or verified canvas, delivery, lifecycle and recovery results for the Ubuntu trial |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup and canvas evidence described above | A published connection or verified listener, delivery, lifecycle and recovery results for the Ubuntu trial |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can

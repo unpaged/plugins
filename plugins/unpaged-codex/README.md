@@ -6,8 +6,10 @@ It is an experimental integration, with the recovery boundaries below.
 
 ## Requirements
 
-- macOS or Linux. Worker process identity is supported on those platforms;
-  Windows is not a supported pilot host.
+- macOS or Linux for rendering and setup checks. Worker process identity is
+  supported on both, but listening also requires a native supported persistent
+  launch. The ordinary Codex 0.155 Linux sandbox cannot keep this detached
+  receiver alive; see the limitation below. Windows is not a supported pilot host.
 - Node.js 24 or newer, available to Codex and its hooks. Node 24 is the tested
   LTS support floor for this pilot; it is deliberate, not a claim that
   `node:sqlite` first became unflagged there (that happened in Node 22.13).
@@ -30,8 +32,10 @@ Both live in the same plugin repository. The app monorepo contains neither.
 installed this package from GitHub, verified its files and discovered its bundled
 direct MCP server as `not_logged_in`. In a later fresh Ubuntu setup with 0.4.0,
 the user confirmed explicit sign-in and native hook trust, and a screenshot
-showed `visual-plan` and `review-plan` loading. Canvas creation, comment delivery
-and restart recovery remain unproven for that trial. The
+showed `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log
+were independently verified. Listener setup then hit native sandbox failures;
+comment delivery, the plan lifecycle and restart recovery remain unproven for
+that trial. The
 [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
@@ -60,7 +64,7 @@ authentication policy is `ON_INSTALL`; that policy is not proof of authenticatio
 
 ## Hook approval before listening
 
-Before creating a listener, the agent runs the installed helper's read-only
+Before creating a listener, the agent runs the installed helper's native setup
 `doctor` check. If approval is missing or the hook changed, use the native
 approval surface: in the CLI, open `/hooks` and review and trust the Unpaged
 plugin's **SessionStart** hook. In the desktop app, open **Settings → Hooks →
@@ -78,6 +82,31 @@ proof that the running app loaded the hook. It never runs a hook, opens the
 review ledger, or starts a receiver. Live listening and restart recovery are
 verified separately. The integration remains experimental; the dated evidence
 and remaining gates are described below.
+
+The native helper uses the current Codex profile. Although it only requests hook
+metadata, Codex startup may create or migrate its own SQLite runtime storage.
+If this is blocked, version 0.4.1 reports `native_state_initialization_failed`
+without printing private paths or native diagnostics. Use the host's native
+approval flow for the exact command in the same task. If that host requires
+path permissions instead, grant the required **directory roots**, never individual
+SQLite files or their `-wal`/`-shm` companions. The relevant roots are the actual
+Codex home, any separately configured SQLite state directory, and the private
+Unpaged data directory when the listener is launched. Prefer a single approved
+command over a broader grant when supported. This failure does not call for
+renewed hook trust, a replacement profile, or repeated reinstalls.
+
+The detached listener inherits its launch restrictions. Its storage, HTTPS
+polling and native queue calls must remain allowed after launch; a successful
+`doctor` does not prove that they will. Verify listener survival and comment
+delivery separately. Hosts that cannot support that background process through
+their native approval flow remain blocked. In Codex 0.155's ordinary Linux
+`bwrap` path, the command's PID namespace ends with the command, preventing a
+detached worker from surviving; directory/network grants alone do not fix this.
+Listening remains blocked there until a native supported persistent launch is
+available. All-access mode is not a customer workaround for this integration.
+The [review skill](skills/review-plan/SKILL.md#runtime-and-tools) also describes the
+one-time same-task recovery attempt for the observed Codex 0.155 Linux sandbox error
+caused by session grants on individual database files.
 
 Repository marketplace distribution is separate from publication in OpenAI's
 public Plugins Directory. That directory route needs a reviewed registration,

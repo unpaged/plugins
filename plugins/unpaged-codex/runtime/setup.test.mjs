@@ -128,7 +128,7 @@ test("folder-wide load warnings and errors keep setup blocked with configuration
   }
 });
 
-test("read-only native query uses exactly initialize, initialized and hooks/list, then terminates its process", async () => {
+test("native inventory query uses exactly initialize, initialized and hooks/list, then terminates its process", async () => {
   const fixture = processFixture((message, child) => {
     if (message.method === "initialize") reply(child, 0, { userAgent: "codex-test" });
     if (message.method === "hooks/list") {
@@ -172,9 +172,77 @@ test("malformed, out-of-order and incomplete native responses fail closed with c
     assert.equal(result.status, "query_failed"); assert.equal(JSON.stringify(result).includes(SECRET), false);
     assert.deepEqual(fixture.signals, ["SIGTERM"]);
   }
-  const fixture = processFixture((_message, child) => { child.stdout.write('{"id":0'); child.emit("exit", 1); });
+  const fixture = processFixture((_message, child) => {
+    child.stdout.write('{"id":0'); child.emit("exit", 1); child.emit("close", 1);
+  });
   const result = await inspectSetup({ ...options(fixture), pluginRoot });
   assert.equal(result.reason, "early_exit");
+});
+
+test("native SQLite startup failure gets constant guidance without exposing paths or diagnostics", async () => {
+  const diagnostic = `Error: failed to initialize sqlite state runtime under /private/${SECRET}: readonly database\n`;
+  for (const afterExit of [false, true]) {
+    const fixture = processFixture((_message, child) => {
+      if (afterExit) child.emit("exit", 1);
+      // Real stderr can split the marker across chunks or drain after process exit.
+      for (const byte of Buffer.from(diagnostic)) child.stderr.write(Buffer.from([byte]));
+      if (!afterExit) child.emit("exit", 1);
+      child.emit("close", 1);
+    });
+    const result = await inspectSetup({ ...options(fixture), pluginRoot });
+    assert.equal(result.setupReady, false);
+    assert.equal(result.status, "query_failed");
+    assert.equal(result.reason, "native_state_initialization_failed");
+    assert.match(result.action, /native approval/);
+    assert.match(result.action, /directories.*database files/);
+    assert.equal(JSON.stringify(result).includes(SECRET), false);
+    assert.equal(JSON.stringify(result).includes("readonly database"), false);
+    assert.deepEqual(fixture.signals, []);
+  }
+});
+
+test("unrelated stderr and stdout cannot claim a native SQLite startup failure", async () => {
+  for (const diagnostic of [SECRET, "readonly database", "failed to initialize sqlite", "failed to initialize other runtime"]) {
+    const fixture = processFixture((_message, child) => {
+      child.stderr.write(diagnostic); child.emit("exit", 1); child.emit("close", 1);
+    });
+    const result = await inspectSetup({ ...options(fixture), pluginRoot });
+    assert.equal(result.reason, "early_exit");
+    assert.equal(JSON.stringify(result).includes(SECRET), false);
+  }
+  const fixture = processFixture((message, child) => {
+    if (message.method === "initialize") {
+      child.stderr.write(SECRET);
+      child.stdout.write(`${JSON.stringify({ method: "notification", params: { text: "failed to initialize sqlite state runtime under /private" } })}\n`);
+      reply(child, 0, {});
+    }
+    if (message.method === "hooks/list") reply(child, 1, inventory());
+  });
+  const result = await inspectSetup({ ...options(fixture), pluginRoot });
+  assert.equal(result.setupReady, true);
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.deepEqual(fixture.signals, ["SIGTERM"]);
+});
+
+test("native startup diagnostic scanning preserves the shared output limit and cleanup", async () => {
+  const fixture = processFixture((_message, child) => {
+    child.stderr.write("failed to initialize sqlite state runtime under ");
+    child.stderr.write(SECRET.repeat(10));
+  });
+  const result = await inspectSetup({ ...options(fixture, { maxOutputBytes: 64 }), pluginRoot });
+  assert.equal(result.setupReady, false);
+  assert.equal(result.reason, "output_limit");
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.deepEqual(fixture.signals, ["SIGTERM"]);
+});
+
+test("an exited native child with open inherited pipes remains deadline-bounded", async () => {
+  const fixture = processFixture((_message, child) => child.emit("exit", 1));
+  const result = await inspectSetup({ ...options(fixture, { timeoutMs: 5 }), pluginRoot });
+  assert.equal(result.setupReady, false);
+  assert.equal(result.reason, "timeout");
+  assert.deepEqual(fixture.signals, []);
+  for (const stream of ["stdin", "stdout", "stderr"]) assert.equal(fixture.child[stream].destroyed, true);
 });
 
 test("stdout and stderr share a raw byte budget including unterminated lines", async () => {

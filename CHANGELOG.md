@@ -6,8 +6,9 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Changed
 
-- Unpaged for Codex 0.4.1: installation guides now require `codex mcp login unpaged` after plugin installation, followed by native SessionStart hook approval before listening. The guides include the CLI `/hooks` path and distinguish user-confirmed Ubuntu setup from unproven canvas, delivery and restart behavior.
-- This Codex package update changes documentation and its manifest version only; runtime, hooks and skills are unchanged from 0.4.0.
+- Unpaged for Codex 0.4.1: installation guides now require `codex mcp login unpaged` after plugin installation, followed by native SessionStart hook approval before listening. The guides include the CLI `/hooks` path and distinguish user-confirmed Ubuntu setup and verified canvas creation from blocked listening and unproven delivery/lifecycle/recovery behavior.
+- The setup helper now recognizes the native SQLite startup failure that blocked an Ubuntu trial. It reports a fixed diagnostic and native-approval action without exposing stderr or private state paths; readiness still fails closed.
+- The review skill distinguishes hook-inventory reads from native runtime storage writes, directs required path permissions to directory roots rather than SQLite files, and preserves the existing task/profile. It describes a one-time recovery attempt for the observed Linux session-grant error without editing trust, copying state or bypassing host policy. Setup approval remains separate from proof that a detached listener survives and delivers comments. Hooks and polling behavior are unchanged.
 
 ## [1.3.0] - 2026-09-21
 
