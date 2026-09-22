@@ -70,15 +70,22 @@ working directory or environment. Missing or invalid native metadata blocks the
 operation; do not infer it from conversation text or use another task. Do not
 use a subagent to own a review. Node 24+ is required on the host.
 
-If the local tool is absent after a plugin update, reload the plugin through
-Codex's native flow and rediscover it. Report a continuing availability or
-metadata blocker; do not repeatedly reinstall, change trust records, grant
-access to native SQLite files, or substitute a temporary Codex profile. Before
-minting any key, require a successful local `doctor` result. Render-only work
+If the local tool is absent after a plugin update on desktop build 26.915.31945,
+give this one refresh action: **Plugins → Plugins tab → Unpaged for Codex**;
+turn the plugin enable switch off, wait for the update to finish, then on.
+Rediscover the tool in the same task and run `info`, then `doctor`. This is a
+bounded update-recovery step, not a normal fresh-install requirement. The
+**MCPs** tab has no Restart control for plugin servers in this build. For another
+build, verify its supported refresh path before prescribing UI steps. Report a
+continuing availability or metadata blocker; do not repeat toggles, reinstalls
+or app restarts, change trust records, grant access to native SQLite files, or
+substitute a temporary Codex profile. Before minting any key, require a
+successful local `doctor` result. Render-only work
 can proceed through remote Unpaged MCP without a listener or hook approval.
-Native metadata support was inspected in Codex `0.155.0-alpha.9.2`; that is not
-live Linux proof or a guarantee for every version. No tool result by itself
-proves detached-worker survival, comment delivery or automatic recovery.
+Native metadata support was inspected in Codex `0.155.0-alpha.9.2`; a ready
+local-tool setup was user-confirmed in one Ubuntu task, not on every version.
+No tool result by itself proves detached-worker survival, comment delivery or
+automatic recovery.
 
 The CLI at `../../runtime/cli.mjs` remains available for legacy queued helpers
 and maintenance on an explicitly host-approved execution path. Its pure `digest`

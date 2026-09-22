@@ -46,8 +46,11 @@ SessionStart hook before listening. The installer returning successfully, or its
 fresh Ubuntu installation of 0.4.0 confirmed the separate login step is needed.
 The user then confirmed sign-in and native hook trust; a screenshot showed
 `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log were
-subsequently verified independently. Native sandbox failures blocked listener
-setup; comment delivery, plan lifecycle and restart recovery remain unproven. See
+subsequently verified independently. Native sandbox failures blocked 0.4.0 CLI
+listener setup. With the 0.5.0 candidate, the user confirmed local-tool discovery,
+`info` and ready setup in the same task after a plugin enable-switch refresh;
+no listener was started. Comment delivery, plan lifecycle and restart recovery
+remain unproven in that trial. See
 [Codex MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands).
 
 For a separately approved, published listing available to the intended customer:
@@ -73,7 +76,10 @@ The 0.5.0 candidate runs setup and detached-worker launch through this local
 stdio MCP tool on the host. Native per-call metadata supplies the actual task
 and workspace; missing metadata fails closed before listening. The model cannot
 choose a task, executable, data directory or environment. If the tool is missing
-after an update, reload the plugin through Codex and rediscover it. Preserve the
+after an update on desktop build 26.915.31945, use the
+[bounded plugin enable-switch refresh](../plugins/unpaged-codex/README.md#missing-local-review-tool-after-an-update),
+then rediscover it in the same task and run `info` followed by `doctor`. This is
+conditional update recovery, not a routine fresh-install step. Preserve the
 same profile and existing binding; do not prescribe SQLite grants, copied state,
 repeated reinstalls or all-access mode. See the
 [skill's native tool contract](../plugins/unpaged-codex/skills/review-plan/SKILL.md#runtime-and-tools).
@@ -113,7 +119,7 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified | Listener setup is blocked in the Ubuntu trial; comment delivery, lifecycle and recovery remain unproven; public-directory availability is separate |
+| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified; same-task local-tool discovery and ready setup with the 0.5.0 candidate are user-confirmed | Listening has not started in the Ubuntu trial; comment delivery, lifecycle and recovery remain unproven; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
 | Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup and canvas evidence described above | A published connection or verified listener, delivery, lifecycle and recovery results for the Ubuntu trial |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |

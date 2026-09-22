@@ -234,8 +234,14 @@ uses a per-command PID namespace and fresh
 `/proc`: a detached child does not survive command completion, and host PIDs
 cannot be checked safely from there. Filesystem/network grants do not remove
 this boundary. The primary tool flow needs no SQLite-file grants, copied native
-state, alternate profile or all-access workaround. Missing tools after an update
-require native plugin reload and rediscovery; missing metadata blocks listening.
+state, alternate profile or all-access workaround. For missing tools after an
+update, the [bounded plugin refresh](README.md#missing-local-review-tool-after-an-update)
+on desktop build 26.915.31945 writes only plugin enablement with
+`reloadUserConfig: true`; the native host clears plugin/skill caches, refreshes
+loaded tasks and schedules MCP startup. Saved hook trust, sign-in and review
+storage are unchanged. Same-task local-tool discovery and ready setup were
+user-confirmed on Ubuntu; worker survival and delivery remain untested there.
+Missing metadata still blocks listening.
 
 The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
 `4607249e430dac1c961df4dc615beae88e33cec8`:
@@ -244,6 +250,8 @@ The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
 [workspace metadata](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/mcp_tool_call.rs#L818),
 [environment allowlist](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/utils.rs#L17),
 [MCP process cleanup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/stdio_server_launcher.rs#L410),
+[loaded-task config refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/app-server/src/request_processors/config_processor.rs#L172),
+[session MCP refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/session/mod.rs#L2038),
 and [Linux namespace setup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/linux-sandbox/src/bwrap.rs#L332).
 Public [MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) supports
 local stdio and environment forwarding. The task/workspace metadata is a native

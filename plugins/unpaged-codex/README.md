@@ -31,9 +31,11 @@ installed this package from GitHub, verified its files and discovered its bundle
 direct MCP server as `not_logged_in`. In a later fresh Ubuntu setup with 0.4.0,
 the user confirmed explicit sign-in and native hook trust, and a screenshot
 showed `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log
-were independently verified. Listener setup then hit native sandbox failures;
-comment delivery, the plan lifecycle and restart recovery remain unproven for
-that trial. The
+were independently verified. The 0.4.0 CLI listener setup hit native sandbox
+failures. With the 0.5.0 candidate, the user confirmed local-tool discovery,
+`info` and a ready `doctor` result in that same task after the bounded refresh
+below. No listener was started; comment delivery, the plan lifecycle and restart
+recovery remain unproven for that trial. The
 [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
@@ -90,8 +92,9 @@ commands or paths. Codex's native child may initialize its own runtime storage;
 this no longer depends on granting that storage to an agent command sandbox.
 The current profile is preserved through `CODEX_HOME` forwarding. If native
 metadata or the local tool is unavailable, listening remains blocked before a
-key is minted. After an update, reload the plugin through Codex and rediscover
-its tools; repeated installation is not a repair procedure.
+key is minted. For an absent tool after an update, use the
+[bounded refresh below](#missing-local-review-tool-after-an-update); repeated
+installation is not a repair procedure.
 
 For a Codex binary outside the standard locations and launch `PATH`, set
 `UNPAGED_CODEX_PATH` to its absolute path in the environment that launches Codex.
@@ -110,10 +113,25 @@ that boundary. No SQLite-file grants, copied state, alternate profile or
 all-access mode are part of the normal customer flow. Preserve an existing
 binding and report a blocker rather than guessing worker ownership.
 
-The local-tool path is a 0.5.0 candidate, not an installed Linux success claim.
-Verify worker survival, an authenticated poll, actual comment delivery and native
-restart recovery separately. The historical Ubuntu evidence below describes the
-0.4.0 CLI failure, not a failed or passing trial of this new path.
+The local-tool path is a 0.5.0 candidate. Its Ubuntu setup result is user-reported;
+worker survival, an authenticated poll, actual comment delivery and native
+restart recovery remain separate, untested gates in that trial. See the
+[dated evidence](../../docs/codex-repository-install-trial-2026-09-20.md#local-review-tool-candidate--september-22-2026).
+
+### Missing local review tool after an update
+
+If the updated plugin is installed but the same task cannot discover its local
+review tool, desktop build **26.915.31945** supports this bounded refresh: open
+**Plugins → Plugins tab → Unpaged for Codex**, turn the plugin enable switch
+off, wait for the update to finish, then turn it on. Return to the same task,
+rediscover the tool, and run `info` followed by `doctor`. This refreshes loaded
+tasks and plugin configuration without uninstalling or changing saved hook trust,
+sign-in or review storage. It was user-confirmed in the Ubuntu trial.
+
+Use this once for a missing tool after an update, not as a normal fresh-install
+step. The **MCPs** tab in this build has no Restart control for plugin servers.
+If the tool remains absent, report the blocker and preserve the canvas and
+existing binding; do not loop through toggles, reinstalls or app restarts.
 
 Repository marketplace distribution is separate from publication in OpenAI's
 public Plugins Directory. That directory route needs a reviewed registration,

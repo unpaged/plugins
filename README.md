@@ -41,9 +41,10 @@ registration ID or artifact build is required.
 
 The agent checks setup through the bundled local `unpaged_review` server's
 `review` tool before creating a listener key. If that tool is absent after an
-update, reload the plugin through Codex and rediscover it. Do not use SQLite
-file grants or repeated reinstalls as the normal setup flow. A ready setup
-check confirms hook configuration; it does not prove listening or recovery.
+update, follow the [bounded plugin refresh](plugins/unpaged-codex/README.md#missing-local-review-tool-after-an-update)
+and rediscover it. This is update recovery, not a fresh-install requirement. Do
+not use SQLite file grants or repeated reinstalls as the normal setup flow. A
+ready setup check confirms hook configuration; it does not prove listening or recovery.
 
 **Installation smoke passed; full workflow pending:** a [fresh CLI trial](docs/codex-repository-install-trial-2026-09-20.md)
 installed the GitHub package and discovered its bundled server as not signed in.
@@ -51,8 +52,10 @@ A later user-reported fresh Ubuntu installation of 0.4.0 confirmed that the
 explicit login command is required. The user confirmed sign-in and native hook
 trust; a screenshot showed `visual-plan` and `review-plan` loading. A PROPOSED
 canvas and Decision log were independently verified. Native sandbox failures in the 0.4.0 CLI flow
-blocked listener setup; comment delivery, the plan lifecycle and restart
-recovery remain unproven for that trial.
+blocked listener setup. With the 0.5.0 candidate, the user subsequently confirmed
+local-tool discovery, `info` and a ready `doctor` result in the same task after
+a plugin enable-switch refresh. No listener was started; comment delivery, the
+plan lifecycle and restart recovery remain unproven for that trial.
 The successful [earlier pilot](docs/codex-installed-trial-2026-09-19.md)
 used a different registered-connection artifact. The [readiness runbook](docs/codex-connection-readiness.md)
 keeps those results and the remaining release gates separate.
@@ -62,7 +65,7 @@ keeps those results and the remaining release gates separate.
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
-| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Listener setup remains blocked in that trial. |
+| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup with the 0.5.0 candidate is user-confirmed; listening and recovery remain untested in that trial. |
 
 ## Support
 

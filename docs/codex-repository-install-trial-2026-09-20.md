@@ -107,8 +107,8 @@ independent MCP read from the maintainer's task confirmed the canvas's
 remains user-reported. Visual inspection in the VM remained blocked by the
 browser's sign-in requirement.
 
-**Listener setup is blocked.** No listener was started and no listener key was
-minted. The installed helper's `doctor` check in the affected task returned
+**The 0.4.0 CLI listener setup was blocked.** No listener was started and no
+listener key was minted. The installed helper's `doctor` check in the affected task returned
 `query_failed` / `early_exit`. Approved read-only guest diagnostics independently
 verified Node `24.21.0`, shell Codex `0.155.1`, and desktop-bundled Codex
 `0.155.0-alpha.9.2`. They also verified the raw Codex SQLite initialization error
@@ -125,7 +125,8 @@ inventory. It does not repair the failing task commands or prove listener
 startup, comment delivery or recovery. No SQLite or trust records were edited,
 and no listener key or worker was created by these diagnostics.
 
-The repository route remains **PARTIAL**, with listener setup **BLOCKED**.
+At this stage the repository route was **PARTIAL**, with CLI listener setup
+**BLOCKED**.
 Comment delivery, the full plan lifecycle and restart recovery remain unproven
 for the Ubuntu trial. These observations concern 0.4.0 and are historical
 evidence for its CLI launch path, not a result for the new local-tool candidate.
@@ -138,8 +139,27 @@ per-call task/workspace metadata. Source inspection of native Codex
 `0.155.0-alpha.9.2` establishes the launch and metadata mechanism; it does not
 establish installed Linux behavior. The SessionStart recovery hook is unchanged.
 
-No successful installed Ubuntu local-tool setup, listener survival, comment
-delivery or restart-recovery trial is added by this documentation update. The
-original canvas, binding/credential evidence and diagnostics above are not
-reinterpreted as proof of the new route. Keep the full workflow pending until
-those observations are recorded separately.
+The installed candidate for the following observation was commit
+`fddbe96200ea4098e60299b95f5c00742bada64e` (version 0.5.0), on desktop build
+`26.915.31945`. These results do not establish behavior for later PR revisions.
+
+The same Ubuntu task initially could not discover the local tool after the
+update. The user then turned **Unpaged for Codex** off and on through the
+**Plugins → Plugins tab** enable switch. In that same task, the user reported:
+
+- Discovery of `mcp__unpaged_review__review`.
+- A successful `info` operation reporting Node `24.21.0` and the existing
+  profile's Unpaged data directory. Private paths are omitted here.
+- `doctor` returning `setupReady: true`, `ready` / `current_hook_trusted`,
+  an enabled and trusted hook, and `launchMethod: "native_mcp"`.
+
+These are **user-reported live setup results**. The native refresh mechanism was
+independently checked in the same desktop build's bundled code and native Codex
+source: toggling plugin enablement clears plugin/skill caches and refreshes
+loaded tasks without uninstalling or changing saved hook trust, sign-in or
+review storage. No listener was started and no listener key was minted.
+
+The repository route remains **PARTIAL**. Local-tool setup is user-confirmed;
+detached-worker survival, authenticated polling, comment delivery, plan
+lifecycle and native restart recovery remain **NOT RUN** for this candidate.
+The historical 0.4.0 failures above are not reinterpreted as new-route results.
