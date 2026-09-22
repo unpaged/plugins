@@ -7,8 +7,8 @@ It is an experimental integration, with the recovery boundaries below.
 ## Requirements
 
 - macOS or Linux. The 0.5.0 candidate uses a native local MCP tool for setup,
-  bookkeeping and detached-worker launch. Installed Linux delivery and recovery
-  still need verification. Windows is not a supported pilot host.
+  bookkeeping and detached-worker launch. Installed Linux feedback completion
+  and recovery still need verification. Windows is not a supported pilot host.
 - Node.js 24 or newer, available to Codex, its local MCP servers and hooks.
   Node 24 is the tested support floor; no npm dependencies are required.
 - Codex with local stdio MCP, native per-call task/workspace metadata, the
@@ -34,8 +34,10 @@ showed `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision l
 were independently verified. The 0.4.0 CLI listener setup hit native sandbox
 failures. With the 0.5.0 candidate, the user confirmed local-tool discovery,
 `info` and a ready `doctor` result in that same task after the bounded refresh
-below. No listener was started; comment delivery, the plan lifecycle and restart
-recovery remain unproven for that trial. The
+below. The installed `fddbe96` candidate subsequently polled successfully, and
+read-only VM inspection verified a real human comment reaching and waking the
+same task. The canvas edit and reply, plan lifecycle and restart recovery remain
+unproven for that trial; later PR revisions have not been installed there. The
 [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
@@ -113,10 +115,22 @@ that boundary. No SQLite-file grants, copied state, alternate profile or
 all-access mode are part of the normal customer flow. Preserve an existing
 binding and report a blocker rather than guessing worker ownership.
 
-The local-tool path is a 0.5.0 candidate. Its Ubuntu setup result is user-reported;
-worker survival, an authenticated poll, actual comment delivery and native
-restart recovery remain separate, untested gates in that trial. See the
+The local-tool path is a 0.5.0 candidate. On installed commit `fddbe96`, the user
+reported a live worker and successful polls 30.4 seconds apart. Read-only VM
+inspection subsequently confirmed a connected polling worker and a real human
+comment waking the same task. Completed feedback handling and native restart
+recovery remain unverified. See the
 [dated evidence](../../docs/codex-repository-install-trial-2026-09-20.md#local-review-tool-candidate--september-22-2026).
+
+Repository marketplace distribution is separate from publication in OpenAI's
+public Plugins Directory. That directory route needs a reviewed registration,
+explicit publication and intended-customer availability. Neither a repository
+catalog nor a working personal registration establishes a public-directory listing.
+
+Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
+[installation](https://learn.chatgpt.com/docs/plugins),
+[MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands), and
+[hook trust](https://learn.chatgpt.com/docs/hooks).
 
 ### Missing local review tool after an update
 
@@ -132,16 +146,6 @@ Use this once for a missing tool after an update, not as a normal fresh-install
 step. The **MCPs** tab in this build has no Restart control for plugin servers.
 If the tool remains absent, report the blocker and preserve the canvas and
 existing binding; do not loop through toggles, reinstalls or app restarts.
-
-Repository marketplace distribution is separate from publication in OpenAI's
-public Plugins Directory. That directory route needs a reviewed registration,
-explicit publication and intended-customer availability. Neither a repository
-catalog nor a working personal registration establishes a public-directory listing.
-
-Official references: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
-[installation](https://learn.chatgpt.com/docs/plugins),
-[MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands), and
-[hook trust](https://learn.chatgpt.com/docs/hooks).
 
 ## Advanced: build for a registered connection
 
@@ -178,9 +182,10 @@ Use the native update flow for the marketplace from which it was installed.
 Registered-pilot users first regenerate and validate their registered artifact;
 repository users keep the bundled direct MCP route. Do not switch connection
 routes as part of an ordinary update.
-Reload the plugin through Codex so its current local tools are available, then
-run the local `doctor` operation again. Do not repeat installation to repair
-tool discovery. Codex requires renewed approval
+Run the local `doctor` operation again after updating. If the same task cannot
+discover the updated plugin's local review tool, use the
+[bounded refresh above](#missing-local-review-tool-after-an-update); do not
+repeat installation to repair tool discovery. Codex requires renewed approval
 when the hook definition changes. Keep the definition stable for ordinary
 runtime/skill updates; do not bypass approval for a deliberate hook change.
 An existing receiver and its key, task, phase and receipts remain intact while

@@ -157,9 +157,39 @@ These are **user-reported live setup results**. The native refresh mechanism was
 independently checked in the same desktop build's bundled code and native Codex
 source: toggling plugin enablement clears plugin/skill caches and refreshes
 loaded tasks without uninstalling or changing saved hook trust, sign-in or
-review storage. No listener was started and no listener key was minted.
+review storage. At this setup checkpoint, no listener had been started and no
+listener key had been minted.
 
-The repository route remains **PARTIAL**. Local-tool setup is user-confirmed;
-detached-worker survival, authenticated polling, comment delivery, plan
-lifecycle and native restart recovery remain **NOT RUN** for this candidate.
-The historical 0.4.0 failures above are not reinterpreted as new-route results.
+### Listener startup and human comment delivery
+
+The same task subsequently armed its listener through the local tool. The user
+reported `workerAlive: true`, `connectionState: connected`, and
+`lastSuccessfulPollAt` advancing from **05:49:04.576Z** to **05:49:34.976Z** on
+September 22: two successful polls **30.4 seconds** apart. The canvas remained
+**PROPOSED**, with no implementation. A later read-only VM inspection
+independently confirmed worker `551380` and a connected `poll-v1` binding.
+
+A human then posted a comment asking the agent to add a monthly-review note
+while keeping the canvas PROPOSED. Read-only inspection of the VM's stored event
+and task records established the following chronology on September 22, in UTC:
+
+| Event | Time |
+| --- | --- |
+| Human comment created | `09:03:59.075Z` |
+| Listener received the event | `09:04:25.464Z` |
+| Owning task woke | `09:04:27.413Z` |
+| Event processing began | `09:04:41.861Z` |
+
+The listener received the comment after **26.4 seconds**, and the same task woke
+after **28.3 seconds**, without a follow-up user message in that task. This
+establishes polling delivery and automatic wakeup for the installed `fddbe96`
+candidate. It does not establish completion: a canvas mutation was issued at
+`09:05:27Z`, but no result had been observed by `09:12Z`; neither a completed edit
+nor a reply is counted as verified.
+
+The repository route remains **PARTIAL**. Local-tool setup, worker survival,
+successful polling and human-comment wakeup now have the evidence above.
+Completed feedback handling, plan lifecycle, an update to the final candidate
+and native restart recovery remain unverified. These observations do not cover
+later PR revisions, and the historical 0.4.0 failures above are not reinterpreted
+as new-route results.
