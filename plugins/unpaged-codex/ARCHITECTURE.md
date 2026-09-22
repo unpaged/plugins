@@ -3,8 +3,9 @@
 Claude parity baseline: `34ebef185dcca4230b7690bfca791904624c6e41` in the
 Unpaged plugin repository, inspected on 2026-09-19.
 The implementation lives in a separate `plugins/unpaged-codex` package.
-Version 0.4.0 consumes the server's additive HTTP polling endpoint; the Claude
-package is unchanged by this Codex release. The Codex workflow includes Decision
+Version 0.4.0 introduced HTTP polling. The 0.5.0 candidate adds a local stdio
+MCP control surface for host-side setup and detached-worker launch; the Claude
+package and SessionStart hook definition are unchanged. The Codex workflow includes Decision
 logs and as-built records in the durable review adapter.
 Canvas approval is separate from the task user's permission to implement.
 
@@ -19,13 +20,26 @@ flowchart LR
   D --> Q[Codex queue: exact task ID]
   Q --> A[Assigned Codex task]
   A --> M[Unpaged MCP: read, CAS edit, reply]
-  A --> D
+  A --> C[Local review MCP: fixed operations]
+  C --> D
+  C -->|Host launch| W
 ```
 
 The receiver transports routing facts. It does not interpret comments or hold
 the user's OAuth credentials. The agent reads content and changes the board only
-through remote MCP. The local CLI is bookkeeping for the already-authorized
-review, not a command interface exposed to collaborators.
+through remote MCP. The local `unpaged_review` server exposes one `review`
+tool for already-authorized bookkeeping, never arbitrary commands. Its input is
+`{ operation, documentId?, eventId?, payload? }`; the operation set is fixed.
+The router derives the task from native `_meta.threadId` and the workspace from
+`_meta["codex/sandbox-state-meta"].sandboxCwd`, rejects missing/invalid context,
+and never accepts caller task, executable, environment or path overrides.
+Status is limited to the calling task. The local tool supplements stored state
+with `workerAlive`: true only when the current host PID identity matches, false
+when missing or replaced, and null when inspection is unavailable. It does not
+turn a stored successful poll into proof of current delivery.
+Existing CLI functions and ledger rules
+remain the implementation of those operations; legacy helper entry points stay
+available for approved host maintenance and retained queued work.
 
 SQLite transactions serialize event claims across local processes; WAL and FULL
 synchronization save work before queue side effects. Each board has one immutable
@@ -150,24 +164,127 @@ task reopen/resume loads the queue; a trusted SessionStart hook repairs the
 receiver. Stop is a turn boundary and therefore is not wired to listener teardown.
 See [official Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
-`doctor` queries the verified native binary through a temporary public
+The bundled `.mcp.json` contains the remote `unpaged` HTTP connection and a
+local `unpaged_review` stdio server. The local server runs `node runtime/mcp.mjs`
+with package-relative `cwd: "."` and explicitly forwards `CODEX_HOME` and
+`UNPAGED_CODEX_PATH`; native stdio defaults omit these variables. The optional
+binary override comes from the trusted host launch environment and still passes
+the resolver's executable, version and queue checks. Model arguments cannot set
+it. The server keeps the same data-home rule as
+the unchanged SessionStart hook. The model cannot choose another profile or
+ledger. A registered-connection artifact replaces only the remote connection;
+it must retain the local review server.
+
+The native stdio process is owned by the task's MCP runtime. It uses a direct
+host launch, not the agent command's bubblewrap wrapper. The tool advertises
+`codex/sandbox-state-meta` and requires the current native task/workspace metadata
+on every call; process cwd is the package root, not the reviewed workspace.
+Native connections may be retained across refreshes, so process startup alone
+is not an authority or current-workspace check. Local tools perform no arbitrary
+repository reads or writes: host access is limited to fixed adapter operations,
+private review state, the canonical listener endpoint and verified native Codex
+commands. These limits are enforced by the adapter input contract, not by
+claiming that the host process inherits the agent's filesystem sandbox.
+
+Tool discovery advertises a compact object with `operation`, `documentId`,
+`eventId` and a union of payload fields. Strict per-operation required fields,
+allowed fields and validation remain separate inside the adapter. The native
+Codex schema size policy starts lossy compaction above 5,000 normalized bytes;
+the earlier repeated root `oneOf` can collapse to `{}`, leaving an unreadable
+argument declaration. The advertised schema stays below 4,000 raw bytes with
+headroom for normalization. Initialization also returns essential operation
+inputs and review rules as MCP `instructions`, exposed by this Codex build as
+the namespace description. Digest, arm and event handling therefore do not
+depend on reading a skill file through the agent command sandbox. The complete
+review-plan skill remains the detailed protocol; an unavailable file is never
+permission to invent evidence or bypass an unclear recovery gate.
+
+Tool payloads are limited to 2 MiB, with a further 256 KiB bound for the native
+request envelope. A frame beyond that combined limit is never dispatched, so
+that request makes no local mutation. The server emits a constant protocol
+error, discards through the next newline and continues serving later requests.
+It does not parse a request ID from the oversized frame: the error has a null
+ID, so the host may time out that tool call. Do not report success or retry a
+mutation automatically; inspect the relevant status or receipts first.
+
+On Node versions below 24, the server still supports initialization and tool
+discovery. Every review operation returns `node_24_required` with guidance to
+make Node 24 or newer available in Codex's launch environment. The native CLI
+and SQLite dependency closure is loaded only when an operation executes, so
+an older host can receive this diagnosis without loading unsupported storage.
+
+`doctor` calls the verified native binary through a bounded temporary public
 `app-server --stdio` connection: initialize, initialized, then `hooks/list` for
-the current folder. It starts no task, invokes no hook, changes no trust, and
-does not open the ledger. Output and duration are bounded, the owned query
-process is terminated, and only sanitized Unpaged setup facts leave the helper.
-Select the current installed source path before checking ambiguity, so another
-marketplace's copy cannot block this one. Readiness requires the exact current installed SessionStart command and matcher,
-enabled and trusted. Missing, disabled, modified, untrusted, unsupported and
-uninspectable states fail closed with one appropriate next action. Folder-wide
-load errors/warnings produce `configuration_problem` with a folder-configuration
-action, not misleading Unpaged approval advice. Native warnings are unstructured
-strings and are not attributed to a plugin by guessing their text. `arm` repeats
-the check before opening/migrating state or binding; the skill checks before key
-creation and revokes a newly minted key if arming subsequently fails.
+the metadata-derived current folder. It starts no task, invokes no hook, changes
+no trust, and does not open the ledger. Native startup can initialize SQLite
+storage in the current profile; running this query from local MCP avoids the
+nested agent-command filesystem restriction. An exact native SQLite failure
+marker produces `query_failed` / `native_state_initialization_failed`; raw
+stderr and state paths are never returned. Other early exits stay unclassified.
+No storage, trust or permission repair is performed automatically.
+
+Select the current installed source path before checking ambiguity. Readiness
+requires the exact installed SessionStart command and matcher, enabled and
+trusted. Missing, disabled, modified, untrusted, unsupported and uninspectable
+states fail closed. Folder-wide loading errors/warnings produce
+`configuration_problem`, not an invented Unpaged Trust requirement. `arm`
+repeats the check before opening/migrating state or binding; the skill checks
+before key creation and revokes a newly minted key if arming fails.
+
+Detached workers retain their private runtime and redirect all standard streams.
+On the inspected Linux implementation, native MCP cleanup targets the server's
+process group; a detached worker has its own group. The recovery hook can restore
+an existing active binding after task reopen. Neither source inspection nor an
+MCP setup result proves installed worker survival, queue delivery or restart
+recovery; the installed `fddbe96` evidence below covers the first two, and
+restart recovery remains a live acceptance gate for 0.5.0. No extra coordinator,
+file mailbox, local socket service or UserPromptSubmit hook is introduced.
+
+Legacy CLI bookkeeping, setup and worker operations must use an explicitly
+approved host path. Pure `digest` and `info` return before native queries, ledger
+access or process inspection, so render-only work can retain its digest check
+in an ordinary sandbox when local MCP is unavailable. Ordinary Linux `bwrap`
+uses a per-command PID namespace and fresh
+`/proc`: a detached child does not survive command completion, and host PIDs
+cannot be checked safely from there. Filesystem/network grants do not remove
+this boundary. The primary tool flow needs no SQLite-file grants, copied native
+state, alternate profile or all-access workaround. For missing tools after an
+update, the [bounded plugin refresh](README.md#missing-local-review-tool-after-an-update)
+on desktop build 26.915.31945 writes only plugin enablement with
+`reloadUserConfig: true`; the native host clears plugin/skill caches, refreshes
+loaded tasks and schedules MCP startup. Saved hook trust, sign-in and review
+storage are unchanged. Same-task local-tool discovery and ready setup were
+user-confirmed on Ubuntu. The installed `fddbe96` candidate subsequently passed
+worker survival, polling and real-comment wakeup; remote readback verified the
+requested edit and single reply, and the user confirmed event completion. Later
+candidate pickup, native instruction visibility and restart recovery remain
+unverified. Delivery took 26.4 seconds and wakeup 28.3 seconds, but the later
+canvas write call remained unanswered for at least 3 h 17 min for an unestablished
+reason; the reply arrived about 3 h 29 min after the comment. This does not
+establish timely completion of feedback handling. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
+Missing metadata still blocks listening.
+
+The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
+`4607249e430dac1c961df4dc615beae88e33cec8`:
+[host stdio launch](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/stdio_server_launcher.rs#L262),
+[task ID injection](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/mcp_tool_call.rs#L511),
+[workspace metadata](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/mcp_tool_call.rs#L818),
+[environment allowlist](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/utils.rs#L17),
+[MCP process cleanup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/stdio_server_launcher.rs#L410),
+[loaded-task config refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/app-server/src/request_processors/config_processor.rs#L172),
+[session MCP refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/session/mod.rs#L2038),
+[schema compaction](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/tools/src/json_schema/compaction.rs#L16),
+[native server instructions](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/codex-mcp/src/rmcp_client.rs#L838),
+and [Linux namespace setup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/linux-sandbox/src/bwrap.rs#L332).
+Public [MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) supports
+local stdio and environment forwarding. The task/workspace metadata is a native
+extension, not a portable MCP guarantee. The older CLI's 0.153.1 version floor
+does not establish this new capability; require metadata and fail closed.
 
 Setup evidence is persisted configuration, not desktop in-memory state or a
-live recovery receipt. Queued work keeps its retained runtime; setup inspection
-uses the current installed plugin. Approval failure does not tear down an
+live recovery receipt. Queued work keeps its retained runtime; compatible
+operations can use the current local tool without changing their event identity
+or receipts. Setup inspection uses the current installed plugin. Approval failure does not tear down an
 existing receiver or erase its binding. Changed hook definitions require native
 reapproval. On the tested Codex 0.155.0-alpha.9.2 build, read-only native hash
 probes matched the raw `${PLUGIN_ROOT}` command template before expansion;
@@ -217,7 +334,8 @@ That is an explicit release gate, not an implicit expansion of this plugin patch
 
 New receivers run from a retained, content-addressed copy under
 `<data-directory>/runtimes/<hash>/`, containing the runtime dependency closure
-and all three skills. Queue prompts reference its CLI and review skill. Copies are
+and all three skills. New queue prompts prefer the local review tool and retain
+CLI/skill references for compatible legacy host paths. Copies are
 published atomically, checked before reuse, and never automatically removed;
 plugin cache replacement cannot invalidate a retained queued operation. Tests
 remove the source cache and continue from the retained copy.
@@ -262,7 +380,10 @@ Customer setup and recovery acceptance matrix:
 
 | Scenario | Required observation |
 | --- | --- |
-| Fresh install, untrusted hook | One native Trust action; no key, binding or receiver before readiness. |
+| Fresh install, untrusted hook | Local tools are discoverable; one native Trust action; no key, binding or receiver before readiness. |
+| Missing task/workspace metadata | Local operation refuses; no inferred task/path, key mint or fallback sandbox launch. |
+| Local tool reload or restart | Same task/profile and stored receipts; no duplicate worker or implicit key replacement. |
+| Custom Codex home | Local MCP, setup child, receiver and SessionStart use the same profile and ledger. |
 | Changed hook after update | Old approval fails; existing key, task, phase and receipts survive; exact new definition requires Trust. |
 | Unchanged trusted hook update | Ready without another approval prompt; installed update preserves existing review state. |
 | Native restart and task reopen | Receiver recovers automatically with the same binding and phase; a real comment gets one verified reply. |
@@ -290,7 +411,7 @@ reopen, then handled a fresh human comment with one read-only reply. No manual
 listener start or wake was used for that recovery/comment trial. It was not a
 clean-profile installation or a full 0.3.1 lifecycle rerun. Both versions used
 sockets; those observations do not verify the installed 0.4.0 polling receiver,
-its handover or its recovery after a native restart.
+its handover, or the 0.5.0 local-tool launch and recovery after a native restart.
 
 Release readiness still requires the [maintainer runbook's remaining gates](../../docs/codex-connection-readiness.md):
 public customer availability, clean-profile installation/sign-in, controlled

@@ -25,15 +25,20 @@ async function component(root, path) {
   return target;
 }
 
-async function validateUnpagedPackage(source, manifest) {
+export async function validateUnpagedPackage(source, manifest) {
   assert.ok(manifest.mcpServers, "Unpaged must declare its bundled MCP configuration");
   assert.equal(manifest.apps, undefined, "repository Unpaged must not bundle a registered connection");
   const connection = await json(await component(source, manifest.mcpServers));
-  assert.deepEqual(Object.keys(connection.mcpServers ?? {}), ["unpaged"],
-    "Unpaged must bundle exactly its named MCP server");
+  assert.deepEqual(Object.keys(connection.mcpServers ?? {}).sort(), ["unpaged", "unpaged_review"],
+    "Unpaged must bundle exactly its remote server and local review adapter");
   assert.equal(connection.mcpServers.unpaged.type, "http", "Unpaged MCP transport must be http");
   assert.equal(connection.mcpServers.unpaged.url, "https://mcp.unpaged.io/mcp",
     "Unpaged MCP URL must be the documented production endpoint");
+  assert.deepEqual(connection.mcpServers.unpaged_review, {
+    type: "stdio", command: "node", args: ["runtime/mcp.mjs"], cwd: ".", env_vars: ["CODEX_HOME", "UNPAGED_CODEX_PATH"]
+  }, "Unpaged local adapter must use the fixed package entry point and profile environment");
+  await component(source, "./runtime/mcp.mjs");
+  await component(source, "./runtime/control.mjs");
   const hooks = await json(await component(source, "./hooks/hooks.json"));
   assert.deepEqual(Object.keys(hooks.hooks ?? {}), ["SessionStart"],
     "Unpaged must declare only its recovery SessionStart hook");

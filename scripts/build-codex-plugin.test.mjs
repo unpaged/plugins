@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { buildPlugin } from "./build-codex-plugin.mjs";
 
@@ -24,9 +24,25 @@ test("registered artifact has one connection and executes the packaged helper wi
   await buildPlugin({ connectionId, output });
   const manifest = JSON.parse(await readFile(join(output, ".codex-plugin/plugin.json"), "utf8"));
   assert.equal(manifest.apps, "./.app.json");
-  assert.equal(manifest.mcpServers, undefined);
+  assert.equal(manifest.mcpServers, "./.mcp.json");
   assert.deepEqual(JSON.parse(await readFile(join(output, ".app.json"), "utf8")), { apps: { unpaged: { id: connectionId } } });
-  await assert.rejects(lstat(join(output, ".mcp.json")), { code: "ENOENT" });
+  const local = JSON.parse(await readFile(join(output, ".mcp.json"), "utf8"));
+  assert.deepEqual(local, { mcpServers: { unpaged_review: {
+    type: "stdio", command: "node", args: ["runtime/mcp.mjs"], cwd: ".", env_vars: ["CODEX_HOME", "UNPAGED_CODEX_PATH"]
+  } } });
+  const hostEnv = { CODEX_HOME: join(root, "host-profile"), UNPAGED_CODEX_PATH: process.execPath };
+  const forwardedEnv = Object.fromEntries(local.mcpServers.unpaged_review.env_vars.map((name) => [name, hostEnv[name]]));
+  const { findCodex } = await import(pathToFileURL(join(output, "runtime/cli.mjs")).href);
+  const probes = [];
+  const selected = await findCodex(undefined, forwardedEnv, async (path, args) => {
+    probes.push({ path, args });
+    return { stdout: args[0] === "--version" ? "codex-cli 0.155.1" : "--thread ID --message MESSAGE" };
+  });
+  assert.equal(selected, await realpath(process.execPath));
+  assert.deepEqual(probes, [
+    { path: selected, args: ["--version"] }, { path: selected, args: ["queue", "--help"] }
+  ]);
+  assert.ok((await readFile(join(output, "runtime/mcp.mjs"), "utf8")).includes("serve"));
   await assert.rejects(lstat(join(output, "runtime/cli.test.mjs")), { code: "ENOENT" });
   for (const name of ["visual-plan", "review-plan", "as-built"]) {
     assert.ok((await readFile(join(output, "skills", name, "SKILL.md"), "utf8")).startsWith("---\n"));

@@ -81,12 +81,37 @@ test("Unpaged requires its declared direct server, transport and production endp
   ];
   for (const value of invalid) {
     const root = await fixture(t);
+    if (value.mcpServers?.unpaged) {
+      const current = JSON.parse(await readFile(join(root, "plugins/unpaged-codex/.mcp.json"), "utf8"));
+      value.mcpServers.unpaged_review = current.mcpServers.unpaged_review;
+    }
     await writeFile(join(root, "plugins/unpaged-codex/.mcp.json"), JSON.stringify(value));
     await assert.rejects(validateCodexMarketplace(root), /Unpaged (must bundle|MCP)/);
   }
   const root = await fixture(t);
   await edit(root, manifest, (value) => { delete value.mcpServers; });
   await assert.rejects(validateCodexMarketplace(root), /must declare its bundled MCP/);
+});
+
+test("local review adapter cannot change its executable, profile, working folder or tool entry point", async (t) => {
+  for (const change of [
+    (value) => { delete value.mcpServers.unpaged_review; },
+    (value) => { value.mcpServers.unpaged_review.command = "sh"; },
+    (value) => { value.mcpServers.unpaged_review.cwd = "/tmp"; },
+    (value) => { value.mcpServers.unpaged_review.args = ["another-script.mjs"]; },
+    (value) => { value.mcpServers.unpaged_review.env = { CODEX_HOME: "/tmp/foreign-profile" }; },
+    (value) => { value.mcpServers.unpaged_review.env = { UNPAGED_CODEX_PATH: "/tmp/foreign-codex" }; },
+    (value) => { value.mcpServers.unpaged_review.env_vars = ["CODEX_HOME"]; },
+    (value) => { value.mcpServers.unpaged_review.env_vars = ["UNPAGED_CODEX_PATH"]; },
+    (value) => { value.mcpServers.unpaged_review.env_vars = []; }
+  ]) {
+    const root = await fixture(t);
+    await edit(root, "plugins/unpaged-codex/.mcp.json", change);
+    await assert.rejects(validateCodexMarketplace(root), /Unpaged (must bundle|local adapter)/);
+  }
+  const root = await fixture(t);
+  await rm(join(root, "plugins/unpaged-codex/runtime/mcp.mjs"));
+  await assert.rejects(validateCodexMarketplace(root), { code: "ENOENT" });
 });
 
 test("Unpaged requires a parseable recovery hook, its SessionStart command and helper", async (t) => {

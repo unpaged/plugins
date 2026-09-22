@@ -47,8 +47,11 @@ Repository operations here are read-only, such as `git status`, `git rev-parse`,
 `git merge-base`, `git log`, `git diff`, `git show`, and `gh pr view`. Treat user
 refs as data, safely quote them, reject option-shaped or ambiguous ranges, and
 read files from the resolved Git endpoints rather than a drifting working tree.
-Do not execute repository scripts. Trusted review-plan CLI calls below only
-record workflow state. Every canvas mutation uses Unpaged MCP; browser use is
+Do not execute repository scripts. Use review-plan's discovered local
+`unpaged_review` / `review` tool for digest, status and lifecycle bookkeeping.
+These operations never write canvas content. Native metadata supplies the task
+and workspace; never pass task IDs or paths to that tool. Follow review-plan's
+availability and legacy-helper rules if the current local tool is unavailable. Every canvas mutation uses Unpaged MCP; browser use is
 read-only rendered QA. If authentication or tools are unavailable, follow
 review-plan's recovery instructions rather than substituting a local document.
 
@@ -230,13 +233,13 @@ fresh revision. For a partial record on an active executing binding, or a new
 record on an active built binding, checkpoint the verified content digest and leave the phase
 and stamp unchanged. If the transition is blocked, report the completed record
 and the unchanged lifecycle accurately; never stamp BUILT to bypass the gate.
-For an active proposed/accepted binding, use review-plan's `submit` command to record the
+For an active proposed/accepted binding, use review-plan's `submit` operation to record the
 new content baseline and set the same status element to `**Status:** 📋 PROPOSED`.
 The new record is hashed content, so prior acceptance becomes historical and
 the new baseline needs fresh approval. For an unbound canvas, preserve its
 status. A stopped binding, including migrated legacy accepted bindings, also
 keeps its status and ledger untouched; do not run any lifecycle transition,
-resume, or arm command for this recording operation. In these cases report that
+resume, or arm operation for this recording request. In these cases report that
 the record documents inspected code without
 certifying an execution transition.
 Do not manufacture an `execute` instruction just to stamp a historical record.

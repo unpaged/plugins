@@ -1,18 +1,20 @@
 # Codex connection and visual-plan readiness
 
-Maintainer runbook, refreshed on September 20, 2026 after the Codex adapter and
-setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
+Maintainer runbook, setup guidance refreshed on September 22, 2026. The Codex
+adapter and setup checks merged in PRs #5 and #21. The [installed trial record](codex-installed-trial-2026-09-19.md)
 documents the observed 0.3.0 plan lifecycle and 0.3.1 setup, update and native
 recovery results. The runtime is on `main`; this runbook records release
 criteria and evidence, not another implementation. For current setup and use,
-follow the [Codex package README](../plugins/unpaged-codex/README.md).
+follow the [repository installation steps](../README.md#install-for-codex--preview)
+and the [Codex package README](../plugins/unpaged-codex/README.md) for usage.
 
 The local registered-connection pilot passed real comment review, explicit
 approval and implementation, partial/complete as-built records, native restart
 recovery, and a fresh post-recovery comment. This does not establish clean-profile
 installation/sign-in, OAuth expiry/revocation recovery, public availability,
 or unrestricted comment-identity and exactly-once guarantees. The matrices below
-keep those remaining gates visible; no new live trial is implied by this doc update.
+keep those remaining gates visible, with each result attributed to its host,
+version and scenario.
 
 The customer requirement is: install Unpaged through the native interface,
 sign in, review the startup-hook approval once, and continue working. A deliberate
@@ -30,21 +32,81 @@ the visual-plan skills, local receiver, hooks, or as-built workflow. Full
 Claude-equivalent visual planning requires the separate lifecycle and
 installed-host criteria below. Neither delivery gate substitutes for the other.
 
-For an approved, published listing available to the intended customer:
+For the current repository marketplace, use a supported Codex CLI in this order:
+
+```sh
+codex plugin marketplace add unpaged/plugins
+codex plugin add unpaged-codex@unpaged
+codex mcp login unpaged
+```
+
+Complete Unpaged sign-in through the explicit login command, then review the
+SessionStart hook before listening. The installer returning successfully, or its
+`ON_INSTALL` authentication policy, does not establish sign-in. A user-reported
+fresh Ubuntu installation of 0.4.0 confirmed the separate login step is needed.
+The user then confirmed sign-in and native hook trust; a screenshot showed
+`visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log were
+subsequently verified independently. Native sandbox failures blocked 0.4.0 CLI
+listener setup. With the 0.5.0 candidate, the user confirmed local-tool discovery,
+`info` and ready setup in the same task after a plugin enable-switch refresh.
+The installed `fddbe96` candidate then polled successfully and woke that same
+task on a real human comment. Remote readback verified exactly one requested
+monthly-review note and one agent reply, with the canvas still PROPOSED. The
+user confirmed successful event completion before VM shutdown; the durable
+receipt was not independently read. Delivery took 26.4 seconds and wakeup 28.3
+seconds, but the canvas write call remained unanswered for at least 3 h 17 min and the
+reply arrived about 3 h 29 min after the comment. The cause of the missing call result was
+not established, so timely feedback completion is not proven. The plan lifecycle,
+an update to the final candidate with its native instructions and restart recovery remain unverified
+in that trial. See the [dated trial evidence](codex-repository-install-trial-2026-09-20.md#listener-startup-and-human-comment-delivery) and
+[Codex MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands).
+
+For a separately approved, published listing available to the intended customer:
 
 1. Open the native Plugins directory and select the verified Unpaged listing.
 2. Install it and complete its requested service sign-in.
 3. Start a fresh task and verify the required Unpaged tools before doing work.
 
-For a listening visual plan, the current installed helper checks native setup
-before a listener key is created; `arm` repeats the check before opening state.
-When trust is missing or changed, give the user one action: **Settings → Hooks →
-From Plugins → Unpaged for Codex → Trust** on the hook row under **SessionStart**;
-**⌘,** opens Settings on macOS. Keep the hook enabled, then recheck. Other setup
-failures have their own action; a folder-wide configuration warning is not a
+For a listening visual plan, discover the current installed `unpaged_review`
+server's `review` tool and call `operation: "doctor"` before creating a listener
+key; `arm` repeats the check before opening state.
+When trust is missing or changed, give the user the action for their host: in the
+CLI, open `/hooks` and review and trust the Unpaged plugin's **SessionStart** hook;
+in the desktop app, use **Settings → Hooks → From Plugins → Unpaged for Codex →
+Trust** on that hook row. **⌘,** opens Settings on macOS. Keep the hook enabled,
+then recheck. See [native hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+Other setup failures have their own action; a folder-wide configuration warning is not a
 request to trust Unpaged again. Do not make log inspection, manual ledger repair,
 or repeated restarts part of customer setup. Render-only canvases skip this gate.
 See the [implemented setup check](../plugins/unpaged-codex/runtime/setup.mjs).
+
+The 0.5.0 candidate runs setup and detached-worker launch through this local
+stdio MCP tool on the host. Native per-call metadata supplies the actual task
+and workspace; missing metadata fails closed before listening. The model cannot
+choose a task, executable, data directory or environment. If the tool is missing
+after an update on desktop build 26.915.31945, use the
+[bounded plugin enable-switch refresh](../plugins/unpaged-codex/README.md#missing-local-review-tool-after-an-update),
+then rediscover it in the same task and run `info` followed by `doctor`. This is
+conditional update recovery, not a routine fresh-install step. Preserve the
+same profile and existing binding; do not prescribe SQLite grants, copied state,
+repeated reinstalls or all-access mode. See the
+[skill's native tool contract](../plugins/unpaged-codex/skills/review-plan/SKILL.md#runtime-and-tools).
+
+`doctor` starts a bounded temporary native app-server in the current profile;
+startup can initialize native storage even though the hook query changes no
+settings. A `native_state_initialization_failed` result from the local tool is
+a host setup blocker, not an instruction to grant database access. Preserve the
+canvas and report it. The earlier Ubuntu 0.4.0 sandbox failures remain historical
+evidence in the [trial record](codex-repository-install-trial-2026-09-20.md).
+
+Native local MCP launch and metadata were inspected in Codex
+`0.155.0-alpha.9.2`; source evidence does not prove installed worker survival,
+comment delivery or restart recovery. Ordinary Linux `bwrap` still cannot
+launch a persistent receiver: its per-command PID namespace ends with the
+command, and cannot safely identify host workers. Legacy bookkeeping, setup and
+worker CLI paths require explicitly approved host execution. Pure `digest` and
+`info` remain available in an ordinary sandbox for render-only work. Keep actual
+listener and recovery observations separate from the setup result.
 
 Setup readiness establishes persisted hook configuration, not a running listener
 or proven recovery. Reopen the same existing task after an app restart; the
@@ -65,9 +127,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | The `unpaged` catalog targets the source package; fresh CLI Git installation and bundled-server discovery passed | Native sign-in, hook approval, lifecycle and recovery are untested for this route; public-directory availability is separate |
+| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified; same-task local-tool discovery and ready setup with the 0.5.0 candidate are user-confirmed; installed candidate `fddbe96` polled and woke on a real human comment; remote readback verified one requested edit and one agent reply while the canvas remained PROPOSED; event completion is user-confirmed | The canvas write call issued at `09:05:27Z` still awaited a result at `12:23Z` for an unestablished reason; the reply came about 3 h 29 min after the comment, so timely completion remains unproven despite fast delivery and wakeup. Independent receipt readback, plan lifecycle, final-candidate update with native instructions and restart recovery remain unverified in the Ubuntu trial; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; this package passed a fresh CLI installation smoke | A published connection or validated sign-in, hook approval, lifecycle and recovery for this route |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup, canvas, polling, human-comment wakeup, edit, reply and user-confirmed event completion described above | A published connection, timely completion after the unexplained wait for the call result, independent receipt readback, plan lifecycle, final-candidate update with native instructions or restart recovery in the Ubuntu trial |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can
@@ -75,8 +137,8 @@ add a GitHub marketplace and install its listed plugins without a public-directo
 listing. The [Codex catalog](../.agents/plugins/marketplace.json) is named
 `unpaged` and lists `unpaged-codex` at `./plugins/unpaged-codex`.
 `.claude-plugin/marketplace.json` remains the separate Claude Code catalog;
-the Codex package is absent there by design. The [customer preview instructions](../plugins/unpaged-codex/README.md#install-from-the-repository-preview)
-target the repository's `main` branch once this catalog is available there.
+the Codex package is absent there by design. The [customer preview instructions](../README.md#install-for-codex--preview)
+target the repository's `main` branch, where the catalog is available.
 The [September 20 CLI smoke](codex-repository-install-trial-2026-09-20.md) verified
 local and Git installation, installed-file identity and bundled-server discovery
 in fresh CLI state. It did not sign in or exercise a desktop profile. Before
@@ -96,8 +158,9 @@ setup, update and recovery results used the registered artifact, which excluded
 approval, lifecycle or recovery behavior for the bundled-direct-MCP route.
 
 For a registered local pilot, its `.app.json` must refer to the intended
-registration and its manifest must reference that file. Exclude direct MCP
-wiring from that artifact. Use a synthetic identifier in packaging tests and
+registration and its manifest must reference that file. Replace only the remote
+`unpaged` MCP connection; retain the bundled local `unpaged_review` stdio server
+in `.mcp.json`. Use a synthetic identifier in packaging tests and
 keep real personal registration identifiers out of source control. The manifest
 connects components; authentication stays in the server/host integration.
 Current packaging guidance prefers root `plugin.json` and `mcp.json`; legacy

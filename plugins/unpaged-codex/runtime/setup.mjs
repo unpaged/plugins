@@ -2,6 +2,8 @@ import { spawn as spawnProcess } from "node:child_process";
 import { isAbsolute, join } from "node:path";
 
 const EVIDENCE_LIMIT = "Persisted setup configuration only; does not verify the running app, listener, or recovery.";
+const NATIVE_STATE_FAILURE = Buffer.from("failed to initialize sqlite state runtime under ");
+const NATIVE_STATE_ACTION = "Codex could not initialize its local runtime storage. Retry this check through the host's native approval flow in the same task. If path permissions are required, request the actual state directories, never individual database files. This is not a hook-trust failure.";
 const ACTIONS = {
   ready: "The current Unpaged setup is approved. Listening and recovery still require separate verification.",
   missing: "Install or enable the current Unpaged plugin, then check its SessionStart hook in Codex Hooks settings for this folder.",
@@ -15,7 +17,9 @@ const ACTIONS = {
 };
 
 function report(status, reason, hook) {
-  return { setupReady: status === "ready", status, reason, action: ACTIONS[status], evidenceScope: "native_hook_inventory", evidenceLimit: EVIDENCE_LIMIT,
+  return { setupReady: status === "ready", status, reason,
+    action: reason === "native_state_initialization_failed" ? NATIVE_STATE_ACTION : ACTIONS[status],
+    evidenceScope: "native_hook_inventory", evidenceLimit: EVIDENCE_LIMIT,
     ...(hook ? { hook } : {}) };
 }
 
@@ -34,7 +38,7 @@ function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** The caller supplies an already verified, absolute native Codex executable. No tasks or hooks are invoked. */
+/** No tasks or hooks are invoked. The verified native binary may initialize its own runtime storage. */
 export async function queryHookInventory({ codexPath, cwd, env = process.env, spawn = spawnProcess,
   timeoutMs = 10000, maxOutputBytes = 1024 * 1024, shutdownTimeoutMs = 1000 }) {
   if (!absolutePath(codexPath) || !absolutePath(cwd) ||
@@ -54,6 +58,8 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
     return await new Promise((resolve, reject) => {
       let bytes = 0;
       let buffered = Buffer.alloc(0);
+      let stderrTail = Buffer.alloc(0);
+      let nativeStateFailed = false;
       let expectedId = 0;
       const finish = (error, value) => {
         if (finished) return;
@@ -91,8 +97,12 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
       };
       try {
         child = spawn(codexPath, ["app-server", "--stdio"], { cwd, env, shell: false, stdio: ["pipe", "pipe", "pipe"] });
-        child.once("exit", () => { markExited(); if (!finished) fail("early_exit"); });
-        child.once("close", () => { markExited(); if (!finished) fail("early_exit"); });
+        child.once("exit", markExited);
+        // Stderr can still drain after exit. Close follows stdio closure; the overall timeout remains bounded.
+        child.once("close", () => {
+          markExited();
+          if (!finished) fail(nativeStateFailed ? "native_state_initialization_failed" : "early_exit");
+        });
         child.on("error", () => {
           // Failed spawn has no process to terminate. Later process errors still require cleanup.
           if (!child.pid) markExited();
@@ -101,7 +111,13 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
         child.stdin.on("error", () => fail("write_failed"));
         child.stdout.on("error", () => fail("read_failed"));
         child.stderr.on("error", () => fail("read_failed"));
-        child.stderr.on("data", (chunk) => { if (!finished) count(chunk); });
+        child.stderr.on("data", (chunk) => {
+          if (finished || !count(chunk) || nativeStateFailed) return;
+          const scan = Buffer.concat([stderrTail, chunk]);
+          nativeStateFailed = scan.includes(NATIVE_STATE_FAILURE);
+          // Keep only the overlap needed for a split ASCII marker, never the full diagnostic or paths.
+          stderrTail = nativeStateFailed ? Buffer.alloc(0) : Buffer.from(scan.subarray(-(NATIVE_STATE_FAILURE.length - 1)));
+        });
         child.stdout.on("data", (chunk) => {
           if (finished || !count(chunk)) return;
           buffered = Buffer.concat([buffered, chunk]);
@@ -112,7 +128,7 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
             if (line.length) receive(line);
           }
         });
-        timer = setTimeout(() => fail("timeout"), timeoutMs);
+        timer = setTimeout(() => fail(nativeStateFailed ? "native_state_initialization_failed" : "timeout"), timeoutMs);
         send({ id: 0, method: "initialize", params: {
           clientInfo: { name: "unpaged_setup_check", title: "Unpaged setup check", version: "0.1.0" }
         } });
@@ -138,6 +154,10 @@ export async function queryHookInventory({ codexPath, cwd, env = process.env, sp
         throw queryError("cleanup_unconfirmed");
       }
     }
+    if (child && exited) {
+      // An exited process can leave inherited pipes open; do not retain those handles after our deadline.
+      child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy();
+    }
   }
 }
 
@@ -151,7 +171,7 @@ export async function inspectSetup({ codexPath, cwd, pluginRoot, query = queryHo
   catch (error) {
     if (error?.code === "SETUP_UNSUPPORTED") return report("unsupported", "unsupported");
     const reason = ["invalid_options", "timeout", "output_limit", "malformed_response", "write_failed",
-      "read_failed", "process_error", "early_exit", "rpc_error", "cleanup_unconfirmed"].includes(error?.reason)
+      "read_failed", "process_error", "early_exit", "native_state_initialization_failed", "rpc_error", "cleanup_unconfirmed"].includes(error?.reason)
       ? error.reason : "query_failed";
     return report("query_failed", reason);
   }

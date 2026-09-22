@@ -3,6 +3,13 @@
     "unpaged": {
       "type": "http",
       "url": "https://mcp.unpaged.io/mcp"
+    },
+    "unpaged_review": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["runtime/mcp.mjs"],
+      "cwd": ".",
+      "env_vars": ["CODEX_HOME", "UNPAGED_CODEX_PATH"]
     }
   }
 }

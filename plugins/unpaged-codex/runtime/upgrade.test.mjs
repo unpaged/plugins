@@ -124,8 +124,8 @@ async function fixture(t, { historical = false } = {}) {
 }
 
 function queuedPaths(message) {
-  const skill = /skill at ("[^\n]+?")\. Use the current Node executable/.exec(message);
-  const begin = /shell:false to begin: (\[[^\n]+\])\. Preserve its operation token/.exec(message);
+  const skill = /skill at ("[^\n]+?")\./.exec(message);
+  const begin = /(?:shell:false to begin: |retained CLI argument array is )(\[[^\n]+?\])\./.exec(message);
   assert.ok(skill, "queued prompt must identify the retained review skill");
   assert.ok(begin, "queued prompt must identify executable begin arguments");
   return { skill: JSON.parse(skill[1]), begin: JSON.parse(begin[1]) };

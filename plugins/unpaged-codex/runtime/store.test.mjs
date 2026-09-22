@@ -612,12 +612,15 @@ test("store rejects directory/database/WAL/SHM symlinks without chmod or writes 
   const base = mkdtempSync(join(tmpdir(), "unpaged-symlink-test-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const target = join(base, "sentinel"); writeFileSync(target, "unchanged", { mode: 0o644 });
+  // Keep chmod-to-0600 regressions observable even under a restrictive umask.
+  chmodSync(target, 0o644);
+  const targetBefore = { content: readFileSync(target), mode: statSync(target).mode & 0o777 };
   for (const suffix of ["", "-wal", "-shm"]) {
     const directory = join(base, `case-${suffix || "db"}`); mkdirSync(directory);
     const path = join(directory, "reviews.sqlite"); symlinkSync(target, path + suffix);
     assert.throws(() => new Store(path), /unsafe_store_path/);
-    assert.equal(readFileSync(target, "utf8"), "unchanged");
-    assert.equal(statSync(target).mode & 0o777, 0o644);
+    assert.deepEqual(readFileSync(target), targetBefore.content);
+    assert.equal(statSync(target).mode & 0o777, targetBefore.mode);
   }
   const targetDirectory = join(base, "target-directory"); mkdirSync(targetDirectory); chmodSync(targetDirectory, 0o755);
   const link = join(base, "directory-link"); symlinkSync(targetDirectory, link);
