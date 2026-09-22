@@ -46,6 +46,24 @@ test("handshake and fixed tool inventory precede operations; unsupported clients
   assert.equal((await handler(request(5, "initialize", { protocolVersion: "2025-06-18" }))).error.code, -32602);
 });
 
+test("native discovery supplies usable digest, arm and receipt guidance without a skill-file read", async () => {
+  const handler = createHandler({ control: () => assert.fail("discovery must not execute") });
+  const init = await handler(request(1, "initialize", { protocolVersion: "2025-11-25" }));
+  const guide = init.result.instructions;
+  assert.match(guide, /digest payload: \{document:/);
+  assert.match(guide, /statusElementIds:\[/);
+  assert.match(guide, /arm payload: \{keyId:<mint keyId>,key:<mint key>,pollUrl:<mint pollUrl>,planDigest:/);
+  assert.match(guide, /require setupReady:true before minting/);
+  assert.match(guide, /complete payload: \{operationToken:<from begin>,evidence:\{replyId:/);
+  assert.match(guide, /acceptance alone never authorizes implementation/);
+  assert.match(guide, /Never replay completed or uncertain effects/);
+  await handler({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const tool = (await handler(request(2, "tools/list"))).result.tools[0];
+  assert.match(tool.description, /Native server instructions/);
+  assert.equal(tool.inputSchema.properties.payload.properties.document.type, "object");
+  assert.ok(Buffer.byteLength(JSON.stringify(tool.inputSchema)) < 4000);
+});
+
 test("unsupported Node versions keep discovery available and refuse every operation before native execution", async () => {
   for (const nodeVersion of ["18.20.8", "20.18.2", "22.13.1", "23.7.0"]) {
     const handler = createHandler({ nodeVersion, control: () => assert.fail("unsupported Node must not execute") });

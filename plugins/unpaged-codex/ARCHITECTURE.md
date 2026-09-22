@@ -186,6 +186,19 @@ private review state, the canonical listener endpoint and verified native Codex
 commands. These limits are enforced by the adapter input contract, not by
 claiming that the host process inherits the agent's filesystem sandbox.
 
+Tool discovery advertises a compact object with `operation`, `documentId`,
+`eventId` and a union of payload fields. Strict per-operation required fields,
+allowed fields and validation remain separate inside the adapter. The native
+Codex schema size policy starts lossy compaction above 5,000 normalized bytes;
+the earlier repeated root `oneOf` can collapse to `{}`, leaving an unreadable
+argument declaration. The advertised schema stays below 4,000 raw bytes with
+headroom for normalization. Initialization also returns essential operation
+inputs and review rules as MCP `instructions`, exposed by this Codex build as
+the namespace description. Digest, arm and event handling therefore do not
+depend on reading a skill file through the agent command sandbox. The complete
+review-plan skill remains the detailed protocol; an unavailable file is never
+permission to invent evidence or bypass an unclear recovery gate.
+
 Tool payloads are limited to 2 MiB, with a further 256 KiB bound for the native
 request envelope. A frame beyond that combined limit is never dispatched, so
 that request makes no local mutation. The server emits a constant protocol
@@ -252,6 +265,8 @@ The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
 [MCP process cleanup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/rmcp-client/src/stdio_server_launcher.rs#L410),
 [loaded-task config refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/app-server/src/request_processors/config_processor.rs#L172),
 [session MCP refresh](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/core/src/session/mod.rs#L2038),
+[schema compaction](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/tools/src/json_schema/compaction.rs#L16),
+[native server instructions](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/codex-mcp/src/rmcp_client.rs#L838),
 and [Linux namespace setup](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/linux-sandbox/src/bwrap.rs#L332).
 Public [MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) supports
 local stdio and environment forwarding. The task/workspace metadata is a native

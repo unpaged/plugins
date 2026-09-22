@@ -215,12 +215,44 @@ test("the transport payload limit is applied before invocation, and schemas expo
   assert.equal(controlInputSchema.type, "object");
   assert.equal(controlInputSchema.additionalProperties, false);
   assert.deepEqual(controlInputSchema.required, ["operation"]);
-  for (const schema of controlInputSchema.oneOf) {
-    assert.equal(schema.additionalProperties, false);
-    assert.equal(schema.properties.threadId, undefined);
-    assert.equal(schema.properties.cwd, undefined);
-    if (schema.properties.payload) assert.equal(schema.properties.payload.additionalProperties, false);
-  }
+  assert.equal(controlInputSchema.properties.threadId, undefined);
+  assert.equal(controlInputSchema.properties.cwd, undefined);
+  assert.equal(controlInputSchema.properties.payload.additionalProperties, false);
+});
+
+test("advertised arguments stay below native schema compaction and expose digest and arm fields", () => {
+  // Codex 4607249 tools/src/json_schema/compaction.rs starts lossy passes at
+  // 5,000 normalized bytes; the old root oneOf became {}. Raw JSON < 4,000
+  // leaves room for native defaults while guarding against that regression.
+  assert.ok(Buffer.byteLength(JSON.stringify(controlInputSchema)) < 4000);
+  assert.equal(controlInputSchema.oneOf, undefined);
+  assert.deepEqual(Object.keys(controlInputSchema.properties), ["operation", "documentId", "eventId", "payload"]);
+  const payload = controlInputSchema.properties.payload;
+  assert.equal(payload.type, "object");
+  assert.equal(payload.properties.document.type, "object");
+  assert.equal(payload.properties.document.additionalProperties, true);
+  for (const name of ["keyId", "key", "planDigest", "operationToken"]) assert.equal(payload.properties[name].type, "string");
+  assert.equal(payload.properties.pollUrl.const, POLL_URL);
+  assert.equal(payload.properties.statusElementIds.type, "array");
+  assert.equal(payload.properties.openTasks.type, "integer");
+});
+
+test("the compact field union does not relax required or operation-specific runtime inputs", async () => {
+  const fake = fixture();
+  for (const args of [
+    { operation: "doctor", documentId: DOC },
+    { operation: "info", payload: {} },
+    { operation: "digest" },
+    { operation: "digest", payload: {} },
+    { operation: "digest", payload: { document: {}, keyId: "key-1" } },
+    { operation: "arm", payload: armPayload() },
+    { operation: "arm", documentId: DOC, payload: { ...armPayload(), document: {} } },
+    { operation: "complete", documentId: DOC, eventId: "event-1", payload: { evidence: { skippedReason: "verified" } } },
+    { operation: "complete", documentId: DOC, eventId: "event-1", payload: { operationToken: TOKEN, evidence: "unverified proof" } },
+    { operation: "approve", documentId: DOC, payload: { evidence: { replyId: "reply-1", planDigest: DIGEST }, currentDigest: DIGEST } },
+    { operation: "reconcile", documentId: DOC, payload: { evidence: "verified", currentDigest: DIGEST } }
+  ]) await assert.rejects(executeControl(args, context, fake.options));
+  assert.equal(fake.calls.length, 0); assert.equal(fake.resolutions, 0);
 });
 
 test("real CLI storage preserves cross-task mutation fences and scopes status", async (t) => {

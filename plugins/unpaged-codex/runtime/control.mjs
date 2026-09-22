@@ -39,19 +39,32 @@ const definitions = {
     evidence: { oneOf: [textSchema, proofSchema] } }) }
 };
 
-// Per-operation shapes keep executable, path, environment and task overrides out of model arguments.
-export const controlInputSchema = { type: "object", properties: {
-  operation: { type: "string", enum: Object.keys(definitions) }, documentId: uuidSchema,
-  eventId: idSchema, payload: { type: "object" }
-}, required: ["operation"], additionalProperties: false, oneOf: Object.entries(definitions).map(([operation, definition]) => {
+// Keep strict per-operation validation independent of the advertised schema.
+// Codex compacts oversized schemas and can erase a root oneOf entirely.
+const operationSchemas = Object.fromEntries(Object.entries(definitions).map(([operation, definition]) => {
   const properties = { operation: { const: operation } };
   const required = ["operation"];
   if (definition.document) properties.documentId = uuidSchema;
   if (definition.document === "required") required.push("documentId");
   if (definition.event) { properties.eventId = idSchema; required.push("eventId"); }
   if (definition.payload) { properties.payload = definition.payload; required.push("payload"); }
-  return shape(properties, required);
-}) };
+  return [operation, shape(properties, required)];
+}));
+
+// A compact field union keeps the native argument declaration readable. The
+// operation-specific required/allowed fields are still enforced below.
+export const controlInputSchema = shape({
+  operation: { type: "string", enum: Object.keys(definitions) },
+  documentId: { ...uuidSchema, description: "Bound canvas UUID; omit for info, doctor and digest; optional for status." },
+  eventId: { ...idSchema, description: "Required for begin, complete, accept and recover." },
+  payload: { ...shape({
+    ...Object.assign({}, ...Object.values(definitions).map((definition) => definition.payload?.properties)),
+    openTasks: { type: "integer", const: 0 },
+    document: { type: "object", additionalProperties: true,
+      description: "Complete parsed document_get document, including id, rootNodeId and all nodes/elements; not its tool envelope." },
+    evidence: { anyOf: [textSchema, proofSchema], description: "Real verified evidence: text for lifecycle, or replyId+planDigest / skippedReason for event completion." }
+  }, []), description: "Operation-specific fields only. Native server instructions specify required inputs; extra fields are rejected." }
+}, ["operation"]);
 
 function requireShape(value, schema) {
   if (!object(value) || Object.keys(value).some((key) => !has(schema.properties, key)) ||
@@ -130,7 +143,7 @@ export async function executeControl(args, context, options = {}) {
       typeof context.cwd !== "string" || !isAbsolute(context.cwd) || /[\0\r\n]/.test(context.cwd)) fail("native_task_context_required");
   if (!object(args) || typeof args.operation !== "string" || !has(definitions, args.operation)) fail("invalid_control_operation");
   const definition = definitions[args.operation];
-  const schema = controlInputSchema.oneOf.find((entry) => entry.properties.operation.const === args.operation);
+  const schema = operationSchemas[args.operation];
   requireShape(args, schema);
   if (has(args, "documentId")) uuid(args.documentId);
   if (definition.event) requireId(args.eventId);
