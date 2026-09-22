@@ -48,9 +48,14 @@ The user then confirmed sign-in and native hook trust; a screenshot showed
 `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log were
 subsequently verified independently. Native sandbox failures blocked 0.4.0 CLI
 listener setup. With the 0.5.0 candidate, the user confirmed local-tool discovery,
-`info` and ready setup in the same task after a plugin enable-switch refresh;
-no listener was started. Comment delivery, plan lifecycle and restart recovery
-remain unproven in that trial. See
+`info` and ready setup in the same task after a plugin enable-switch refresh.
+The installed `fddbe96` candidate then polled successfully and woke that same
+task on a real human comment. Remote readback verified exactly one requested
+monthly-review note and one agent reply, with the canvas still PROPOSED. The
+user confirmed successful event completion before VM shutdown; the durable
+receipt was not independently read. The plan lifecycle, an update to the final
+candidate with its native instructions and restart recovery remain unverified
+in that trial. See the [dated trial evidence](codex-repository-install-trial-2026-09-20.md#listener-startup-and-human-comment-delivery) and
 [Codex MCP login](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#other-cli-commands).
 
 For a separately approved, published listing available to the intended customer:
@@ -119,9 +124,9 @@ a trial pass.
 | Delivery surface | What it supplies | What it does not establish |
 | --- | --- | --- |
 | Published MCP-backed plugin | The reviewed server integration and native install/sign-in entry point | Successful recovery on every supported host or customer eligibility |
-| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified; same-task local-tool discovery and ready setup with the 0.5.0 candidate are user-confirmed | Listening has not started in the Ubuntu trial; comment delivery, lifecycle and recovery remain unproven; public-directory availability is separate |
+| Repository marketplace (Codex preview) | Fresh CLI Git installation and bundled-server discovery passed; a user confirmed Ubuntu 0.4.0 sign-in and hook trust, with skill loading visible in a screenshot; a PROPOSED canvas and Decision log were independently verified; same-task local-tool discovery and ready setup with the 0.5.0 candidate are user-confirmed; installed candidate `fddbe96` polled and woke on a real human comment; remote readback verified one requested edit and one agent reply while the canvas remained PROPOSED; event completion is user-confirmed | Independent receipt readback, plan lifecycle, final-candidate update with native instructions and restart recovery remain unverified in the Ubuntu trial; public-directory availability is separate |
 | Local package mapping a registered connection through `.app.json` | A reference to that existing connection | A new registration, access rights, or public availability |
-| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup and canvas evidence described above | A published connection or verified listener, delivery, lifecycle and recovery results for the Ubuntu trial |
+| Local package bundling a direct MCP server | Server configuration in portable `mcp.json`, or legacy `.mcp.json`; installation smoke passed, with the later Ubuntu setup, canvas, polling, human-comment wakeup, edit, reply and user-confirmed event completion described above | A published connection, independent receipt readback, plan lifecycle, final-candidate update with native instructions or restart recovery in the Ubuntu trial |
 | Direct MCP in host settings | An independently configured server connection | Plugin installation or parity with the registered connection |
 
 Repository distribution is separate from OpenAI's public directory. Codex can

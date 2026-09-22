@@ -20,8 +20,10 @@ hooks and local MCP servers. The 0.5.0 candidate uses a bundled local review
 tool to perform setup and launch detached receivers on the host. It requires
 native task/workspace metadata plus the public `queue` and `hooks/list` APIs;
 those source contracts were verified in Codex `0.155.0-alpha.9.2`. Missing
-metadata blocks listening. Installed Linux delivery and recovery are not yet
-verified for this candidate; rendering remains usable.
+metadata blocks listening. Installed Ubuntu polling and human-comment wakeup
+passed on candidate `fddbe96`, with one canvas edit and one agent reply verified.
+The user confirmed event completion. The final candidate update, plan lifecycle
+and recovery remain unverified. Rendering remains usable.
 
 Use a supported Codex CLI:
 
@@ -54,8 +56,13 @@ trust; a screenshot showed `visual-plan` and `review-plan` loading. A PROPOSED
 canvas and Decision log were independently verified. Native sandbox failures in the 0.4.0 CLI flow
 blocked listener setup. With the 0.5.0 candidate, the user subsequently confirmed
 local-tool discovery, `info` and a ready `doctor` result in the same task after
-a plugin enable-switch refresh. No listener was started; comment delivery, the
-plan lifecycle and restart recovery remain unproven for that trial.
+a plugin enable-switch refresh. The installed `fddbe96` candidate then polled
+successfully and woke that same task on a real human comment. Remote readback
+verified one requested monthly-review note and one agent reply, with the canvas
+still PROPOSED. The user confirmed successful event completion before VM
+shutdown; the durable receipt was not independently read. The plan lifecycle,
+an update to the final candidate with its native instructions and restart
+recovery remain unverified for that trial.
 The successful [earlier pilot](docs/codex-installed-trial-2026-09-19.md)
 used a different registered-connection artifact. The [readiness runbook](docs/codex-connection-readiness.md)
 keeps those results and the remaining release gates separate.
@@ -65,7 +72,7 @@ keeps those results and the remaining release gates separate.
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
-| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup with the 0.5.0 candidate is user-confirmed; listening and recovery remain untested in that trial. |
+| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup is user-confirmed. On installed 0.5.0 candidate `fddbe96`, polling and a real human-comment wakeup passed; remote readback verified one requested edit and one agent reply, with the canvas still PROPOSED. Event completion is user-confirmed. Plan lifecycle, final-candidate update with native instructions and restart recovery remain unverified. |
 
 ## Support
 
