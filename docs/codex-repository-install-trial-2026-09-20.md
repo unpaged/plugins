@@ -127,8 +127,8 @@ and no listener key or worker was created by these diagnostics.
 
 At this stage the repository route was **PARTIAL**, with CLI listener setup
 **BLOCKED**.
-Comment delivery, the full plan lifecycle and restart recovery remain unproven
-for the Ubuntu trial. These observations concern 0.4.0 and are historical
+Comment delivery, the full plan lifecycle and restart recovery were unproven
+at that checkpoint. These observations concern 0.4.0 and are historical
 evidence for its CLI launch path, not a result for the new local-tool candidate.
 
 ## Local review-tool candidate — September 22, 2026
@@ -183,13 +183,18 @@ and task records established the following chronology on September 22, in UTC:
 The listener received the comment after **26.4 seconds**, and the same task woke
 after **28.3 seconds**, without a follow-up user message in that task. This
 establishes polling delivery and automatic wakeup for the installed `fddbe96`
-candidate. It does not establish completion: a canvas mutation was issued at
-`09:05:27Z`, but no result had been observed by `09:12Z`; neither a completed edit
-nor a reply is counted as verified.
+candidate. A canvas mutation was issued at `09:05:27Z` and was still awaiting a
+result when checked at `12:23Z`; the cause of that wait was not established.
+Subsequent remote readback verified exactly one note containing the requested
+text, the unchanged PROPOSED status element, and one agent reply created at
+`12:33:03.583Z`. The user confirmed that the owning task reported successful
+event completion before shutting down the VM. Completion bookkeeping is thus
+user-confirmed; the final local receipt was not independently inspected while
+the VM was stopped.
 
 The repository route remains **PARTIAL**. Local-tool setup, worker survival,
-successful polling and human-comment wakeup now have the evidence above.
-Completed feedback handling, plan lifecycle, an update to the final candidate
-and native restart recovery remain unverified. These observations do not cover
-later PR revisions, and the historical 0.4.0 failures above are not reinterpreted
+successful polling, human-comment wakeup and feedback handling now have the
+evidence above. Plan lifecycle, an update to the final candidate, visibility of
+its native instructions and native restart recovery remain unverified. These
+observations do not cover later PR revisions, and the historical 0.4.0 failures above are not reinterpreted
 as new-route results.

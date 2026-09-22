@@ -7,8 +7,8 @@ It is an experimental integration, with the recovery boundaries below.
 ## Requirements
 
 - macOS or Linux. The 0.5.0 candidate uses a native local MCP tool for setup,
-  bookkeeping and detached-worker launch. Installed Linux feedback completion
-  and recovery still need verification. Windows is not a supported pilot host.
+  bookkeeping and detached-worker launch. Installed Linux pickup of the final
+  candidate and restart recovery still need verification. Windows is not a supported pilot host.
 - Node.js 24 or newer, available to Codex, its local MCP servers and hooks.
   Node 24 is the tested support floor; no npm dependencies are required.
 - Codex with local stdio MCP, native per-call task/workspace metadata, the
@@ -36,9 +36,10 @@ failures. With the 0.5.0 candidate, the user confirmed local-tool discovery,
 `info` and a ready `doctor` result in that same task after the bounded refresh
 below. The installed `fddbe96` candidate subsequently polled successfully, and
 read-only VM inspection verified a real human comment reaching and waking the
-same task. The canvas edit and reply, plan lifecycle and restart recovery remain
-unproven for that trial; later PR revisions have not been installed there. The
-[earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
+same task. The requested canvas edit and single reply were independently read
+back, and the user confirmed successful event completion. Plan lifecycle and
+restart recovery remain unproven; later PR revisions have not been installed
+there. The [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
 Run these commands with a supported Codex CLI:
@@ -118,8 +119,10 @@ binding and report a blocker rather than guessing worker ownership.
 The local-tool path is a 0.5.0 candidate. On installed commit `fddbe96`, the user
 reported a live worker and successful polls 30.4 seconds apart. Read-only VM
 inspection subsequently confirmed a connected polling worker and a real human
-comment waking the same task. Completed feedback handling and native restart
-recovery remain unverified. See the
+comment waking the same task. The requested edit and single reply were read back,
+and the user confirmed event completion before shutting down the VM. Pickup of
+the final candidate, its native instructions and native restart recovery remain
+unverified. See the
 [dated evidence](../../docs/codex-repository-install-trial-2026-09-20.md#local-review-tool-candidate--september-22-2026).
 
 Repository marketplace distribution is separate from publication in OpenAI's

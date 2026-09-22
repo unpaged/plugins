@@ -253,7 +253,11 @@ on desktop build 26.915.31945 writes only plugin enablement with
 `reloadUserConfig: true`; the native host clears plugin/skill caches, refreshes
 loaded tasks and schedules MCP startup. Saved hook trust, sign-in and review
 storage are unchanged. Same-task local-tool discovery and ready setup were
-user-confirmed on Ubuntu; worker survival and delivery remain untested there.
+user-confirmed on Ubuntu. The installed `fddbe96` candidate subsequently passed
+worker survival, polling and real-comment wakeup; remote readback verified the
+requested edit and single reply, and the user confirmed event completion. Later
+candidate pickup, native instruction visibility and restart recovery remain
+unverified. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
 Missing metadata still blocks listening.
 
 The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
