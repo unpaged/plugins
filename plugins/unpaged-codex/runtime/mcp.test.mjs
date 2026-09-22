@@ -57,6 +57,11 @@ test("native discovery supplies usable digest, arm and receipt guidance without 
   assert.match(guide, /complete payload: \{operationToken:<from begin>,evidence:\{replyId:/);
   assert.match(guide, /acceptance alone never authorizes implementation/);
   assert.match(guide, /Never replay completed or uncertain effects/);
+  assert.match(guide, /recover requires an explicit human recovery decision and recorded evidence/);
+  assert.match(guide, /Only after verifying that the task was interrupted may interrupt/);
+  assert.match(guide, /continue requires checking precisely which effects remain and returns a fresh operationToken/);
+  assert.match(guide, /Only uncertain queueing supports retry, after explicit confirmation/);
+  assert.match(guide, /an empty pending queue is not proof of failure and never authorizes retry/);
   await handler({ jsonrpc: "2.0", method: "notifications/initialized" });
   const tool = (await handler(request(2, "tools/list"))).result.tools[0];
   assert.match(tool.description, /Native server instructions/);
