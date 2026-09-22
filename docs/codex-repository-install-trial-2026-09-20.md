@@ -192,9 +192,16 @@ event completion before shutting down the VM. Completion bookkeeping is thus
 user-confirmed; the final local receipt was not independently inspected while
 the VM was stopped.
 
+The write was outstanding for at least **3 h 17 min**, and the reply was created
+about **3 h 29 min** after the human comment. These are later processing timings,
+not polling delivery latency. The 26.4-second delivery and 28.3-second wakeup
+observations do not establish timely completion of feedback handling, and no
+cause is assigned to the write wait without evidence.
+
 The repository route remains **PARTIAL**. Local-tool setup, worker survival,
 successful polling, human-comment wakeup and feedback handling now have the
-evidence above. Plan lifecycle, an update to the final candidate, visibility of
+evidence and latency limitation above. Timely feedback completion, plan
+lifecycle, an update to the final candidate, visibility of
 its native instructions and native restart recovery remain unverified. These
 observations do not cover later PR revisions, and the historical 0.4.0 failures above are not reinterpreted
 as new-route results.

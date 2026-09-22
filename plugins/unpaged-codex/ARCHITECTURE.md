@@ -236,7 +236,8 @@ On the inspected Linux implementation, native MCP cleanup targets the server's
 process group; a detached worker has its own group. The recovery hook can restore
 an existing active binding after task reopen. Neither source inspection nor an
 MCP setup result proves installed worker survival, queue delivery or restart
-recovery; those remain live acceptance gates for 0.5.0. No extra coordinator,
+recovery; the installed `fddbe96` evidence below covers the first two, and
+restart recovery remains a live acceptance gate for 0.5.0. No extra coordinator,
 file mailbox, local socket service or UserPromptSubmit hook is introduced.
 
 Legacy CLI bookkeeping, setup and worker operations must use an explicitly
@@ -257,7 +258,10 @@ user-confirmed on Ubuntu. The installed `fddbe96` candidate subsequently passed
 worker survival, polling and real-comment wakeup; remote readback verified the
 requested edit and single reply, and the user confirmed event completion. Later
 candidate pickup, native instruction visibility and restart recovery remain
-unverified. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
+unverified. Delivery took 26.4 seconds and wakeup 28.3 seconds, but the later
+canvas write waited at least 3 h 17 min for an unestablished reason; the reply
+arrived about 3 h 29 min after the comment. This does not establish timely
+completion of feedback handling. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
 Missing metadata still blocks listening.
 
 The pinned source contract is Codex `0.155.0-alpha.9.2`, commit
