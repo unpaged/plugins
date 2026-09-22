@@ -39,8 +39,8 @@ read-only VM inspection verified a real human comment reaching and waking the
 same task. The requested canvas edit and single reply were independently read
 back, and the user confirmed successful event completion. Plan lifecycle and
 restart recovery remain unproven; later PR revisions have not been installed
-there. The canvas write waited at least 3 h 17 min for an unestablished reason,
-and the reply arrived about 3 h 29 min after the comment; timely feedback
+there. The canvas write call remained unanswered for at least 3 h 17 min for an
+unestablished reason, and the reply arrived about 3 h 29 min after the comment; timely feedback
 completion is not proven. The [earlier registered-connection pilot](../../docs/codex-installed-trial-2026-09-19.md)
 does not establish those results for this package.
 
@@ -123,9 +123,9 @@ reported a live worker and successful polls 30.4 seconds apart. Read-only VM
 inspection subsequently confirmed a connected polling worker and a real human
 comment waking the same task. The requested edit and single reply were read back,
 and the user confirmed event completion before shutting down the VM. Delivery
-took 26.4 seconds and wakeup 28.3 seconds, but the subsequent write waited at
-least 3 h 17 min for an unexplained reason; the reply arrived about 3 h 29 min
-after the comment. Timely completion is therefore not established. Pickup of
+took 26.4 seconds and wakeup 28.3 seconds, but the subsequent write call remained
+unanswered for at least 3 h 17 min for an unexplained reason; the reply arrived
+about 3 h 29 min after the comment. Timely completion is therefore not established. Pickup of
 the final candidate, its native instructions and native restart recovery remain
 unverified. See the
 [dated evidence](../../docs/codex-repository-install-trial-2026-09-20.md#local-review-tool-candidate--september-22-2026).

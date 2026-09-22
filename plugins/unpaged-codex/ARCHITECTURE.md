@@ -259,9 +259,9 @@ worker survival, polling and real-comment wakeup; remote readback verified the
 requested edit and single reply, and the user confirmed event completion. Later
 candidate pickup, native instruction visibility and restart recovery remain
 unverified. Delivery took 26.4 seconds and wakeup 28.3 seconds, but the later
-canvas write waited at least 3 h 17 min for an unestablished reason; the reply
-arrived about 3 h 29 min after the comment. This does not establish timely
-completion of feedback handling. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
+canvas write call remained unanswered for at least 3 h 17 min for an unestablished
+reason; the reply arrived about 3 h 29 min after the comment. This does not
+establish timely completion of feedback handling. See the [dated trial](../../docs/codex-repository-install-trial-2026-09-20.md).
 Missing metadata still blocks listening.
 
 The pinned source contract is Codex `0.155.0-alpha.9.2`, commit

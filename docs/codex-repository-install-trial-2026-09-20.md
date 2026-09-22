@@ -192,11 +192,13 @@ event completion before shutting down the VM. Completion bookkeeping is thus
 user-confirmed; the final local receipt was not independently inspected while
 the VM was stopped.
 
-The write was outstanding for at least **3 h 17 min**, and the reply was created
-about **3 h 29 min** after the human comment. These are later processing timings,
-not polling delivery latency. The 26.4-second delivery and 28.3-second wakeup
+The write call had no observed result for at least **3 h 17 min**, and the reply
+was created about **3 h 29 min** after the human comment. The note's commit time
+is not established, so this does not measure the duration of the server write.
+These are call/response observations, not polling delivery latency. The
+26.4-second delivery and 28.3-second wakeup
 observations do not establish timely completion of feedback handling, and no
-cause is assigned to the write wait without evidence.
+cause is assigned to the missing call result without evidence.
 
 The repository route remains **PARTIAL**. Local-tool setup, worker survival,
 successful polling, human-comment wakeup and feedback handling now have the
