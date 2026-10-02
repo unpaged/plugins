@@ -46,6 +46,7 @@ type Loop = {
 }
 
 const MCP_SERVER = 'unpaged'
+const PANE = 'unpaged-listening'
 const FIRST_POLL_WAIT_MS = 8000
 const FLUSH_DELAY_MS = 50
 /** session.end reasons that end listening; `clear` and `resume` keep it. */
@@ -328,6 +329,47 @@ async function stop($: Api, documentId: string) {
   return { title: canvas?.title ?? documentId, revoked, keyId }
 }
 
+const timeLabel = (at: number) => {
+  const d = new Date(at)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** Opens the canvas in the browser: macOS `open`, then `xdg-open`, else the link as a toast. */
+async function openCanvas($: Api, documentId: string) {
+  const canvas = canvases.get(documentId)
+  if (!canvas) return
+  record(documentId, { unread: 0 })
+  await sync($)
+  for (const argv of [['open', canvas.boardUrl], ['xdg-open', canvas.boardUrl]]) {
+    try {
+      const ran = await $.process.run(argv, { timeoutMs: 10000 })
+      if (ran.exitCode === 0) return
+    } catch {
+      // try the next opener
+    }
+  }
+  $.ui.toast(canvas.boardUrl, { timeoutMs: 10000 })
+}
+
+async function stopAll($: Api) {
+  for (const documentId of [...canvases.keys()]) await stop($, documentId)
+}
+
+function statusLabel(canvas: ArmedCanvas, isWorking: boolean, isReplying: boolean) {
+  if (canvas.state === 'stopped') return `push off${canvas.reason ? ` (${canvas.reason})` : ''}`
+  if (canvas.state === 'connecting') return 'connecting'
+  if (canvas.state === 'reconnecting') return 'reconnecting'
+  const fresh = canvas.unread > 0 ? `${canvas.unread} new` : 'no new comments'
+  if (isWorking && isReplying) return `${fresh}  ·  replying on the canvas`
+  return canvas.unread > 0 ? fresh : `${fresh}  ·  armed ${timeLabel(canvas.armedAt)}`
+}
+
+function dotColor(canvas: ArmedCanvas) {
+  if (canvas.state === 'stopped') return 'red'
+  if (canvas.state !== 'connected') return 'gray'
+  return canvas.unread > 0 ? 'yellow' : 'green'
+}
+
 function describe(canvas: ArmedCanvas | undefined, first?: string) {
   if (!canvas) return 'nothing armed'
   const state = first === 'pending' ? 'armed, first poll pending' : canvas.state
@@ -456,9 +498,84 @@ export const register: Register = on => {
     on('tool.check', { tool }, async () => ({ decision: 'allow' }))
   }
 
+  // The reply turn is over: the comments it answered are no longer new.
   on('turn.complete', async ($, e, next) => {
-    if (await read($, replying)) await update($, replying, () => false)
+    if (await read($, replying)) {
+      for (const canvas of canvases.values()) record(canvas.documentId, { unread: 0 })
+      await update($, replying, () => false)
+      await sync($)
+    }
     return next(e)
+  })
+
+  // The band above the prompt: one line while this session listens.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const list = await read($, armed)
+    if (list.length === 0 || e.props.hasSurvey) return next(e)
+    const theirs = await next(e)
+    const isReplying = await read($, replying)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const unread = list.reduce((n, c) => n + c.unread, 0)
+    const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
+      Button({ key, label, hotkey, plain: true, onPress })
+    const ours =
+      list.length === 1
+        ? Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            children: [
+              Text({ color: dotColor(list[0]), children: ['●'] }),
+              Text({ bold: true, children: ['Listening'] }),
+              Text({ wrap: 'truncate-end', children: [list[0].title] }),
+              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, isReplying)}`] }),
+              button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
+              button('stop', 'stop', '2', () => void stop($, list[0].documentId)),
+            ],
+          })
+        : Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            children: [
+              Text({ color: unread > 0 ? 'yellow' : list.some(c => c.state === 'connected') ? 'green' : 'gray', children: ['●'] }),
+              Text({ bold: true, children: ['Listening'] }),
+              Text({ children: [`on ${list.length} canvases`] }),
+              Text({ dimColor: true, children: [`·  ${unread > 0 ? `${unread} new` : 'no new comments'}${e.props.isWorking && isReplying ? '  ·  replying on the canvas' : ''}`] }),
+              button('canvases', 'canvases', '1', () => void $.ui.open({ id: PANE, title: 'Listening', focus: true, closeOnEscape: true })),
+              button('stop-all', 'stop all', '2', () => void stopAll($)),
+            ],
+          })
+    const children = typeof theirs === 'object' && theirs !== null ? [theirs, ours] : [ours]
+    return Box({ flexDirection: 'column', children })
+  })
+
+  // The pane past one canvas: each with its own open and stop.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const list = await read($, armed)
+    const isReplying = await read($, replying)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    if (list.length === 0) return Box({ children: [Text({ dimColor: true, children: ['Nothing is armed in this session.'] })] })
+    return Box({
+      flexDirection: 'column',
+      children: list.map(canvas =>
+        Box({
+          flexDirection: 'row',
+          columnGap: 2,
+          children: [
+            Text({ color: dotColor(canvas), children: ['●'] }),
+            Text({ wrap: 'truncate-end', children: [canvas.title] }),
+            Text({ dimColor: true, children: [statusLabel(canvas, false, isReplying)] }),
+            Button({ key: `open-${canvas.documentId}`, label: 'open', onPress: () => void openCanvas($, canvas.documentId) }),
+            Button({
+              key: `stop-${canvas.documentId}`,
+              label: 'stop',
+              onPress: () => {
+                void stop($, canvas.documentId).then(() => (canvases.size === 0 ? $.ui.close({ id: PANE }) : undefined))
+              },
+            }),
+          ],
+        }),
+      ),
+    })
   })
 
   on('session.end', async ($, e, next) => {
