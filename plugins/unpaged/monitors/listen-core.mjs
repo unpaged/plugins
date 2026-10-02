@@ -96,6 +96,9 @@ export function backoffMs(attempt) {
 export function rejectedKeyLine(outcome, documentId = "") {
   const board = documentId ? ` for canvas ${documentId}` : "";
   const id = documentId || "<documentId>";
+  if (outcome === "unmatched") {
+    return `Unpaged listener key rejected${board} (HTTP 401): this session's key is no longer valid. The stored key file could not be matched to it, so it was left in place; it may hold another session's key or an older layout. Do not mint a key here — check /unpaged:listen status, and let the user turn push back on with /unpaged:listen arm ${id} if it should be on.`;
+  }
   if (outcome === "kept-newer" || outcome === "superseded") {
     return `Unpaged listener key rejected${board} (HTTP 401): this session's key is no longer valid, and a newer key for this canvas is already stored by another session, so its file was left in place. Do not re-arm from here — leave that key in place and check /unpaged:listen status.`;
   }

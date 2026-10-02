@@ -397,6 +397,70 @@ test("alive requires authenticated polling ownership and a successful-poll times
   await check(connected, "monitor:unverified");
 });
 
+test("alive trusts the in-session listener's status file only while its last poll is fresh", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-keys-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const dir = join(home, ".claude", "unpaged", "monitors");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${DOC}.json`);
+  const status = (changes) => JSON.stringify({
+    pid: 0, state: "connected", reason: null, script: null, documentId: DOC, transport: "mod-v1",
+    sessionId: "session-1", updatedAt: new Date().toISOString(), lastSuccessfulPollAt: new Date().toISOString(), ...changes
+  });
+  writeFileSync(file, status({}));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:connected");
+  writeFileSync(file, status({ lastSuccessfulPollAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+  writeFileSync(file, status({ state: "reconnecting" }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:reconnecting");
+  writeFileSync(file, status({ sessionId: undefined }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+  writeFileSync(file, status({ documentId: "22222222-2222-4222-8222-222222222222" }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+});
+
+test("retire matches the loaded config on stdin or a keyId, and keeps a file it cannot match", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-keys-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  assert.equal(run(home, ["retire", DOC]).out, "absent");
+  assert.equal(run(home, ["store", DOC], JSON.stringify(MINT)).code, 0);
+  const file = join(home, ".claude", "unpaged", "listeners", `${DOC}.json`);
+  const stored = readFileSync(file, "utf8");
+  // No config and no keyId: nothing to match on, the file stays.
+  assert.equal(run(home, ["retire", DOC]).out, "unmatched");
+  assert.equal(existsSync(file), true);
+  // Another key's config on stdin: the file holds a newer key, kept.
+  assert.equal(run(home, ["retire", DOC], JSON.stringify({ ...JSON.parse(stored), key: "z".repeat(43) })).out, "kept-newer");
+  assert.equal(existsSync(file), true);
+  // The wrong keyId: kept.
+  assert.equal(run(home, ["retire", DOC, "someone-else"]).out, "kept-newer");
+  assert.equal(existsSync(file), true);
+  // The stored config itself: removed, through the race-safe helper.
+  assert.equal(run(home, ["retire", DOC], stored).out, "removed");
+  assert.equal(existsSync(file), false);
+  // By keyId alone, when the caller has no config left.
+  assert.equal(run(home, ["store", DOC], JSON.stringify(MINT)).code, 0);
+  assert.equal(run(home, ["retire", DOC, MINT.keyId]).out, "removed");
+  assert.equal(existsSync(file), false);
+});
+
+test("status writes the in-session listener's file like the Monitor: tmp + rename, mode 600, mod-v1", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-keys-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const body = { state: "connected", reason: null, script: null, documentId: DOC, sessionId: "session-1", lastSuccessfulPollAt: new Date().toISOString() };
+  assert.equal(run(home, ["status", DOC], JSON.stringify(body)).out, "written");
+  const file = join(home, ".claude", "unpaged", "monitors", `${DOC}.json`);
+  const written = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(written.transport, "mod-v1");
+  assert.equal(written.pid, 0);
+  assert.equal(written.state, "connected");
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal(readdirSync(join(home, ".claude", "unpaged", "monitors")).filter((n) => n.endsWith(".tmp")).length, 0);
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:connected");
+  assert.equal(run(home, ["status", DOC], JSON.stringify({ ...body, documentId: "22222222-2222-4222-8222-222222222222" })).out, "refused");
+  assert.equal(run(home, ["status", DOC], "not json").out, "refused");
+});
+
 test("alive does not trust a connected legacy status just because its PID is live", (t) => {
   const home = mkdtempSync(join(tmpdir(), "unpaged-legacy-status-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
