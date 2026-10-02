@@ -1,2 +1,5 @@
 .claude/
 .DS_Store
+
+# Written by `claude plugin validate|test` for editor types; regenerate, never commit
+plugins/*/tsconfig.json
