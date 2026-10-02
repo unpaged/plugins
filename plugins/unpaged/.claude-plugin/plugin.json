@@ -19,5 +19,6 @@
     "mcp",
     "as-built",
     "decision-log"
-  ]
+  ],
+  "types": "./types/index.d.ts"
 }
