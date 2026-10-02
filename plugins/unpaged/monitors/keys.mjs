@@ -9,11 +9,13 @@
 //   node keys.mjs list                         one row per key file (never the key)
 //   node keys.mjs alive <documentId>           monitor:connected|<state>|dead|absent
 //   node keys.mjs forget <documentId>|all      remove key files (server revoke already done)
+//   node keys.mjs retire <documentId> <keyId>  after HTTP 401: retire the file only if it still
+//                                              holds that key → removed|kept-newer|superseded|absent
 //
 // Prints no key material on any path. Files: ~/.claude/unpaged/listeners/
 // <documentId>.json, mode 600, written tmp + rename. Plain Node ≥ 22.
 
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
@@ -30,7 +32,8 @@ import {
   listenerConfigFromMint,
   monitorLine,
   parseListenerConfig,
-  printableKeyId
+  printableKeyId,
+  retireKeyFile
 } from "./listen-core.mjs";
 import { probeMonitorOwnership } from "./ownership.mjs";
 
@@ -261,6 +264,25 @@ async function forget(target) {
   say(`forgotten ${count}`);
 }
 
+/**
+ * After HTTP 401, the mod's counterpart of the Monitor's own retirement:
+ * the file goes only if it still holds the key that was rejected (matched
+ * by keyId, an identifier, never the key), through the same race-safe helper.
+ */
+async function retire(documentId, keyId) {
+  const keyFile = keyFileFor(keyDir, documentId);
+  const config = await loadConfig(documentId);
+  if (!keyFile || !config) {
+    say("absent");
+    return;
+  }
+  if (typeof keyId !== "string" || !keyId || config.keyId !== keyId) {
+    say("kept-newer");
+    return;
+  }
+  say(await retireKeyFile({ rename, readFile, rm, link }, keyFile, config));
+}
+
 async function main() {
   const [verb, first, second] = process.argv.slice(2);
   switch (verb) {
@@ -276,6 +298,13 @@ async function main() {
       return 0;
     case "alive":
       await alive(first);
+      return 0;
+    case "retire":
+      if (!isDocumentId(first)) {
+        say("absent");
+        return 0;
+      }
+      await retire(first, second);
       return 0;
     case "forget":
       if (first !== "all" && !isDocumentId(first)) {

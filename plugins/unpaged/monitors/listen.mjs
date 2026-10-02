@@ -2,6 +2,10 @@
 // Receive one board's @agent comments through short authenticated HTTP polls.
 // Claude Code's session Monitor turns stdout lines into model notifications.
 // The listener never starts itself, mints keys, or changes a board.
+//
+// The loop itself lives in listen-loop.mjs, shared with the plugin's Claude
+// Code mod; this script is the Node host for it: fetch, stdout, timers, the
+// key and status files, and the local ownership gate.
 
 import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
@@ -9,21 +13,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  KEY_DIR_RELATIVE, PROTOCOL_PREAMBLE, STATUS_DIR_RELATIVE, closePolicy,
-  isDocumentId, keyFileFor, monitorStatus, parseListenerConfig, rejectedKeyLine, retireKeyFile
+  KEY_DIR_RELATIVE, STATUS_DIR_RELATIVE, isDocumentId, keyFileFor, monitorStatus, parseListenerConfig, retireKeyFile
 } from "./listen-core.mjs";
-import { pollInbox, POLL_TIMEOUT_MS } from "./poll.mjs";
+import { pollInbox } from "./poll.mjs";
+import { DEDUPE_LIMIT, LOCAL_SUPERSEDED, runListener as runLoop } from "./listen-loop.mjs";
 import { acquireMonitorOwnership } from "./ownership.mjs";
 
-const scriptPath = fileURLToPath(import.meta.url);
-export const DEDUPE_LIMIT = 4096;
-const LOCAL_SUPERSEDED = "local-superseded";
+export { DEDUPE_LIMIT };
 
-function duration(value, fallback, maximum) {
-  const result = value ?? fallback;
-  if (!Number.isInteger(result) || result < 1 || result > maximum) throw new Error("listener_configuration_invalid");
-  return result;
-}
+const scriptPath = fileURLToPath(import.meta.url);
 
 function wait(ms, signal) {
   return new Promise((resolveWait) => {
@@ -34,87 +32,16 @@ function wait(ms, signal) {
   });
 }
 
+const stdoutLine = (line) => new Promise((resolveWrite, reject) => {
+  process.stdout.write(`${line}\n`, (error) => error ? reject(error) : resolveWrite());
+});
+
 // Injectable boundaries keep transport, cadence and stdout behavior testable
-// without credentials, a live board, or a Claude session.
-export async function runListener(config, options = {}) {
-  const intervalMs = duration(options.pollIntervalMs, 30000, 60000);
-  const idleIntervalMs = duration(options.idlePollIntervalMs, 60000, 60000);
-  const idleAfterMs = duration(options.idleAfterMs, 3600000, 3600000);
-  const retryBaseMs = duration(options.retryBaseMs, 30000, 60000);
-  const maxRetryMs = duration(options.maxRetryMs, 60000, 60000);
-  const timeoutMs = duration(options.requestTimeoutMs, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
-  const dedupeLimit = duration(options.dedupeLimit, DEDUPE_LIMIT, DEDUPE_LIMIT);
-  const now = options.now ?? Date.now;
-  const sleep = options.sleep ?? wait;
-  const say = options.say ?? ((line) => new Promise((resolveWrite, reject) => {
-    process.stdout.write(`${line}\n`, (error) => error ? reject(error) : resolveWrite());
-  }));
-  const report = options.reportStatus ?? (async () => {});
-  const signal = options.signal;
-  const seen = new Set();
-  let lastEventAt = now();
-  let lastSuccessfulPollAt = null;
-  let attempt = 0;
-  let cursor = null;
-  let preambleSent = false;
-  const interval = () => now() - lastEventAt >= idleAfterMs ? idleIntervalMs : intervalMs;
-  const reportStatus = async (state, reason) => {
-    if (!signal?.aborted) await report(state, reason, { lastSuccessfulPollAt });
-  };
-  const finish = async () => {
-    const reason = signal?.reason === LOCAL_SUPERSEDED ? LOCAL_SUPERSEDED : "shutdown";
-    await report("stopped", reason, { lastSuccessfulPollAt });
-    if (reason === LOCAL_SUPERSEDED) {
-      await say("Another local Monitor requested this canvas's Unpaged listener, so this session stops listening. Leave the stored key in place; do not mint another key. Use /unpaged:listen status to check the replacement.");
-    }
-    return { reason };
-  };
-  if (signal?.aborted) return signal.reason === LOCAL_SUPERSEDED ? finish() : { reason: "shutdown" };
-  await reportStatus("connecting");
-  while (!signal?.aborted) {
-    let result;
-    try {
-      result = await pollInbox(config, { fetch: options.fetch, signal, cursor, timeoutMs });
-    } catch {
-      if (signal?.aborted) break;
-      await reportStatus("reconnecting", "poll-failed");
-      await sleep(Math.min(maxRetryMs, Math.max(interval(), retryBaseMs * 2 ** Math.min(attempt++, 16))), signal);
-      continue;
-    }
-    if (signal?.aborted) break;
-    if (result.terminal) {
-      const policy = closePolicy(result.terminal, config.documentId);
-      let line = policy.line;
-      if (policy.deleteKeyFile) {
-        const outcome = await options.retireKey();
-        line = rejectedKeyLine(outcome, config.documentId);
-      }
-      if (signal?.aborted) break;
-      // A newer key's monitor owns this board's status. HTTP 409 never retires
-      // credentials or writes a terminal status over that monitor.
-      if (!policy.superseded) await reportStatus("stopped", `http-${result.terminal}`);
-      if (!signal?.aborted && line) await say(line);
-      return { reason: `http-${result.terminal}` };
-    }
-    lastSuccessfulPollAt = new Date(now()).toISOString();
-    await reportStatus("connected");
-    if (signal?.aborted) break;
-    for (const event of result.events) {
-      if (signal?.aborted) break;
-      if (seen.has(event.id)) continue;
-      seen.add(event.id);
-      if (seen.size > dedupeLimit) seen.delete(seen.values().next().value);
-      lastEventAt = now();
-      if (!preambleSent) { preambleSent = true; await say(PROTOCOL_PREAMBLE); }
-      if (!signal?.aborted) await say(JSON.stringify(event));
-    }
-    cursor = result.nextCursor;
-    attempt = 0;
-    await sleep(interval(), signal);
-  }
-  // The local ownership gate remains held until the final status and any
-  // supersession notice drain. Ordinary external shutdown stays silent.
-  return finish();
+// without credentials, a live board, or a Claude session. `fetch`, `sleep`
+// and `say` default to Node's; a caller may inject `poll` whole instead.
+export function runListener(config, options = {}) {
+  const poll = options.poll ?? ((binding, settings) => pollInbox(binding, { ...settings, fetch: options.fetch }));
+  return runLoop(config, { sleep: wait, say: stdoutLine, ...options, poll });
 }
 
 export async function runMonitor(documentId, options = {}) {
@@ -162,9 +89,7 @@ export async function runMonitor(documentId, options = {}) {
 }
 
 export async function runCommand(documentId, options = {}) {
-  const say = options.say ?? ((line) => new Promise((resolveWrite, reject) => {
-    process.stdout.write(`${line}\n`, (error) => error ? reject(error) : resolveWrite());
-  }));
+  const say = options.say ?? stdoutLine;
   let result;
   try { result = await runMonitor(documentId, options); }
   catch { result = { reason: "monitor-unavailable" }; }
