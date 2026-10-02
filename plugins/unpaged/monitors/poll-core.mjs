@@ -18,7 +18,8 @@ export const TERMINAL_STATUSES = Object.freeze([401, 409]);
 export const failure = (reason) => Object.assign(new Error(reason), { reason });
 export const validCursor = (value) => value === null || (typeof value === "string" && ID.test(value));
 export const isTerminalStatus = (status) => TERMINAL_STATUSES.includes(status);
-const byteLength = (text) => new TextEncoder().encode(text).byteLength;
+/** UTF-8 bytes of a text, for the response ceiling where the body arrives as text. */
+export const byteLength = (text) => new TextEncoder().encode(text).byteLength;
 
 export function validFrame(frame, documentId) {
   if (!frame || typeof frame !== "object" || Array.isArray(frame) || frame.type !== "agent-inbox-event" ||

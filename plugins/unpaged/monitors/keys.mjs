@@ -11,8 +11,14 @@
 //                                              (a mod-v1 status file counts as connected while
 //                                              its last successful poll is under three minutes old)
 //   node keys.mjs forget <documentId>|all      remove key files (server revoke already done)
-//   node keys.mjs retire <documentId> <keyId>  after HTTP 401: retire the file only if it still
-//                                              holds that key → removed|kept-newer|superseded|absent
+//   node keys.mjs retire <documentId> [keyId]  after HTTP 401 or a stop: retire the file only if it
+//                                              still holds the key that was rejected or revoked —
+//                                              matched on the loaded config given as JSON on stdin
+//                                              (the Monitor's own rule), or on the keyId when no
+//                                              config is given → removed|kept-newer|superseded|
+//                                              absent|unmatched (nothing to match on: kept)
+//   node keys.mjs status <documentId>          the in-session listener's status JSON on stdin →
+//                                              written tmp + rename, mode 600, like the Monitor's
 //
 // Prints no key material on any path. Files: ~/.claude/unpaged/listeners/
 // <documentId>.json, mode 600, written tmp + rename. Plain Node ≥ 22.
@@ -288,22 +294,60 @@ async function forget(target) {
 }
 
 /**
- * After HTTP 401, the mod's counterpart of the Monitor's own retirement:
- * the file goes only if it still holds the key that was rejected (matched
- * by keyId, an identifier, never the key), through the same race-safe helper.
+ * After HTTP 401 or a stop, the mod's counterpart of the Monitor's own
+ * retirement: the file goes only if it still holds the key that was
+ * rejected or revoked, through the same race-safe helper. The key to match
+ * comes as the loaded config on stdin (so a file that stores no keyId is
+ * matched the way the Monitor matches it), or as a keyId on the command
+ * line when the caller has no config left. With nothing to match on the
+ * file is kept and the outcome says so.
  */
 async function retire(documentId, keyId) {
   const keyFile = keyFileFor(keyDir, documentId);
-  const config = await loadConfig(documentId);
-  if (!keyFile || !config) {
+  if (!keyFile) {
     say("absent");
     return;
   }
-  if (typeof keyId !== "string" || !keyId || config.keyId !== keyId) {
-    say("kept-newer");
+  const current = await loadConfig(documentId);
+  if (!current) {
+    say("absent");
     return;
   }
-  say(await retireKeyFile({ rename, readFile, rm, link }, keyFile, config));
+  const raw = process.stdin.isTTY ? "" : await readStdin();
+  let loaded = raw.trim() ? parseListenerConfig(raw) : null;
+  if (!loaded && typeof keyId === "string" && keyId) {
+    if (current.keyId !== keyId) {
+      say("kept-newer");
+      return;
+    }
+    loaded = current;
+  }
+  if (!loaded || loaded.documentId !== documentId) {
+    say("unmatched");
+    return;
+  }
+  say(await retireKeyFile({ rename, readFile, rm, link }, keyFile, loaded));
+}
+
+/** The in-session listener's status file, written as the Monitor writes its own: tmp + rename, mode 600. */
+async function status(documentId) {
+  const raw = process.stdin.isTTY ? "" : await readStdin();
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.documentId !== documentId) {
+    say("refused");
+    return;
+  }
+  await mkdir(statusDir, { recursive: true, mode: 0o700 });
+  const file = join(statusDir, `${documentId}.json`);
+  const tmp = `${file}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tmp, JSON.stringify({ ...value, pid: 0, transport: "mod-v1", updatedAt: new Date().toISOString() }), { mode: 0o600 });
+  await rename(tmp, file);
+  say("written");
 }
 
 async function main() {
@@ -328,6 +372,13 @@ async function main() {
         return 0;
       }
       await retire(first, second);
+      return 0;
+    case "status":
+      if (!isDocumentId(first)) {
+        say("refused");
+        return 0;
+      }
+      await status(first);
       return 0;
     case "forget":
       if (first !== "all" && !isDocumentId(first)) {

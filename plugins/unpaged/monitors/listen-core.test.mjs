@@ -235,3 +235,11 @@ test("a displaced listener never paints over a live newer listener's connected s
   assert.equal(shouldWriteStatus(live, 100, "connected", alive), true);
   assert.equal(shouldWriteStatus(null, 100, "stopped", alive), true);
 });
+
+test("rejectedKeyLine for an unmatched key file keeps it and never claims another session owns the canvas", () => {
+  const line = rejectedKeyLine("unmatched", "11111111-1111-4111-8111-111111111111");
+  assert.match(line, /could not be matched/);
+  assert.match(line, /left in place/);
+  assert.doesNotMatch(line, /already stored by another session/);
+  assert.match(line, /unpaged:listen arm 11111111-1111-4111-8111-111111111111/);
+});
