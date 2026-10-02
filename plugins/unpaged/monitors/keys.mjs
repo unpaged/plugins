@@ -7,7 +7,9 @@
 //                                              stores the mint from stdin, tells the model
 //   node keys.mjs store <documentId>           fallback: raw mint JSON on stdin → stored <keyId>
 //   node keys.mjs list                         one row per key file (never the key)
-//   node keys.mjs alive <documentId>           monitor:connected|<state>|dead|absent
+//   node keys.mjs alive <documentId>           monitor:connected|<state>|unverified|dead|absent
+//                                              (a mod-v1 status file counts as connected while
+//                                              its last successful poll is under three minutes old)
 //   node keys.mjs forget <documentId>|all      remove key files (server revoke already done)
 //   node keys.mjs retire <documentId> <keyId>  after HTTP 401: retire the file only if it still
 //                                              holds that key → removed|kept-newer|superseded|absent
@@ -208,6 +210,21 @@ async function list() {
   say(rows.length ? rows.join("\n") : "none");
 }
 
+/** A poll at most this old proves the in-session listener still runs (it polls every 30–60 s). */
+export const MOD_STATUS_FRESH_MS = 3 * 60 * 1000;
+
+/** The in-session listener's status line, from the file the mod writes (transport mod-v1). */
+export function modMonitorLine(status, documentId, now) {
+  if (!status || status.documentId !== documentId || typeof status.sessionId !== "string" || !status.sessionId) {
+    return "monitor:unverified";
+  }
+  const lastPoll = status.lastSuccessfulPollAt;
+  const fresh = typeof lastPoll === "string" && Number.isFinite(Date.parse(lastPoll)) &&
+    new Date(lastPoll).toISOString() === lastPoll && now - Date.parse(lastPoll) < MOD_STATUS_FRESH_MS;
+  if (status.state === "connected") return fresh ? "monitor:connected" : "monitor:unverified";
+  return `monitor:${typeof status.state === "string" && status.state ? status.state : "unknown"}`;
+}
+
 async function alive(documentId) {
   if (!isDocumentId(documentId)) {
     say("monitor:absent");
@@ -215,6 +232,12 @@ async function alive(documentId) {
   }
   try {
     const status = JSON.parse(await readFile(join(statusDir, `${documentId}.json`), "utf8"));
+    if (status && status.transport === "mod-v1") {
+      // The listener inside Claude Code has no process to probe and no port
+      // owner: its word is good while its last successful poll is recent.
+      say(modMonitorLine(status, documentId, Date.now()));
+      return;
+    }
     if (!status || !Number.isSafeInteger(status.pid) || status.pid <= 0) {
       say("monitor:absent");
       return;

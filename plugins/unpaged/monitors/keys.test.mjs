@@ -397,6 +397,28 @@ test("alive requires authenticated polling ownership and a successful-poll times
   await check(connected, "monitor:unverified");
 });
 
+test("alive trusts the in-session listener's status file only while its last poll is fresh", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "unpaged-keys-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const dir = join(home, ".claude", "unpaged", "monitors");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${DOC}.json`);
+  const status = (changes) => JSON.stringify({
+    pid: 0, state: "connected", reason: null, script: null, documentId: DOC, transport: "mod-v1",
+    sessionId: "session-1", updatedAt: new Date().toISOString(), lastSuccessfulPollAt: new Date().toISOString(), ...changes
+  });
+  writeFileSync(file, status({}));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:connected");
+  writeFileSync(file, status({ lastSuccessfulPollAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+  writeFileSync(file, status({ state: "reconnecting" }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:reconnecting");
+  writeFileSync(file, status({ sessionId: undefined }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+  writeFileSync(file, status({ documentId: "22222222-2222-4222-8222-222222222222" }));
+  assert.equal(run(home, ["alive", DOC]).out, "monitor:unverified");
+});
+
 test("alive does not trust a connected legacy status just because its PID is live", (t) => {
   const home = mkdtempSync(join(tmpdir(), "unpaged-legacy-status-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
