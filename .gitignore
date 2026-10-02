@@ -3,3 +3,4 @@
 
 # Written by `claude plugin validate|test` for editor types; regenerate, never commit
 plugins/*/tsconfig.json
+plugins/*/.claude-plugin/types/

@@ -7,7 +7,7 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 ### Added
 
 - Unpaged 1.4.0 candidate: on a Claude Code that runs plugin mods, the listener lives inside Claude Code. Arming mints a fresh key, stores it, revokes the key it replaces and polls on the host's HTTP client; each new @agent comment is a toast and one submitted prompt per poll starts the reply turn. A line above the prompt shows the canvas, its state and the count of new comments, with `1: open` and `2: stop` (a pane past one canvas). Three tools (`listen_arm`, `listen_stop`, `listen_status`) and the no-turn command `/unpaged-listen` share one code path; `/unpaged:visual-plan` and `/unpaged:listen` use them when present and keep the Monitor path otherwise. `/clear` and `/resume` keep listening.
-- The receive loop and the poll contract moved into Node-free modules (`monitors/listen-loop.mjs`, `monitors/poll-core.mjs`) shared by the Monitor script and the mod; `keys.mjs retire <documentId> <keyId>` retires a key file after HTTP 401 only if it still holds that key. The Monitor path is unchanged.
+- The receive loop and the poll contract moved into Node-free modules (`monitors/listen-loop.mjs`, `monitors/poll-core.mjs`) shared by the Monitor script and the mod; `keys.mjs retire <documentId> [keyId]` retires a key file after HTTP 401 or a stop only if it still holds the key being retired (matched on the loaded config given on stdin, the Monitor's own rule, or on a keyId), and `keys.mjs status <documentId>` writes the in-session listener's status file tmp + rename at mode 600; `keys.mjs alive` reads that file as connected while its last poll is fresh. The Monitor path is unchanged.
 
 ### Changed
 

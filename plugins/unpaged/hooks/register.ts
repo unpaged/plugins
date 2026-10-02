@@ -21,7 +21,7 @@ import {
   parseListenerConfig,
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
-import { MAX_POLL_BYTES, failure, isTerminalStatus, parseEnvelope, pollRequest } from '../monitors/poll-core.mjs'
+import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollRequest } from '../monitors/poll-core.mjs'
 
 type On = Parameters<Register>[0]
 type Hook = Extract<Parameters<On>[number], (...args: never[]) => unknown>
@@ -38,9 +38,11 @@ type ListenerConfig = {
 }
 
 type Loop = {
+  config: ListenerConfig
   controller: AbortController
   done: Promise<unknown>
   pending: string[]
+  pendingEvents: number
   flush: { cancel: () => void } | null
   settled: Promise<string>
 }
@@ -53,7 +55,7 @@ const FLUSH_DELAY_MS = 50
 const ENDING_REASONS = new Set(['logout', 'prompt_input_exit', 'other'])
 
 const armed = atom({ plugin: 'unpaged', key: 'armed' } as const, [] as ArmedCanvas[])
-const replying = atom({ plugin: 'unpaged', key: 'replying' } as const, false)
+const replying = atom({ plugin: 'unpaged', key: 'replying' } as const, [] as string[])
 
 // Module records: the truth for what this module runs. The atoms are the
 // band's view of them, rewritten on every change; after a hot reload the
@@ -160,11 +162,16 @@ function pollWith($: Api) {
     })
     const deadline = $.clock.after(settings.timeoutMs, () => rejectLate(failure('poll_timeout')))
     try {
+      // The host reads the body whole before answering and follows redirects on
+      // its own (its fetch exposes neither a redirect mode nor the final URL), so
+      // the ceiling is checked on the text's UTF-8 bytes once it is here, and a
+      // redirected body is caught by the envelope validation rather than refused
+      // up front as poll.mjs does.
       const response = await Promise.race([$.http.fetch(url, { headers }), timedOut])
       if (settings.signal?.aborted) throw failure('poll_aborted')
       if (isTerminalStatus(response.status)) return { terminal: response.status }
       if (response.status !== 200) throw failure('poll_http_error')
-      if (response.text.length > MAX_POLL_BYTES) throw failure('poll_body_limit')
+      if (byteLength(response.text) > MAX_POLL_BYTES) throw failure('poll_body_limit')
       return parseEnvelope(response.text, binding.documentId)
     } finally {
       deadline.cancel()
@@ -186,6 +193,15 @@ function sleepWith($: Api) {
       }
       signal?.addEventListener('abort', onAbort, { once: true })
     })
+}
+
+function isEventLine(line: string) {
+  try {
+    const parsed = JSON.parse(line) as { type?: unknown }
+    return Boolean(parsed) && parsed.type === 'agent-inbox-event'
+  } catch {
+    return false
+  }
 }
 
 /** One submitted prompt per poll: the preamble once, then every new line. The toast is per event. */
@@ -211,37 +227,41 @@ function sayWith($: Api, documentId: string) {
       }
     }
     loop.pending.push(line)
+    if (line !== PROTOCOL_PREAMBLE) loop.pendingEvents += isEventLine(line) ? 1 : 0
     loop.flush?.cancel()
     loop.flush = $.clock.after(FLUSH_DELAY_MS, () => {
       const lines = loop.pending.splice(0)
+      const events = loop.pendingEvents
+      loop.pendingEvents = 0
       loop.flush = null
       if (lines.length === 0) return
-      void update($, replying, () => true)
-      void $.prompt.submit({ text: lines.join('\n') })
+      // The submit resolves when its turn starts; from then until turn.complete
+      // the canvas counts as covered, and only when the turn was handed a comment.
+      void $.prompt
+        .submit({ text: lines.join('\n') })
+        .then(() => (events > 0 ? update($, replying, list => (list.includes(documentId) ? list : [...list, documentId])) : undefined))
+        .catch(() => undefined)
     })
   }
 }
 
+/** The status file, written by the key script the way the Monitor writes its own (tmp + rename, mode 600). */
 async function writeStatus($: Api, documentId: string, state: string, reason: string | null, lastSuccessfulPollAt: string | null) {
   try {
-    const { statusDir } = await paths($)
-    await $.fs.write(
-      `${statusDir}/${documentId}.json`,
-      JSON.stringify({
-        pid: 0,
-        state,
-        reason,
-        script: null,
-        documentId,
-        updatedAt: new Date().toISOString(),
-        transport: 'mod-v1',
-        sessionId: await $.session.id(),
-        lastSuccessfulPollAt,
-      }),
+    await keysVerb(
+      $,
+      'status',
+      [documentId],
+      JSON.stringify({ state, reason, script: null, documentId, sessionId: await $.session.id(), lastSuccessfulPollAt }),
     )
   } catch {
     // Advisory state: a missed write costs one "unverified" status line, nothing more.
   }
+}
+
+/** Retires the key file only if it still holds `config`'s key: the Monitor's own rule, through the key script. */
+async function retireKeyFile($: Api, config: ListenerConfig) {
+  return (await keysVerb($, 'retire', [config.documentId], JSON.stringify(config))).lines[0] ?? 'absent'
 }
 
 /** Starts the loop for a stored key. The caller has already recorded the canvas. */
@@ -252,7 +272,7 @@ async function startLoop($: Api, config: ListenerConfig) {
   const settled = new Promise<string>(resolve => {
     settle = resolve
   })
-  const loop: Loop = { controller, done: Promise.resolve(), pending: [], flush: null, settled }
+  const loop: Loop = { config, controller, done: Promise.resolve(), pending: [], pendingEvents: 0, flush: null, settled }
   loops.set(documentId, loop)
   const reportStatus = async (state: string, reason: string | null | undefined, metadata: { lastSuccessfulPollAt?: string | null }) => {
     const known = state === 'connecting' || state === 'connected' || state === 'reconnecting' || state === 'stopped' ? state : 'reconnecting'
@@ -267,7 +287,7 @@ async function startLoop($: Api, config: ListenerConfig) {
     say: sayWith($, documentId),
     now: () => Date.now(),
     reportStatus,
-    retireKey: async () => (await keysVerb($, 'retire', [documentId, config.keyId ?? ''])).lines[0] ?? 'absent',
+    retireKey: () => retireKeyFile($, config),
     signal: controller.signal,
   })
     .catch(() => ({ reason: 'failed' }))
@@ -321,9 +341,14 @@ async function stop($: Api, documentId: string) {
     loop.controller.abort()
     await loop.done
   }
-  const keyId = canvas?.keyId ?? (await loadConfig($, documentId))?.keyId ?? null
+  const keyId = loop?.config.keyId ?? canvas?.keyId ?? null
   const revoked = await revoke($, keyId)
-  if (revoked) await keysVerb($, 'forget', [documentId])
+  // The file goes only if it still holds the key just revoked: another session
+  // may have re-armed the canvas and stored a newer key under the same name.
+  if (revoked) {
+    if (loop) await retireKeyFile($, loop.config)
+    else if (keyId) await keysVerb($, 'retire', [documentId, keyId], '')
+  }
   canvases.delete(documentId)
   await sync($)
   return { title: canvas?.title ?? documentId, revoked, keyId }
@@ -498,11 +523,12 @@ export const register: Register = on => {
     on('tool.check', { tool }, async () => ({ decision: 'allow' }))
   }
 
-  // The reply turn is over: the comments it answered are no longer new.
+  // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
   on('turn.complete', async ($, e, next) => {
-    if (await read($, replying)) {
-      for (const canvas of canvases.values()) record(canvas.documentId, { unread: 0 })
-      await update($, replying, () => false)
+    const covered = await read($, replying)
+    if (covered.length > 0) {
+      for (const documentId of covered) record(documentId, { unread: 0 })
+      await update($, replying, () => [])
       await sync($)
     }
     return next(e)
@@ -513,7 +539,7 @@ export const register: Register = on => {
     const list = await read($, armed)
     if (list.length === 0 || e.props.hasSurvey) return next(e)
     const theirs = await next(e)
-    const isReplying = await read($, replying)
+    const covered = await read($, replying)
     const { Box, Text, Button } = $.ui.resolve(e)
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
@@ -527,7 +553,7 @@ export const register: Register = on => {
               Text({ color: dotColor(list[0]), children: ['●'] }),
               Text({ bold: true, children: ['Listening'] }),
               Text({ wrap: 'truncate-end', children: [list[0].title] }),
-              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, isReplying)}`] }),
+              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
               button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
               button('stop', 'stop', '2', () => void stop($, list[0].documentId)),
             ],
@@ -539,7 +565,7 @@ export const register: Register = on => {
               Text({ color: unread > 0 ? 'yellow' : list.some(c => c.state === 'connected') ? 'green' : 'gray', children: ['●'] }),
               Text({ bold: true, children: ['Listening'] }),
               Text({ children: [`on ${list.length} canvases`] }),
-              Text({ dimColor: true, children: [`·  ${unread > 0 ? `${unread} new` : 'no new comments'}${e.props.isWorking && isReplying ? '  ·  replying on the canvas' : ''}`] }),
+              Text({ dimColor: true, children: [`·  ${unread > 0 ? `${unread} new` : 'no new comments'}${e.props.isWorking && covered.length > 0 ? '  ·  replying on the canvas' : ''}`] }),
               button('canvases', 'canvases', '1', () => void $.ui.open({ id: PANE, title: 'Listening', focus: true, closeOnEscape: true })),
               button('stop-all', 'stop all', '2', () => void stopAll($)),
             ],
@@ -551,7 +577,7 @@ export const register: Register = on => {
   // The pane past one canvas: each with its own open and stop.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const list = await read($, armed)
-    const isReplying = await read($, replying)
+    const covered = await read($, replying)
     const { Box, Text, Button } = $.ui.resolve(e)
     if (list.length === 0) return Box({ children: [Text({ dimColor: true, children: ['Nothing is armed in this session.'] })] })
     return Box({
@@ -563,7 +589,7 @@ export const register: Register = on => {
           children: [
             Text({ color: dotColor(canvas), children: ['●'] }),
             Text({ wrap: 'truncate-end', children: [canvas.title] }),
-            Text({ dimColor: true, children: [statusLabel(canvas, false, isReplying)] }),
+            Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] }),
             Button({ key: `open-${canvas.documentId}`, label: 'open', onPress: () => void openCanvas($, canvas.documentId) }),
             Button({
               key: `stop-${canvas.documentId}`,

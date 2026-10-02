@@ -81,7 +81,7 @@ On a Claude Code that runs plugin mods, the plugin's hooks module (`hooks/regist
 
 - Arming (`/unpaged:visual-plan`, `/unpaged:listen arm`, `/unpaged-listen arm`, or the `listen_arm` tool) mints a fresh **listener key for that canvas** through the Unpaged MCP server, stores it with `monitors/keys.mjs store` (mode 600, tmp + rename), revokes the key it replaces, and polls `GET https://mcp.unpaged.io/events/poll` from inside Claude Code with the key in the Authorization header — every 30 seconds, or every 60 seconds after an idle hour, each request bounded by a 15-second deadline. The key never enters the model's context: it is read from the key file, sent in a header, and never logged, toasted or submitted.
 - Each new comment is a toast, and one prompt per poll starts the reply turn (the session reads it as *"The unpaged plugin sent a message"*), carrying the same protocol line and JSON events the Monitor prints. A reply waits for the current turn to finish.
-- The line above the prompt shows the canvas, its state and the count of new comments, with `1: open` and `2: stop`. Stopping revokes the key and forgets the file once the server confirmed.
+- The line above the prompt shows the canvas, its state and the count of new comments, with `1: open` and `2: stop`. Stopping revokes the key and retires the key file only if it still holds that key, so a canvas another session re-armed meanwhile keeps its newer key. The listener's status file is written by `monitors/keys.mjs status` the way the Monitor writes its own (tmp + rename, mode 600), and `/unpaged:listen status` reads it as connected while its last poll is under three minutes old.
 - `/clear` and `/resume` keep listening; closing the session ends it. A second arm of the same canvas from another session mints a newer key, and the server answers the older one with HTTP 409, which stops it.
 - Nothing listens between sessions, as before: a session listens only to canvases it armed.
 
@@ -127,7 +127,7 @@ Updating preserves stored listener keys: legacy endpoint files are read in memor
 ## Developing
 
 - `node --test 'plugins/unpaged/monitors/*.test.mjs'` runs the listener's Node tests (the shared poll loop, the poll contract, the key helper, local ownership).
-- `claude plugin validate plugins/unpaged` and `claude plugin test plugins/unpaged` check the mod against the engine and run `hooks/*.test.ts` (Claude Code 2.1.287 or later; both also write the editor types under `.claude-plugin/types/`, which stay out of git).
+- `claude plugin validate plugins/unpaged` and `claude plugin test plugins/unpaged` check the mod against the engine and run `hooks/*.test.ts` (Claude Code 2.1.287 or later; both also write the editor types under `.claude-plugin/types/` and a `tsconfig.json` beside the manifest, both ignored by git).
 - `claude --plugin-dir plugins/unpaged` loads the working copy for one session and reloads the mod when its files change.
 
 ## Support

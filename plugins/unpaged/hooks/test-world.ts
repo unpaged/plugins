@@ -33,6 +33,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   const files = new Map<string, string>()
   const calls = {
     armed: [] as Array<Record<string, unknown>>,
+    replying: [] as string[],
     process: [] as { argv: string[]; stdin?: string }[],
     mcp: [] as { tool: string; args: Record<string, unknown> }[],
     fetch: [] as { url: string; authorization?: string }[],
@@ -44,8 +45,10 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   on('state.set', (_$, e, next) => {
     const write = e as unknown as { plugin?: string; key?: string; value?: unknown }
     if (write.plugin === 'unpaged' && write.key === 'armed') calls.armed = (write.value as Array<Record<string, unknown>>) ?? []
+    if (write.plugin === 'unpaged' && write.key === 'replying') calls.replying = (write.value as string[]) ?? []
     return next(e)
   })
+  on('turn.complete', () => ({ text: '', reason: 'answer' }) as never)
   // The engine's own drawing beneath the plugin: an empty box where the band would be.
   on('ui.render', ($, e) => {
     const { Box } = $.ui.resolve(e)
@@ -78,8 +81,21 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
       return ok(`stored ${keyIdFor(id)}\n`)
     }
     if (verb === 'retire') {
+      // The script's rule: the file goes only if it still holds the key being retired.
+      const stored = files.get(keyFileFor(id))
+      if (!stored) return ok('absent\n')
+      const current = JSON.parse(stored) as { key?: string; keyId?: string }
+      const given = e.init?.stdin ? (JSON.parse(e.init.stdin) as { key?: string }) : null
+      const keyId = argv[4]
+      if (!given && !keyId) return ok('unmatched\n')
+      const same = given ? given.key === current.key : current.keyId === keyId
+      if (!same) return ok('kept-newer\n')
       files.delete(keyFileFor(id))
       return ok('removed\n')
+    }
+    if (verb === 'status') {
+      files.set(statusFileFor(id), JSON.stringify({ ...(JSON.parse(e.init?.stdin ?? '{}') as object), pid: 0, transport: 'mod-v1' }))
+      return ok('written\n')
     }
     if (verb === 'forget') {
       files.delete(keyFileFor(id))
@@ -114,15 +130,24 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     calls.fetch.push({ url: e.url, authorization: e.init?.headers?.Authorization })
     return { value: { status: next.status, ok: next.status === 200, headers: {}, text: JSON.stringify(next.body ?? {}) } }
   })
+  // A submitted prompt starts a turn only when the session is idle: the test
+  // decides when, with startTurn(), as the engine would.
+  const pendingSubmits: Array<() => void> = []
   on('prompt.submit', (_$, e) => {
     calls.submits.push(e.text)
-    return { text: e.text }
+    return new Promise<{ text: string }>(resolve => {
+      pendingSubmits.push(() => resolve({ text: e.text }))
+    }) as never
   })
+  const startTurn = async () => {
+    pendingSubmits.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
   on('ui.toast', (_$, e) => {
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, calls, files }
+  return { clock, calls, files, startTurn }
 }
 
 /** The props a surface hands the band. */

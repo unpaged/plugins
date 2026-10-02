@@ -59,6 +59,10 @@ describe('band', () => {
     await w.clock.advance(30_000)
     await w.clock.advance(50)
     expect(w.calls.submits).toHaveLength(1)
+    const queued = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps({ isWorking: true }) })
+    expect(await queued.find({ text: /replying on the canvas/ })).toBeUndefined()
+    await queued.unmount()
+    await w.startTurn()
     const ui = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps({ isWorking: true }) })
     expect(await ui.find({ text: /replying on the canvas/ })).toBeDefined()
     await ui.unmount()
@@ -92,6 +96,34 @@ describe('band', () => {
     expect(w.calls.armed).toEqual([])
     expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke')).toHaveLength(3)
     await band.unmount()
+  })
+
+  test('a reply turn clears the count of the canvas it answered, not one whose comment arrived meanwhile', async ($, on) => {
+    // Polls are served in call order across both loops: A then B each cycle.
+    const w = world(on, { pages: [page(), page(), page([frame('a1', 'on A', DOCUMENT)]), page(), page(), page([frame('b1', 'on B', SECOND)]), page(), page()] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: SECOND } as never)
+    const counts = () => Object.fromEntries(w.calls.armed.map(c => [c.documentId, c.unread]))
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(counts()).toEqual({ [DOCUMENT]: 1, [SECOND]: 0 })
+    expect(w.calls.submits).toHaveLength(1)
+    await w.startTurn()
+    expect(w.calls.replying).toEqual([DOCUMENT])
+    // While A's reply turn runs, a comment lands on B: its prompt queues behind the turn.
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(counts()).toEqual({ [DOCUMENT]: 1, [SECOND]: 1 })
+    expect(w.calls.submits).toHaveLength(2)
+    expect(w.calls.replying).toEqual([DOCUMENT])
+    await $.turn.complete({} as never)
+    expect(counts()).toEqual({ [DOCUMENT]: 0, [SECOND]: 1 })
+    expect(w.calls.replying).toEqual([])
+    // B's turn starts next and clears B when it completes.
+    await w.startTurn()
+    expect(w.calls.replying).toEqual([SECOND])
+    await $.turn.complete({} as never)
+    expect(counts()).toEqual({ [DOCUMENT]: 0, [SECOND]: 0 })
   })
 
   test('/clear keeps listening and rebuilds the band state', async ($, on) => {

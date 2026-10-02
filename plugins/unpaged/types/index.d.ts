@@ -21,8 +21,8 @@ declare module 'claude-code' {
   interface PluginState {
     unpaged: {
       armed: ArmedCanvas[]
-      /** True while a reply turn this mod submitted has not finished. */
-      replying: boolean
+      /** The canvases whose comments the running reply turn covers; empty when none. */
+      replying: string[]
     }
   }
 }
