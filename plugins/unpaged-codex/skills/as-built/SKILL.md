@@ -212,7 +212,10 @@ may be completed over several calls; it freezes only after final readback.
    retry; never create duplicate records merely because a response was lost.
 
 Keep every element inside its canvas, text dark (`#0f172a` on white), and table
-rows at most 20 per table. On `text`, `fillColor` is text color. Give notes both
+rows at most 20 per table. On `text`, `fillColor` is text color. Give every
+rectangle, and any other basic shape (`triangle`, `diamond`, `hexagon`,
+`ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`: the server
+refuses a basic shape that lacks either, and the whole batch with it. Give notes both
 their `colorVariant` and explicit fill (yellow `#FFE066`, peach `#FFB4A2`, sky
 `#A8D8F0`). Use CommonMark prose, one idea per cell, and only short paths or
 identifiers as code; the Data flow diagram is the deliberate code-block
