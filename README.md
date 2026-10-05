@@ -16,16 +16,17 @@ Claude Code and Codex plugins by [Unpaged](https://unpaged.io) — the whiteboar
 The experimental [Unpaged for Codex](plugins/unpaged-codex/README.md) package
 adds visual plans, same-task comment review, implementation Decision logs, and
 as-built canvases. It requires macOS or Linux, Node.js 24+ available to Codex's
-hooks and local MCP servers. The 0.5.0 candidate uses a bundled local review
+hooks and local MCP servers. Version 0.5.0 uses a bundled local review
 tool to perform setup and launch detached receivers on the host. It requires
 native task/workspace metadata plus the public `queue` and `hooks/list` APIs;
 those source contracts were verified in Codex `0.155.0-alpha.9.2`. Missing
 metadata blocks listening. Installed Ubuntu polling and human-comment wakeup
-passed on candidate `fddbe96`, with one canvas edit and one agent reply verified.
+passed on pre-release build `fddbe96`, with one canvas edit and one agent reply verified.
 The user confirmed event completion, but the canvas write call had no result
 for at least 3 h 17 min for an unexplained reason; the reply came about 3 h 29 min
-after the comment. Completion timeliness, the final candidate update, plan lifecycle and
-recovery remain unverified. Rendering remains usable.
+after the comment. Completion timeliness, an update to the released 0.5.0, plan lifecycle and
+recovery remain unverified; 0.5.0 was released on 2026-10-06 with those checks
+still open. Rendering remains usable.
 
 Use a supported Codex CLI:
 
@@ -56,14 +57,14 @@ A later user-reported fresh Ubuntu installation of 0.4.0 confirmed that the
 explicit login command is required. The user confirmed sign-in and native hook
 trust; a screenshot showed `visual-plan` and `review-plan` loading. A PROPOSED
 canvas and Decision log were independently verified. Native sandbox failures in the 0.4.0 CLI flow
-blocked listener setup. With the 0.5.0 candidate, the user subsequently confirmed
+blocked listener setup. With a 0.5.0 pre-release build, the user subsequently confirmed
 local-tool discovery, `info` and a ready `doctor` result in the same task after
-a plugin enable-switch refresh. The installed `fddbe96` candidate then polled
+a plugin enable-switch refresh. The installed pre-release build `fddbe96` then polled
 successfully and woke that same task on a real human comment. Remote readback
 verified one requested monthly-review note and one agent reply, with the canvas
 still PROPOSED. The user confirmed successful event completion before VM
 shutdown; the durable receipt was not independently read. The plan lifecycle,
-an update to the final candidate with its native instructions and restart
+an update to the released 0.5.0 with its native instructions and restart
 recovery remain unverified for that trial. Delivery took 26.4 seconds and wakeup
 28.3 seconds; the later canvas write call remained unanswered for at least
 3 h 17 min for an unestablished reason, and the reply arrived about 3 h 29 min
@@ -78,7 +79,7 @@ keeps those results and the remaining release gates separate.
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
-| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup is user-confirmed. On installed 0.5.0 candidate `fddbe96`, polling and a real human-comment wakeup passed; remote readback verified one requested edit and one agent reply, with the canvas still PROPOSED. Event completion is user-confirmed, but the write call remained unanswered for at least 3 h 17 min for an unexplained reason. Completion timeliness, plan lifecycle, final-candidate update with native instructions and restart recovery remain unverified. |
+| [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup is user-confirmed. On installed 0.5.0 pre-release build `fddbe96`, polling and a real human-comment wakeup passed; remote readback verified one requested edit and one agent reply, with the canvas still PROPOSED. Event completion is user-confirmed, but the write call remained unanswered for at least 3 h 17 min for an unexplained reason. Completion timeliness, plan lifecycle, an update to the released 0.5.0 with native instructions and restart recovery remain unverified. |
 
 ## Support
 

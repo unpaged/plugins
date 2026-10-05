@@ -3,7 +3,7 @@
 Claude parity baseline: `34ebef185dcca4230b7690bfca791904624c6e41` in the
 Unpaged plugin repository, inspected on 2026-09-19.
 The implementation lives in a separate `plugins/unpaged-codex` package.
-Version 0.4.0 introduced HTTP polling. The 0.5.0 candidate adds a local stdio
+Version 0.4.0 introduced HTTP polling. Version 0.5.0 adds a local stdio
 MCP control surface for host-side setup and detached-worker launch; the Claude
 package and SessionStart hook definition are unchanged. The Codex workflow includes Decision
 logs and as-built records in the durable review adapter.
@@ -254,10 +254,10 @@ on desktop build 26.915.31945 writes only plugin enablement with
 `reloadUserConfig: true`; the native host clears plugin/skill caches, refreshes
 loaded tasks and schedules MCP startup. Saved hook trust, sign-in and review
 storage are unchanged. Same-task local-tool discovery and ready setup were
-user-confirmed on Ubuntu. The installed `fddbe96` candidate subsequently passed
+user-confirmed on Ubuntu. The installed pre-release build `fddbe96` subsequently passed
 worker survival, polling and real-comment wakeup; remote readback verified the
-requested edit and single reply, and the user confirmed event completion. Later
-candidate pickup, native instruction visibility and restart recovery remain
+requested edit and single reply, and the user confirmed event completion. Pickup
+of the released 0.5.0, native instruction visibility and restart recovery remain
 unverified. Delivery took 26.4 seconds and wakeup 28.3 seconds, but the later
 canvas write call remained unanswered for at least 3 h 17 min for an unestablished
 reason; the reply arrived about 3 h 29 min after the comment. This does not

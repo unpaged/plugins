@@ -6,9 +6,9 @@ It is an experimental integration, with the recovery boundaries below.
 
 ## Requirements
 
-- macOS or Linux. The 0.5.0 candidate uses a native local MCP tool for setup,
-  bookkeeping and detached-worker launch. Installed Linux pickup of the final
-  candidate and restart recovery still need verification. Windows is not a supported pilot host.
+- macOS or Linux. Version 0.5.0 uses a native local MCP tool for setup,
+  bookkeeping and detached-worker launch. Installed Linux pickup of the released
+  0.5.0 and restart recovery still need verification. Windows is not a supported pilot host.
 - Node.js 24 or newer, available to Codex, its local MCP servers and hooks.
   Node 24 is the tested support floor; no npm dependencies are required.
 - Codex with local stdio MCP, native per-call task/workspace metadata, the
@@ -32,9 +32,9 @@ direct MCP server as `not_logged_in`. In a later fresh Ubuntu setup with 0.4.0,
 the user confirmed explicit sign-in and native hook trust, and a screenshot
 showed `visual-plan` and `review-plan` loading. A PROPOSED canvas and Decision log
 were independently verified. The 0.4.0 CLI listener setup hit native sandbox
-failures. With the 0.5.0 candidate, the user confirmed local-tool discovery,
+failures. With a 0.5.0 pre-release build, the user confirmed local-tool discovery,
 `info` and a ready `doctor` result in that same task after the bounded refresh
-below. The installed `fddbe96` candidate subsequently polled successfully, and
+below. The installed pre-release build `fddbe96` subsequently polled successfully, and
 read-only VM inspection verified a real human comment reaching and waking the
 same task. The requested canvas edit and single reply were independently read
 back, and the user confirmed successful event completion. Plan lifecycle and
@@ -118,7 +118,7 @@ that boundary. No SQLite-file grants, copied state, alternate profile or
 all-access mode are part of the normal customer flow. Preserve an existing
 binding and report a blocker rather than guessing worker ownership.
 
-The local-tool path is a 0.5.0 candidate. On installed commit `fddbe96`, the user
+The local-tool path ships in 0.5.0. On installed pre-release build `fddbe96`, the user
 reported a live worker and successful polls 30.4 seconds apart. Read-only VM
 inspection subsequently confirmed a connected polling worker and a real human
 comment waking the same task. The requested edit and single reply were read back,
@@ -126,8 +126,8 @@ and the user confirmed event completion before shutting down the VM. Delivery
 took 26.4 seconds and wakeup 28.3 seconds, but the subsequent write call remained
 unanswered for at least 3 h 17 min for an unexplained reason; the reply arrived
 about 3 h 29 min after the comment. Timely completion is therefore not established. Pickup of
-the final candidate, its native instructions and native restart recovery remain
-unverified. See the
+the released 0.5.0, its native instructions and native restart recovery remain
+unverified; 0.5.0 was released on 2026-10-06 with those checks still open. See the
 [dated evidence](../../docs/codex-repository-install-trial-2026-09-20.md#local-review-tool-candidate--september-22-2026).
 
 Repository marketplace distribution is separate from publication in OpenAI's
