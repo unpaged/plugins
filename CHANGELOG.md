@@ -6,12 +6,18 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Changed
 
-- The plan and as-built instructions, for Claude Code and for Codex, tell the agent to give every rectangle, and any other basic shape, a fill colour and an outline colour. The Unpaged server is about to refuse a basic shape created without both; the instruction is safe on the current server too.
+- The Unpaged for Codex plan and as-built instructions tell the agent to give every rectangle, and any other basic shape, a fill colour and an outline colour ([#29](https://github.com/unpaged/plugins/pull/29)). The Unpaged server is about to refuse a basic shape created without both; the instruction is safe on the current server too.
 - Unpaged for Codex 0.5.0 candidate ([#25](https://github.com/unpaged/plugins/pull/25)): local review operations move to the bundled `unpaged_review` stdio MCP server's `review` tool. Native per-call metadata supplies task and workspace identity; the tool accepts no caller task, executable or path overrides and fails closed when required metadata is absent.
 - Native tool discovery keeps its advertised argument schema compact and supplies digest, arm, event and lifecycle inputs in the server instructions. This avoids Codex erasing the previous oversized schema and removes the need to read a skill file just to discover those inputs; strict per-operation runtime validation is unchanged.
 - Setup inspection and detached-worker launch run on the host through that tool, avoiding nested native storage initialization and worker ownership checks inside Linux agent-command sandboxes. The SessionStart recovery hook, polling protocol, keys, bindings and receipt semantics remain unchanged. The installed Ubuntu candidate at `fddbe962` passed worker survival, advancing 30-second polls and a real human comment waking its idle task. The requested edit and single reply were independently read back, and the user confirmed event completion. Delivery took 26.4 seconds and wakeup 28.3 seconds, but the canvas write call remained unanswered for at least 3 h 17 min for an unestablished reason and the reply arrived about 3 h 29 min after the comment. Timely completion, pickup of the final candidate, visibility of its native instructions and automatic restart recovery remain unverified.
 - Installation guidance requires `codex mcp login unpaged` after plugin installation, then native SessionStart hook approval. For a missing local tool after an update on desktop build 26.915.31945, one plugin enable-switch off/on refresh updates the existing task. Same-task local-tool setup, listening and eventual comment handling passed with the evidence and unexplained wait for the call result above on the installed Ubuntu candidate; timely completion, final-candidate pickup and recovery remain pending. Normal setup no longer asks for native SQLite file grants or repeated restarts/reinstalls.
 - The setup helper recognizes the verified native SQLite initialization diagnostic without exposing private paths or stderr. The historical Ubuntu 0.4.0 trial remains partial: sign-in and hook trust are user-confirmed, canvas creation was independently verified, and listener setup was blocked.
+
+## [1.4.1] - 2026-10-05
+
+### Changed
+
+- `/unpaged:visual-plan` and `/unpaged:as-built` tell the agent to give every rectangle, and any other basic shape, a fill colour and an outline colour ([#29](https://github.com/unpaged/plugins/pull/29)). The Unpaged server is about to refuse a basic shape created without both; the instruction is safe on the current server too.
 
 ## [1.4.0] - 2026-10-02
 
@@ -140,7 +146,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/unpaged/plugins/releases/tag/v1.4.1
 [1.4.0]: https://github.com/unpaged/plugins/releases/tag/v1.4.0
 [1.3.0]: https://github.com/unpaged/plugins/releases/tag/v1.3.0
 [unpaged-codex 0.4.0]: https://github.com/unpaged/plugins/pull/23

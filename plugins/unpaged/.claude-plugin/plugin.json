@@ -2,7 +2,7 @@
   "name": "unpaged",
   "displayName": "Unpaged",
   "description": "Renders Claude Code plans as whiteboards on Unpaged. /unpaged:visual-plan turns the plan in your conversation into a canvas of phases, tasks, and dependencies and listens to its @agent comments (delivered automatically by a listener inside Claude Code, with a line above the prompt showing what you listen to; a background Monitor on older builds); approving the plan stamps the canvas EXECUTING. While the plan is implemented the session keeps a Decision log on the canvas; /unpaged:as-built then compiles the as-built record — what shipped vs the plan, every decision and its why, the data flow, a reviewer's guide — as a frozen canvas nested under the plan. Every plan is filed in the Visual plans folder of your Unpaged library.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": {
     "name": "Unpaged",
     "url": "https://unpaged.io"
