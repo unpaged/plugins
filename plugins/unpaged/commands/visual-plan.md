@@ -42,7 +42,7 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
 
    The node is plugin scaffolding, not plan content: it does not count against fidelity (step 6), and its rows are written by the agent during implementation, never at render time.
 
-5. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible.
+5. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible. Give every `rectangle` (and any other basic shape: `triangle`, `diamond`, `hexagon`, `ellipse`, `block-arrow`) both a `fillColor` and a `strokeColor` — the server refuses a basic shape that lacks either, and the whole batch with it.
 
 6. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels. The Decision log node of step 4 is the one addition — scaffolding the plugin owns, not plan content.
 

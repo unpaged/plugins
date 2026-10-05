@@ -54,6 +54,8 @@ Use the root node as the overview:
 - A readable title and concise goal.
 - One phase or major step per rectangle, arranged in the plan's execution order.
   Use anchored connectors for actual dependencies; do not invent dependencies.
+  Give every rectangle both a `fillColor` and a `strokeColor`: the server
+  refuses a basic shape that lacks either, and the whole batch with it.
 - Notes for stated risks, assumptions, and open decisions.
 - One dedicated root text element, kept separate from plan content, beginning
   exactly `**Status:**`. Let review-plan initialize `**Status:** 📋 PROPOSED`
