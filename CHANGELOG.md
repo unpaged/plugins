@@ -4,6 +4,11 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- `/unpaged:visual-plan` and `/unpaged:as-built` tell the agent to look at every canvas it drew before handing the link back: `node_picture` (Unpaged v0.117.0, the server's PNG of a canvas, whole or a region) replaces guessing at the layout — overlaps, text cut off at an edge, clipped table cells and notes are fixed through MCP and checked again, at most twice per canvas. On an older server without the tool the step is skipped and the reply says so.
+- The Unpaged for Codex plan, as-built and review instructions use `node_picture` as rendered QA, with the read-only browser view as the fallback only when the tool is missing.
+
 ## [unpaged-codex 0.5.0] - 2026-10-06
 
 ### Changed
