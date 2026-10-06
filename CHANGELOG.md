@@ -4,6 +4,8 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-06
+
 ### Added
 
 - On a Claude Code that runs plugin mods, the session listens to every canvas it creates or changes through the Unpaged tools, a plan or not ([#33](https://github.com/unpaged/plugins/pull/33)). `document_create`, `template_clone` and the element, node, table, checklist and batch tools arm the canvas the moment the call succeeds, without holding up the call's answer, and the line above the prompt shows it. That happens once per canvas per session: after a stop, a takeover by another session or a refused mint, later changes leave the canvas alone until it is armed by hand. Reading, commenting, renaming, filing and sharing arm nothing. Deleting a canvas through the Unpaged tools stops listening to it and revokes its key, and a key the agent mints by hand for a canvas the session already listens to is refused by the plugin instead of replacing that listener.
@@ -164,7 +166,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/unpaged/plugins/releases/tag/v1.6.0
 [1.5.0]: https://github.com/unpaged/plugins/releases/tag/v1.5.0
 [unpaged-codex 0.6.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.6.0
 [unpaged-codex 0.5.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.5.0
