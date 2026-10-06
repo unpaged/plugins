@@ -601,14 +601,17 @@ export const register: Register = on => {
   })
 
   // A deleted canvas is not listened to any longer: the server would go on
-  // answering its polls until the session ends. The answer waits for the stop,
-  // as listen_stop's does, so its key is revoked even if the session ends next.
+  // answering its polls until the session ends. The stop runs beside the
+  // delete's answer, since its revoke can wait on a permission decision.
   on('tool.call', { tool: unpagedTool(['document_delete']) }, async ($, e, next) => {
     const ran = await next(e)
     const documentId = text((e as unknown as Record<string, unknown>).documentId)
-    if (ran.deny === undefined && ran.isError !== true) {
-      await arming.get(documentId)?.catch(() => undefined)
-      if (canvases.has(documentId)) await stop($, documentId).catch(() => undefined)
+    if (ran.deny === undefined && ran.isError !== true && (canvases.has(documentId) || arming.has(documentId))) {
+      // Mid-mint, wait for the canvas to be recorded; once it is, stop it at once.
+      const recorded = canvases.has(documentId) ? undefined : arming.get(documentId)?.catch(() => undefined)
+      void Promise.resolve(recorded)
+        .then(() => (canvases.has(documentId) ? stop($, documentId) : undefined))
+        .catch(() => undefined)
     }
     return ran
   })

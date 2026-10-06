@@ -34,6 +34,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   const calls = {
     armed: [] as Array<Record<string, unknown>>,
     replying: [] as string[],
+    armedOnce: [] as string[],
     process: [] as { argv: string[]; stdin?: string }[],
     mcp: [] as { tool: string; args: Record<string, unknown> }[],
     fetch: [] as { url: string; authorization?: string }[],
@@ -46,6 +47,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     const write = e as unknown as { plugin?: string; key?: string; value?: unknown }
     if (write.plugin === 'unpaged' && write.key === 'armed') calls.armed = (write.value as Array<Record<string, unknown>>) ?? []
     if (write.plugin === 'unpaged' && write.key === 'replying') calls.replying = (write.value as string[]) ?? []
+    if (write.plugin === 'unpaged' && write.key === 'armedOnce') calls.armedOnce = (write.value as string[]) ?? []
     return next(e)
   })
   on('turn.complete', () => ({ text: '', reason: 'answer' }) as never)

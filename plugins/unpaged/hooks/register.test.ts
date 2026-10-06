@@ -257,6 +257,20 @@ describe('arming on its own', () => {
     expect(mints(w)).toHaveLength(2)
   })
 
+  test('the record of armed canvases is written again after /clear, so a stopped canvas stays stopped', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    w.calls.armedOnce = []
+    await $.classic.SessionStart({ source: 'clear' } as never)
+    expect(w.calls.armedOnce).toEqual([DOCUMENT])
+    await edit($)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+  })
+
   test('a canvas another session took over is not taken back by the next change', async ($, on) => {
     const w = world(on, { pages: [page(), { status: 409 }] })
     unpagedServer(on)
@@ -288,6 +302,7 @@ describe('arming on its own', () => {
     await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
     await until(() => w.calls.armed[0]?.state === 'connected')
     await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    await until(() => w.calls.armed.length === 0)
     expect(w.calls.armed).toEqual([])
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
   })
