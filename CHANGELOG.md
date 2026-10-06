@@ -4,6 +4,18 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-06
+
+### Changed
+
+- `/unpaged:visual-plan` and `/unpaged:as-built` tell the agent to look at every canvas it drew before handing the link back ([#32](https://github.com/unpaged/plugins/pull/32)): `node_picture` (Unpaged v0.117.0, the server's PNG of a canvas, whole or a region) replaces guessing at the layout — overlaps, text cut off at an edge, clipped table cells and notes are fixed through MCP and checked again, at most twice per canvas. On an older server without the tool the step is skipped and the reply says so.
+
+## [unpaged-codex 0.6.0] - 2026-10-06
+
+### Changed
+
+- The Unpaged for Codex plan, as-built and review instructions use `node_picture` as rendered QA, with the read-only browser view as the fallback only when the tool is missing ([#32](https://github.com/unpaged/plugins/pull/32)).
+
 ## [unpaged-codex 0.5.0] - 2026-10-06
 
 ### Changed
@@ -148,7 +160,9 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/unpaged/plugins/releases/tag/v1.5.0
+[unpaged-codex 0.6.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.6.0
 [unpaged-codex 0.5.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.5.0
 [1.4.1]: https://github.com/unpaged/plugins/releases/tag/v1.4.1
 [1.4.0]: https://github.com/unpaged/plugins/releases/tag/v1.4.0

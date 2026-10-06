@@ -51,8 +51,9 @@ Do not execute repository scripts. Use review-plan's discovered local
 `unpaged_review` / `review` tool for digest, status and lifecycle bookkeeping.
 These operations never write canvas content. Native metadata supplies the task
 and workspace; never pass task IDs or paths to that tool. Follow review-plan's
-availability and legacy-helper rules if the current local tool is unavailable. Every canvas mutation uses Unpaged MCP; browser use is
-read-only rendered QA. If authentication or tools are unavailable, follow
+availability and legacy-helper rules if the current local tool is unavailable. Every canvas mutation uses Unpaged MCP; rendered QA is
+`node_picture` (the server's PNG of a canvas), with a read-only browser view as
+the fallback when that tool is missing. If authentication or tools are unavailable, follow
 review-plan's recovery instructions rather than substituting a local document.
 
 ## Read before creating anything
@@ -204,7 +205,11 @@ may be completed over several calls; it freezes only after final readback.
    relabel phases on a canvas already stamped BUILT. A complete record for an
    unbound, proposed, or accepted canvas leaves phase labels alone: recording
    historical code is not an execution transition.
-7. Read back all new nodes and edits, confirm record counts, link targets,
+7. Look at each new canvas with `node_picture` and fix clipped cells, notes
+   that run past their edge or overlapping boxes through MCP before stamping
+   anything (the Data flow canvas holds a Mermaid fence, which the picture
+   draws as a grey placeholder, so it is not checked this way). Then read back
+   all new nodes and edits, confirm record counts, link targets,
    exact-source evidence, task coverage, table bounds, and layout. Inspect the
    rendered overview and children read-only when available; correct layout
    through MCP before freezing the record. If visual QA is unavailable, report

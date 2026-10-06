@@ -40,11 +40,13 @@ The `unpaged` MCP server ships with this plugin. If its tools (e.g. `document_cr
    - A `uml-note` with the rule: *One row per deviation from the plan, dropped or added task, or choice a reviewer would ask "why" about — appended at the moment of the choice, naming the alternative rejected. Never backfill, never rewrite earlier rows.*
    - On the root, a small `rectangle` labelled `📝 Decision log` that links to this node (`isLink`, `linkTarget`), placed below the phase row and apart from it, so it never reads as a phase.
 
-   The node is plugin scaffolding, not plan content: it does not count against fidelity (step 6), and its rows are written by the agent during implementation, never at render time.
+   The node is plugin scaffolding, not plan content: it does not count against fidelity (step 7), and its rows are written by the agent during implementation, never at render time.
 
 5. **Layout discipline:** space elements generously (no overlaps), keep tables ≤20 rows, keep every element inside the canvas — enlarge the node first via `node_update` (`canvasWidth`/`canvasHeight`) if content needs room. Cell/label/text content is CommonMark Markdown. On a `text` element `fillColor` is the **text colour** (there is no background fill): use a dark colour such as `#0f172a` on the default white canvas, never white — white text is invisible. Give every `rectangle` (and any other basic shape: `triangle`, `diamond`, `hexagon`, `ellipse`, `block-arrow`) both a `fillColor` and a `strokeColor` — the server refuses a basic shape that lacks either, and the whole batch with it.
 
-6. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels. The Decision log node of step 4 is the one addition — scaffolding the plugin owns, not plan content.
+6. **Look at what you drew.** Before handing the link back, ask the server for a picture of each canvas you created — `node_picture({ documentId, nodeId })` for the root and for every phase node — and look at it the way the user will: nothing overlaps, nothing is cut off at the canvas edge, every table cell and note shows its whole text, the phase boxes read in order. Fix what you see through the MCP tools (move or resize elements, enlarge the canvas with `node_update`) and look again, at most twice per canvas. On a dense canvas, pass `region` to zoom in on a part. The picture draws Mermaid as a grey placeholder and emoji in black and white; that is not a layout fault. If `node_picture` is missing (an older server), skip this step and say in your reply that the layout was not checked visually.
+
+7. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels. The Decision log node of step 4 is the one addition — scaffolding the plugin owns, not plan content.
 
 ## Finish
 

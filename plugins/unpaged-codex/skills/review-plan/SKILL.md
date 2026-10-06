@@ -20,8 +20,9 @@ plan baseline; it never grants implementation permission by itself.
 
 Use Unpaged MCP for semantic reads and **every board mutation**, preferring the
 existing registered Unpaged plugin connection exposed in this task. Honor an
-explicit user choice of an already configured direct connection. Browser use is
-read-only rendered QA. Discover the tools and schemas actually exposed in this
+explicit user choice of an already configured direct connection. Rendered QA is
+`node_picture`, the server's PNG of a canvas; browser use is read-only and only
+the fallback when that tool is missing. Discover the tools and schemas actually exposed in this
 session: document and element reads, `element_update.expectedRevision`,
 `comments_list_unresolved`, `comment_reply`, and the three listener-key tools.
 Use the discovered tool names; registered and direct connections can have

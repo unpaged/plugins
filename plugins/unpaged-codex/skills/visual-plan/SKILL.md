@@ -92,9 +92,15 @@ Do not invent decisions when rendering the plan.
 Use the discovered schemas for `batch_create_elements`, connectors, checklists,
 and node creation. Space content without overlaps and enlarge the canvas before
 placing elements beyond its bounds. Read back all created nodes and elements,
-check the plan's fidelity and bounds, then inspect the rendered overview and
-detail canvases through a read-only browser view. Correct layout through MCP.
-If rendered QA is unavailable, report that limit rather than claim a visual pass.
+check the plan's fidelity and bounds, then look at the rendered overview and
+every detail canvas with `node_picture` (the server's PNG of a canvas, whole or
+a `region` of it): no overlaps, nothing cut off at the canvas edge, every table
+cell and note showing its whole text, phase boxes in order. Correct layout
+through MCP and look again, at most twice per canvas. The picture draws Mermaid
+as a grey placeholder and emoji in black and white; neither is a layout fault.
+A read-only browser view is the fallback only when `node_picture` is missing
+(an older server). If rendered QA is unavailable, report that limit rather than
+claim a visual pass.
 Use current revisions for subsequent edits, as required by review-plan.
 
 ## During implementation
