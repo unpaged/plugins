@@ -26,7 +26,7 @@ export const page = (events: unknown[] = [], nextCursor: string | null = null): 
 
 export type World = ReturnType<typeof world>
 
-export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; openExit?: number } = {}) {
+export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; openExit?: number; hangPolls?: boolean } = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
@@ -124,6 +124,10 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   })
   let served = 0
   on('http.fetch', (_$, e) => {
+    if (settings.hangPolls) {
+      calls.fetch.push({ url: e.url, authorization: e.init?.headers?.Authorization })
+      return new Promise(() => {}) as never
+    }
     const pages = settings.pages ?? []
     const next = pages[Math.min(served, Math.max(pages.length - 1, 0))] ?? page()
     served += 1
@@ -148,6 +152,34 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     return { value: undefined }
   })
   return { clock, calls, files, startTurn }
+}
+
+/**
+ * The Unpaged MCP server beneath the plugin, answering the model's tool calls
+ * as core does: the tool's record (its content blocks) and, as `text`, the
+ * JSON the model reads. Returns the tools it was called with, in order.
+ */
+export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string } = {}) {
+  const called: string[] = []
+  on('tool.call', { tool: /^mcp__(plugin_unpaged_unpaged|unpaged)__(?!listen_)/ }, (_$, e) => {
+    const tool = String(e.tool)
+    const name = tool.slice(tool.lastIndexOf('__') + 2)
+    const args = e as unknown as Record<string, unknown>
+    called.push(name)
+    const answer = (value: unknown, text = JSON.stringify(value, null, 2)) =>
+      ({ result: [{ type: 'text', text: JSON.stringify(value) }], text }) as never
+    if (settings.refuse?.includes(name)) return { isError: true, result: 'Error: refused', text: 'Error: refused' } as never
+    if (name === 'document_create') return answer({ id: SECOND, title: args.title, rootNodeId: 'root-2', url: `https://unpaged.io/document/${SECOND}/edit` })
+    if (name === 'template_clone') return answer({ id: THIRD, title: args.title ?? 'From the gallery', nodes: [{ id: 'root-3', elements: [] }] }, settings.cloneText)
+    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: args.documentId, keyId: 'key-by-hand', title: 'By hand' })
+    return answer({ ok: true })
+  })
+  return called
+}
+
+/** Lets work a hook left running unawaited (an arm a tool call started) go on until `done` holds. */
+export async function until(done: () => boolean, turns = 200) {
+  for (let turn = 0; turn < turns && !done(); turn++) await new Promise(resolve => setTimeout(resolve, 0))
 }
 
 /** The props a surface hands the band. */
