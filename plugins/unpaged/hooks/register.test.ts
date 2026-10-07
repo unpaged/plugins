@@ -307,6 +307,29 @@ describe('arming on its own', () => {
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
   })
 
+  test('a delete answers without waiting for the revoke of its key', async ($, on) => {
+    const w = world(on, { hangRevoke: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    const answer = await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    expect(JSON.stringify(answer)).toContain('ok')
+    await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke'))
+    expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+  })
+
+  test('a canvas deleted while its key is being minted is stopped once the mint lands', async ($, on) => {
+    const w = world(on, { holdMint: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => mints(w).length === 1)
+    await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    w.releaseMint()
+    await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke') && w.calls.armed.length === 0)
+    expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+    expect(w.calls.armed).toEqual([])
+  })
+
   test('a key minted by hand for a canvas the session listens to is answered by the plugin, not the server', async ($, on) => {
     const w = world(on)
     const called = unpagedServer(on)

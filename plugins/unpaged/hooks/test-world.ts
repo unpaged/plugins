@@ -26,7 +26,10 @@ export const page = (events: unknown[] = [], nextCursor: string | null = null): 
 
 export type World = ReturnType<typeof world>
 
-export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; openExit?: number; hangPolls?: boolean } = {}) {
+export function world(
+  on: On,
+  settings: { pages?: Page[]; mintError?: boolean; openExit?: number; hangPolls?: boolean; holdMint?: boolean; hangRevoke?: boolean } = {},
+) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
@@ -113,9 +116,14 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     return ok('')
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
-  on('mcp.call', (_$, e) => {
+  // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
+  let releaseMint: () => void = () => {}
+  const minted = settings.holdMint ? new Promise<void>(resolve => (releaseMint = resolve)) : Promise.resolve()
+  on('mcp.call', async (_$, e) => {
     calls.mcp.push({ tool: e.tool, args: e.args })
+    if (e.tool === 'agent_listener_key_revoke' && settings.hangRevoke) return new Promise(() => {}) as never
     if (e.tool === 'agent_listener_key_create') {
+      await minted
       if (settings.mintError) return { value: { content: [{ type: 'text', text: 'listener key cap reached' }], isError: true } }
       const documentId = String(e.args.documentId)
       const mint = { pollUrl: POLL_URL, key: KEY, documentId, keyId: keyIdFor(documentId), title: titleFor(documentId) }
@@ -153,7 +161,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, calls, files, startTurn }
+  return { clock, calls, files, startTurn, releaseMint: () => releaseMint() }
 }
 
 /**
