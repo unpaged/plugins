@@ -24,7 +24,8 @@ jobs:
             plugins/unpaged/.claude-plugin/plugin.json \
             plugins/unpaged/.mcp.json \
             plugins/unpaged/hooks/hooks.json \
-            plugins/unpaged/hooks/plan-approved-context.json; do
+            plugins/unpaged/hooks/plan-approved-context.json \
+            plugins/unpaged/hooks/allow-key-calls.json; do
             node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
             echo "ok $f"
           done

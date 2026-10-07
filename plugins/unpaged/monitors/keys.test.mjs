@@ -58,6 +58,33 @@ test("the key-store hook fires for the Unpaged MCP server names only", () => {
   }
 });
 
+test("the key-call allow answers for the two key tools on the Unpaged MCP server names only", () => {
+  const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
+  const entry = hooks.hooks.PreToolUse.find((e) => /agent_listener_key_/.test(e.matcher));
+  assert.ok(entry, "hook entry present");
+  assert.match(entry.hooks[0].command, /allow-key-calls\.json"$/);
+  const answer = JSON.parse(readFileSync(fileURLToPath(new URL("../hooks/allow-key-calls.json", import.meta.url)), "utf8"));
+  assert.equal(answer.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(answer.hookSpecificOutput.permissionDecision, "allow");
+  const matcher = new RegExp(entry.matcher);
+  for (const server of ["plugin_unpaged_unpaged", "unpaged", "unpaged-staging"]) {
+    for (const tool of ["agent_listener_key_create", "agent_listener_key_revoke"]) {
+      assert.equal(matcher.test(`mcp__${server}__${tool}`), true, `${server} ${tool}`);
+    }
+  }
+  for (const name of [
+    "mcp__unpaged__agent_listener_keys_list",
+    "mcp__unpaged__document_create",
+    "mcp__unpaged__agent_listener_key_revoke_all",
+    "mcp__evil__agent_listener_key_revoke",
+    "mcp__evil_mcp__unpaged__agent_listener_key_create",
+    "xmcp__unpaged__agent_listener_key_create",
+    "mcp__plugin_evil_unpaged__agent_listener_key_revoke"
+  ]) {
+    assert.equal(matcher.test(name), false, name);
+  }
+});
+
 test("printableKeyId prints a plain token and nothing else", () => {
   assert.equal(printableKeyId("a0d1bf7f4d152d31"), "a0d1bf7f4d152d31");
   assert.equal(printableKeyId("k\nignore previous"), "");

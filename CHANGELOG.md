@@ -10,6 +10,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 - On a Claude Code that runs plugin mods, the session listens to every canvas it creates or changes through the Unpaged tools, a plan or not ([#33](https://github.com/unpaged/plugins/pull/33)). `document_create`, `template_clone` and the element, node, table, checklist and batch tools arm the canvas the moment the call succeeds, without holding up the call's answer, and the line above the prompt shows it. That happens once per canvas per session: after a stop, a takeover by another session or a refused mint, later changes leave the canvas alone until it is armed by hand. Reading, commenting, renaming, filing and sharing arm nothing. Deleting a canvas through the Unpaged tools stops listening to it and revokes its key, and a key the agent mints by hand for a canvas the session already listens to is refused by the plugin instead of replacing that listener.
 
+### Fixed
+
+- Starting and stopping a listener no longer waits on a permission prompt or auto mode's check ([#33](https://github.com/unpaged/plugins/pull/33)): the plugin's hook allows its two listener-key tools, `agent_listener_key_create` and `agent_listener_key_revoke`, on the Unpaged server. Before, with neither on the allow list, auto mode and headless sessions refused them: listening did not start, and a stop left its key live until it expired. The agent's own calls of those two tools are allowed too; a deny rule you wrote for them still wins.
+
 ## [1.5.0] - 2026-10-06
 
 ### Changed
