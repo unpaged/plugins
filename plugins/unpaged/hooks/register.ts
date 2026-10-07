@@ -5,6 +5,12 @@
 // to listen, and the key never enters the model's context: it is read from
 // the key file, sent in a request header, and never logged or shown.
 //
+// A canvas the session creates or changes through the Unpaged tools is armed
+// on its own, the moment the call succeeds, once per canvas per session: a
+// stop, a takeover by another session or a refused mint stays as it is
+// until someone arms that canvas by hand. A canvas deleted through those
+// tools stops being listened to.
+//
 // The loop itself is monitors/listen-loop.mjs, shared with the Monitor
 // script that older clients keep using; this file is its host.
 import { atom, read, update } from 'claude-code'
@@ -54,8 +60,32 @@ const FLUSH_DELAY_MS = 50
 /** session.end reasons that end listening; `clear` and `resume` keep it. */
 const ENDING_REASONS = new Set(['logout', 'prompt_input_exit', 'other'])
 
+/** The Unpaged MCP server's tools, by the name the model calls them: `mcp__plugin_unpaged_unpaged__…` installed with this plugin, `mcp__unpaged__…` added by hand. */
+const unpagedTool = (names: readonly string[]) => new RegExp(`^mcp__(plugin_unpaged_)?unpaged[A-Za-z0-9-]*__(${names.join('|')})$`)
+/** The tools that make a canvas: the new document is their answer. */
+const CREATES = ['document_create', 'template_clone'] as const
+/** The tools that change what is on a canvas: the canvas is their `documentId`. */
+const EDITS = [
+  'element_create',
+  'element_update',
+  'element_delete',
+  'checklist_toggle_item',
+  'table_append_row',
+  'table_update_cell',
+  'batch_create_elements',
+  'batch_update_elements',
+  'batch_delete_elements',
+  'batch_reorder_elements',
+  'node_create',
+  'node_create_with_elements',
+  'node_create_with_id',
+  'node_update',
+  'node_delete',
+] as const
+
 const armed = atom({ plugin: 'unpaged', key: 'armed' } as const, [] as ArmedCanvas[])
 const replying = atom({ plugin: 'unpaged', key: 'replying' } as const, [] as string[])
+const armedOnce = atom({ plugin: 'unpaged', key: 'armedOnce' } as const, [] as string[])
 
 // Module records: the truth for what this module runs. The atoms are the
 // band's view of them, rewritten on every change; after a hot reload the
@@ -64,6 +94,8 @@ const canvases = new Map<string, ArmedCanvas>()
 const loops = new Map<string, Loop>()
 /** Arms in flight, so two calls for one canvas mint one key, not two. */
 const arming = new Map<string, Promise<ArmResult>>()
+/** Every canvas this session has armed, by hand or on its own; only a canvas not in it is armed on its own. */
+const armedBefore = new Set<string>()
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
 
@@ -141,6 +173,7 @@ async function revoke($: Api, keyId: string | null) {
 async function sync($: Api) {
   const list = [...canvases.values()].sort((a, b) => a.armedAt - b.armedAt)
   await update($, armed, () => list)
+  await update($, armedOnce, () => [...armedBefore])
 }
 
 function record(documentId: string, changes: Partial<ArmedCanvas>) {
@@ -312,6 +345,8 @@ function arm($: Api, documentId: string, title: string | null): Promise<ArmResul
 }
 
 async function armNow($: Api, documentId: string, title: string | null): Promise<ArmResult> {
+  armedBefore.add(documentId)
+  await update($, armedOnce, () => [...armedBefore])
   const previous = await loadConfig($, documentId)
   const config = await mint($, documentId)
   if (previous?.keyId && previous.keyId !== config.keyId) void revoke($, previous.keyId)
@@ -352,6 +387,36 @@ async function stop($: Api, documentId: string) {
   canvases.delete(documentId)
   await sync($)
   return { title: canvas?.title ?? documentId, revoked, keyId }
+}
+
+/** The new document a create tool answered with: in the JSON the model reads, or in the tool's own record. */
+function createdDocument(value: unknown): { id: string; title: string } | null {
+  if (typeof value === 'string') {
+    try {
+      return createdDocument(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const block of value) {
+      const found = createdDocument((block as { text?: unknown } | null)?.text)
+      if (found) return found
+    }
+    return null
+  }
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (Array.isArray(record.content)) return createdDocument(record.content)
+  return isDocumentId(record.id) ? { id: String(record.id), title: text(record.title) } : null
+}
+
+/** Arms a canvas the session just made or changed, unless this session has armed it before. */
+function armOnItsOwn($: Api, documentId: string, title: string | null) {
+  if (!isDocumentId(documentId) || armedBefore.has(documentId) || arming.has(documentId) || loops.has(documentId)) return
+  arm($, documentId, title).catch((err: unknown) => {
+    $.ui.toast(`Not listening to ${title || documentId}: ${String((err as Error)?.message ?? err)}`, { timeoutMs: 8000 })
+  })
 }
 
 const timeLabel = (at: number) => {
@@ -412,8 +477,10 @@ async function statusText($: Api) {
 }
 
 async function restoreAfterReload($: Api) {
+  for (const documentId of await read($, armedOnce)) armedBefore.add(documentId)
   const kept = await read($, armed)
   for (const canvas of kept) {
+    armedBefore.add(canvas.documentId)
     if (canvas.state === 'stopped' || loops.has(canvas.documentId)) continue
     const config = await loadConfig($, canvas.documentId)
     if (!config) continue
@@ -517,6 +584,48 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__unpaged__listen_status' }, async $ => ({ result: await statusText($) }))
+
+  // A canvas made or changed through the Unpaged tools is armed on its own once
+  // the call succeeds. The call's answer goes back as it came, without waiting
+  // for the arm: arming waits up to FIRST_POLL_WAIT_MS for the first poll.
+  on('tool.call', { tool: unpagedTool([...CREATES, ...EDITS]) }, async ($, e, next) => {
+    const ran = await next(e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    const input = e as unknown as Record<string, unknown>
+    if (CREATES.some(name => e.tool.endsWith(`__${name}`))) {
+      const answer = ran as { text?: unknown; result?: unknown }
+      const created = createdDocument(answer.text) ?? createdDocument(answer.result)
+      if (created) armOnItsOwn($, created.id, created.title || text(input.title) || null)
+    } else armOnItsOwn($, text(input.documentId), null)
+    return ran
+  })
+
+  // A deleted canvas is not listened to any longer: the server would go on
+  // answering its polls until the session ends. The stop runs beside the
+  // delete's answer, since its revoke can wait on a permission decision.
+  on('tool.call', { tool: unpagedTool(['document_delete']) }, async ($, e, next) => {
+    const ran = await next(e)
+    const documentId = text((e as unknown as Record<string, unknown>).documentId)
+    if (ran.deny === undefined && ran.isError !== true && (canvases.has(documentId) || arming.has(documentId))) {
+      // Mid-mint, wait for the canvas to be recorded; once it is, stop it at once.
+      const recorded = canvases.has(documentId) ? undefined : arming.get(documentId)?.catch(() => undefined)
+      void Promise.resolve(recorded)
+        .then(() => (canvases.has(documentId) ? stop($, documentId) : undefined))
+        .catch(() => undefined)
+    }
+    return ran
+  })
+
+  // A key minted by hand for a canvas this session listens to would take the
+  // canvas over and stop that listener (the newest key wins): the mod answers.
+  on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, ($, e, next) => {
+    const documentId = text((e as unknown as Record<string, unknown>).documentId)
+    if (!loops.has(documentId) && !arming.has(documentId)) return next(e)
+    const title = canvases.get(documentId)?.title || documentId
+    return {
+      deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
+    }
+  })
 
   // The mod answers for its own tools: no permission prompt and no classifier.
   for (const tool of ['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status']) {

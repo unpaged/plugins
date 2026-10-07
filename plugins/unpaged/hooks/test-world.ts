@@ -26,7 +26,10 @@ export const page = (events: unknown[] = [], nextCursor: string | null = null): 
 
 export type World = ReturnType<typeof world>
 
-export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; openExit?: number } = {}) {
+export function world(
+  on: On,
+  settings: { pages?: Page[]; mintError?: boolean; openExit?: number; hangPolls?: boolean; holdMint?: boolean; hangRevoke?: boolean } = {},
+) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
@@ -34,6 +37,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   const calls = {
     armed: [] as Array<Record<string, unknown>>,
     replying: [] as string[],
+    armedOnce: [] as string[],
     process: [] as { argv: string[]; stdin?: string }[],
     mcp: [] as { tool: string; args: Record<string, unknown> }[],
     fetch: [] as { url: string; authorization?: string }[],
@@ -46,6 +50,7 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     const write = e as unknown as { plugin?: string; key?: string; value?: unknown }
     if (write.plugin === 'unpaged' && write.key === 'armed') calls.armed = (write.value as Array<Record<string, unknown>>) ?? []
     if (write.plugin === 'unpaged' && write.key === 'replying') calls.replying = (write.value as string[]) ?? []
+    if (write.plugin === 'unpaged' && write.key === 'armedOnce') calls.armedOnce = (write.value as string[]) ?? []
     return next(e)
   })
   on('turn.complete', () => ({ text: '', reason: 'answer' }) as never)
@@ -111,9 +116,14 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     return ok('')
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
-  on('mcp.call', (_$, e) => {
+  // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
+  let releaseMint: () => void = () => {}
+  const minted = settings.holdMint ? new Promise<void>(resolve => (releaseMint = resolve)) : Promise.resolve()
+  on('mcp.call', async (_$, e) => {
     calls.mcp.push({ tool: e.tool, args: e.args })
+    if (e.tool === 'agent_listener_key_revoke' && settings.hangRevoke) return new Promise(() => {}) as never
     if (e.tool === 'agent_listener_key_create') {
+      await minted
       if (settings.mintError) return { value: { content: [{ type: 'text', text: 'listener key cap reached' }], isError: true } }
       const documentId = String(e.args.documentId)
       const mint = { pollUrl: POLL_URL, key: KEY, documentId, keyId: keyIdFor(documentId), title: titleFor(documentId) }
@@ -124,6 +134,10 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
   })
   let served = 0
   on('http.fetch', (_$, e) => {
+    if (settings.hangPolls) {
+      calls.fetch.push({ url: e.url, authorization: e.init?.headers?.Authorization })
+      return new Promise(() => {}) as never
+    }
     const pages = settings.pages ?? []
     const next = pages[Math.min(served, Math.max(pages.length - 1, 0))] ?? page()
     served += 1
@@ -147,7 +161,35 @@ export function world(on: On, settings: { pages?: Page[]; mintError?: boolean; o
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, calls, files, startTurn }
+  return { clock, calls, files, startTurn, releaseMint: () => releaseMint() }
+}
+
+/**
+ * The Unpaged MCP server beneath the plugin, answering the model's tool calls
+ * as core does: the tool's record (its content blocks) and, as `text`, the
+ * JSON the model reads. Returns the tools it was called with, in order.
+ */
+export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string } = {}) {
+  const called: string[] = []
+  on('tool.call', { tool: /^mcp__(plugin_unpaged_unpaged|unpaged)__(?!listen_)/ }, (_$, e) => {
+    const tool = String(e.tool)
+    const name = tool.slice(tool.lastIndexOf('__') + 2)
+    const args = e as unknown as Record<string, unknown>
+    called.push(name)
+    const answer = (value: unknown, text = JSON.stringify(value, null, 2)) =>
+      ({ result: [{ type: 'text', text: JSON.stringify(value) }], text }) as never
+    if (settings.refuse?.includes(name)) return { isError: true, result: 'Error: refused', text: 'Error: refused' } as never
+    if (name === 'document_create') return answer({ id: SECOND, title: args.title, rootNodeId: 'root-2', url: `https://unpaged.io/document/${SECOND}/edit` })
+    if (name === 'template_clone') return answer({ id: THIRD, title: args.title ?? 'From the gallery', nodes: [{ id: 'root-3', elements: [] }] }, settings.cloneText)
+    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: args.documentId, keyId: 'key-by-hand', title: 'By hand' })
+    return answer({ ok: true })
+  })
+  return called
+}
+
+/** Lets work a hook left running unawaited (an arm a tool call started) go on until `done` holds. */
+export async function until(done: () => boolean, turns = 200) {
+  for (let turn = 0; turn < turns && !done(); turn++) await new Promise(resolve => setTimeout(resolve, 0))
 }
 
 /** The props a surface hands the band. */

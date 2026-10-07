@@ -1,7 +1,8 @@
 // Tests of the listener mod's arming, delivery and stopping, run against the
 // engine with the world beneath the mod answered by the test's own hooks.
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DOCUMENT, KEY, POLL_URL, frame, keyFileFor, page, statusFileFor, world } from './test-world'
+import type { Engine } from 'claude-code/testing'
+import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, frame, keyFileFor, page, statusFileFor, unpagedServer, until, world } from './test-world'
 
 const KEY_FILE = keyFileFor(DOCUMENT)
 const STATUS_FILE = statusFileFor(DOCUMENT)
@@ -178,5 +179,173 @@ describe('stop', () => {
     expect(answer).toContain('connected')
     expect(answer).toContain('key-1')
     expect(answer).not.toContain(KEY)
+  })
+})
+
+describe('arming on its own', () => {
+  const UNPAGED = 'mcp__plugin_unpaged_unpaged__'
+  const mints = (w: ReturnType<typeof world>) => w.calls.mcp.filter(c => c.tool === 'agent_listener_key_create')
+  const edit = ($: Engine, documentId = DOCUMENT) =>
+    $.tool.call({ tool: `${UNPAGED}batch_create_elements`, documentId, nodeId: 'root', elements: [] } as never)
+  /** Gives work a hook left running a moment to show itself, for a check that nothing happened. */
+  const quiet = () => until(() => false, 20)
+
+  test('a canvas made with document_create is armed once the call answers, without waiting for its first poll', async ($, on) => {
+    const w = world(on, { hangPolls: true })
+    unpagedServer(on)
+    const answer = await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Owl detective' } as never)
+    expect(JSON.stringify(answer)).toContain(SECOND)
+    await until(() => w.calls.fetch.length > 0)
+    expect(mints(w).map(c => c.args.documentId)).toEqual([SECOND])
+    expect(w.calls.fetch).toEqual([{ url: POLL_URL, authorization: `Bearer ${KEY}` }])
+    expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: SECOND, title: 'Owl detective', state: 'connecting' })])
+    expect(w.calls.process.every(c => !c.argv.join(' ').includes(KEY))).toBe(true)
+  })
+
+  test('a canvas made with template_clone is armed, read from the tool record when the model reads a file pointer', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on, { cloneText: 'Output too large (120KB). Full output saved to: /tmp/clone.txt' })
+    await $.tool.call({ tool: `${UNPAGED}template_clone`, templateId: 'tpl-1' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: THIRD, title: 'From the gallery', state: 'connected' })])
+  })
+
+  test('a change to an existing canvas arms it once, under the title the mint names', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: `${UNPAGED}element_update`, documentId: DOCUMENT, nodeId: 'root', elementId: 'e1', updates: {} } as never)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+    expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: DOCUMENT, title: 'Plan canvas', state: 'connected' })])
+  })
+
+  test('the connector name of the server arms too', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Owl detective' } as never)
+    await until(() => w.calls.armed.length > 0)
+    expect(mints(w).map(c => c.args.documentId)).toEqual([SECOND])
+  })
+
+  test('a refused call, a read, and a change to the document record arm nothing', async ($, on) => {
+    const w = world(on)
+    const called = unpagedServer(on, { refuse: ['document_create'] })
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Refused' } as never)
+    await $.tool.call({ tool: `${UNPAGED}document_get`, documentId: DOCUMENT } as never)
+    await $.tool.call({ tool: `${UNPAGED}node_picture`, documentId: DOCUMENT, nodeId: 'root' } as never)
+    await $.tool.call({ tool: `${UNPAGED}document_update`, documentId: DOCUMENT, folder: 'Owls' } as never)
+    await quiet()
+    expect(called).toEqual(['document_create', 'document_get', 'node_picture', 'document_update'])
+    expect(mints(w)).toEqual([])
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test('a canvas stopped by hand stays stopped through later changes, and listen_arm still arms it', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    await edit($)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+    expect(w.calls.armed).toEqual([])
+    const again = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(again)).toContain('Listening on')
+    expect(mints(w)).toHaveLength(2)
+  })
+
+  test('the record of armed canvases is written again after /clear, so a stopped canvas stays stopped', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    w.calls.armedOnce = []
+    await $.classic.SessionStart({ source: 'clear' } as never)
+    expect(w.calls.armedOnce).toEqual([DOCUMENT])
+    await edit($)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+  })
+
+  test('a canvas another session took over is not taken back by the next change', async ($, on) => {
+    const w = world(on, { pages: [page(), { status: 409 }] })
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await w.clock.advance(30_000)
+    await until(() => w.calls.armed[0]?.state === 'stopped')
+    await edit($)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+    expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: DOCUMENT, state: 'stopped' })])
+  })
+
+  test('a refused mint is one toast, and the next change does not mint again', async ($, on) => {
+    const w = world(on, { mintError: true })
+    unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.toasts.length > 0)
+    await edit($)
+    await quiet()
+    expect(mints(w)).toHaveLength(1)
+    expect(w.calls.toasts).toEqual([expect.stringContaining(`Not listening to ${DOCUMENT}`)])
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test('deleting a canvas the session listens to stops listening and revokes its key', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    await until(() => w.calls.armed.length === 0)
+    expect(w.calls.armed).toEqual([])
+    expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+  })
+
+  test('a delete answers without waiting for the revoke of its key', async ($, on) => {
+    const w = world(on, { hangRevoke: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    const answer = await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    expect(JSON.stringify(answer)).toContain('ok')
+    await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke'))
+    expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+  })
+
+  test('a canvas deleted while its key is being minted is stopped once the mint lands', async ($, on) => {
+    const w = world(on, { holdMint: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => mints(w).length === 1)
+    await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    w.releaseMint()
+    await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke') && w.calls.armed.length === 0)
+    expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test('a key minted by hand for a canvas the session listens to is answered by the plugin, not the server', async ($, on) => {
+    const w = world(on)
+    const called = unpagedServer(on)
+    await edit($)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    const answer = await $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('Not minted: this session already listens to Plan canvas')
+    expect(called).toEqual(['batch_create_elements'])
+    expect(mints(w)).toHaveLength(1)
+    expect(w.calls.process.filter(c => c.argv[2] === 'store')).toHaveLength(1)
+  })
+
+  test('a key minted by hand for a canvas the session does not listen to goes to the server', async ($, on) => {
+    world(on)
+    const called = unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId: SECOND } as never)
+    expect(called).toEqual(['agent_listener_key_create'])
   })
 })

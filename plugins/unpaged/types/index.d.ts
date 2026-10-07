@@ -23,6 +23,8 @@ declare module 'claude-code' {
       armed: ArmedCanvas[]
       /** The canvases whose comments the running reply turn covers; empty when none. */
       replying: string[]
+      /** Every canvas this session has armed, by hand or on its own: a canvas is armed on its own only once. */
+      armedOnce: string[]
     }
   }
 }
