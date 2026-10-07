@@ -4,7 +4,7 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
-## [1.6.0] - 2026-10-06
+## [1.6.0] - 2026-10-07
 
 ### Added
 
