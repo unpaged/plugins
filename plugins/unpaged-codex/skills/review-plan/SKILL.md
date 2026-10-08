@@ -212,6 +212,12 @@ Read the bound event from `pending`, then `begin documentId eventId`. Persist
 the returned operation token in the current task context. Do not act twice on
 completed events. An existing processing/uncertain operation is a recovery case.
 
+For a `mention` event, once `begin` has returned its token, reply `On it…` on
+that thread with `comment_reply` before anything else, so its author sees the
+comment was picked up. Post it once per event: never for a `reply` event, on
+recovery, or on a resumed operation. It is not the completion reply; `complete`
+cites the reply that says what changed.
+
 Use `comments_list_unresolved` to find that thread and inspect the actual schema
 returned. Check document, node, full human message, and current state. If exact
 message IDs are exposed by both the event and the read, match those IDs; never
