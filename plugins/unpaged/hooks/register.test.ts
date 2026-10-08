@@ -162,7 +162,7 @@ describe('"On it…"', () => {
     expect(w.calls.submitsAtReply).toEqual([0])
     const lines = w.calls.submits[0].split('\n')
     expect(JSON.parse(lines[1]).id).toBe('e1')
-    expect(lines.at(-1)).toBe(`The unpaged plugin already replied "On it…" on thread ${THREAD}; do not post another.`)
+    expect(lines.at(-1)).toBe(`The unpaged plugin already replied "On it…" on thread ${THREAD}; do not post another, and it is not your answer.`)
   })
 
   test('a reply in a thread the agent took part in gets no "On it…"', async ($, on) => {
@@ -201,7 +201,7 @@ describe('"On it…"', () => {
     expect(w.calls.submits).toEqual([])
     await w.clock.advance(5_000)
     await until(() => w.calls.submits.length > 0)
-    expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin is replying "On it…" on thread ${THREAD}; do not post another.`)
+    expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin is replying "On it…" on thread ${THREAD}; do not post another, and it is not your answer.`)
   })
 })
 

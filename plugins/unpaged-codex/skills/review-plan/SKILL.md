@@ -212,12 +212,6 @@ Read the bound event from `pending`, then `begin documentId eventId`. Persist
 the returned operation token in the current task context. Do not act twice on
 completed events. An existing processing/uncertain operation is a recovery case.
 
-For a `mention` event, once `begin` has returned its token, reply `On it…` on
-that thread with `comment_reply` before anything else, so its author sees the
-comment was picked up. Post it once per event: never for a `reply` event, on
-recovery, or on a resumed operation. It is not the completion reply; `complete`
-cites the reply that says what changed.
-
 Use `comments_list_unresolved` to find that thread and inspect the actual schema
 returned. Check document, node, full human message, and current state. If exact
 message IDs are exposed by both the event and the read, match those IDs; never
@@ -245,6 +239,14 @@ limitation when relevant. If a future schema exposes that exact read, verify its
 identity, full text, author role, and current state before processing; follow the
 current comment tool contract and leave any response thread open. Never resolve
 a human thread.
+
+For a `mention` event routed with `resolved: false`, once
+`comments_list_unresolved` shows that thread open and you will act on it,
+reply `On it…` there with `comment_reply` before any edit, so its author sees
+the comment was picked up. Post it once per event: never for a `reply` event, a
+thread you skip, on recovery, or on a resumed operation. It is not the
+completion reply and never `complete` or `recover` evidence; `complete` cites
+the reply that says what changed.
 
 For the matched owner/editor request, read current element revisions and make
 only the requested plan change using MCP compare-and-swap preconditions.
@@ -447,7 +449,8 @@ and must not be reported as passed because doctor or manual resume succeeded.
 `queue_uncertain` means queueing may have succeeded. Inspect the pending Codex
 queue and task history for the event marker; absence from the pending queue is
 not proof of failure. `effect_uncertain` means a board action may have committed.
-Read the board and thread before deciding what remains. Do not automatically
+Read the board and thread before deciding what remains; an `On it…` reply
+alone means the work was picked up, not done, and is never `replyId` evidence. Do not automatically
 replay either state. `recover` requires an explicit human recovery decision and
 recorded evidence. An interrupted agent turn can leave `processing` while the
 receiver is healthy: after verifying the task was interrupted, use decision

@@ -261,7 +261,7 @@ function acknowledge($: Api, documentId: string, event: Record<string, unknown>)
   const id = text(event.id)
   const threadId = text(event.threadId)
   if (event.reason !== 'mention' || !id || !isDocumentId(threadId)) return Promise.resolve(null)
-  const posted = `The unpaged plugin already replied "${ACK_TEXT}" on thread ${threadId}; do not post another.`
+  const posted = `The unpaged plugin already replied "${ACK_TEXT}" on thread ${threadId}; do not post another, and it is not your answer.`
   const reply = (async () => {
     try {
       if (ackedEvents.has(id)) return posted
@@ -277,7 +277,7 @@ function acknowledge($: Api, documentId: string, event: Record<string, unknown>)
   })()
   return new Promise(resolve => {
     const late = $.clock.after(ACK_WAIT_MS, () =>
-      resolve(`The unpaged plugin is replying "${ACK_TEXT}" on thread ${threadId}; do not post another.`),
+      resolve(`The unpaged plugin is replying "${ACK_TEXT}" on thread ${threadId}; do not post another, and it is not your answer.`),
     )
     void reply.then(note => {
       late.cancel()

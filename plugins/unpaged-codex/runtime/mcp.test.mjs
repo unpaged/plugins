@@ -62,6 +62,10 @@ test("native discovery supplies usable digest, arm and receipt guidance without 
   assert.match(guide, /continue requires checking precisely which effects remain and returns a fresh operationToken/);
   assert.match(guide, /Only uncertain queueing supports retry, after explicit confirmation/);
   assert.match(guide, /an empty pending queue is not proof of failure and never authorizes retry/);
+  assert.match(guide, /once that read shows the thread open and you will act on it, reply On it… there before any edit/);
+  assert.match(guide, /The On it… reply is never replyId evidence/);
+  assert.match(guide, /An On it… reply alone means picked up, not done, and is never replyId evidence for complete or recover/);
+  assert.doesNotMatch(guide, /reply once in the same thread and read back the reply/);
   await handler({ jsonrpc: "2.0", method: "notifications/initialized" });
   const tool = (await handler(request(2, "tools/list"))).result.tools[0];
   assert.match(tool.description, /Native server instructions/);

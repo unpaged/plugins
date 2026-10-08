@@ -136,6 +136,7 @@ test("the preamble has the agent post the \"On it…\" reply on a mention unless
   assert.ok(PROTOCOL_PREAMBLE.includes(`comment_reply "${ACK_TEXT}"`));
   assert.match(PROTOCOL_PREAMBLE, /reason is mention/);
   assert.match(PROTOCOL_PREAMBLE, /unless the unpaged plugin says it already replied/);
+  assert.match(PROTOCOL_PREAMBLE, /never the answer/);
 });
 
 test("the comment_reply hook allows exactly the \"On it…\" reply and says nothing about any other", () => {

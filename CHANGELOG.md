@@ -8,13 +8,13 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Added
 
-- An @agent comment gets the reply *On it…* on its thread the moment it reaches the session, before the agent starts on it, so the person who wrote it sees it was picked up ([#34](https://github.com/unpaged/plugins/pull/34)). On a Claude Code that runs plugin mods the plugin posts it itself; the agent's turn waits up to five seconds for it and is told whether it went out, and posts it itself when the server refused it. Two @agent comments in one thread on one poll get one *On it…*, and an event a re-armed listener receives again is not answered twice. A human's reply in a thread the agent already answered gets none. On the Monitor path the agent posts it, as the protocol line now says. The plugin's hook allows a `comment_reply` on the Unpaged server only when its text is exactly *On it…*; every other reply goes through your own rules.
+- An @agent comment gets the reply *On it…* on its thread the moment it reaches the session, before the agent starts on it, so the person who wrote it sees it was picked up ([#34](https://github.com/unpaged/plugins/pull/34)). On a Claude Code that runs plugin mods the plugin posts it itself; the agent's turn waits up to five seconds for it and is told whether it went out, and posts it itself when the server refused it. Two @agent comments in one thread on one poll get one *On it…*, and an event a re-armed listener receives again is not answered twice. A human's reply in a thread the agent already answered gets none. On the Monitor path the agent posts it, as the protocol line now says. The protocol line and the plugin's note both tell the agent that *On it…* is never the answer, so a thread whose last message is that reply still gets one. The plugin's hook allows a `comment_reply` on the Unpaged server only when its text is exactly *On it…*; every other reply goes through your own rules.
 
 ## [unpaged-codex 0.7.0] - 2026-10-08
 
 ### Added
 
-- The Unpaged for Codex review instructions have the agent reply *On it…* on the thread of an @agent comment right after it claims the event, before it reads or changes the board ([#34](https://github.com/unpaged/plugins/pull/34)). Once per event, never for a reply or on recovery; it is not the completion reply.
+- The Unpaged for Codex review instructions have the agent reply *On it…* on the thread of an @agent comment once it has claimed the event and read the thread open, before it changes the board ([#34](https://github.com/unpaged/plugins/pull/34)). Once per event; never for a reply, a resolved or skipped thread, or on recovery. It is never the completion reply or recovery evidence, in the skill and in the native instructions alike.
 
 ## [1.6.0] - 2026-10-07
 
