@@ -4,11 +4,15 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-08
+
 ### Added
 
 - An @agent comment gets the reply *On it…* on its thread the moment it reaches the session, before the agent starts on it, so the person who wrote it sees it was picked up ([#34](https://github.com/unpaged/plugins/pull/34)). On a Claude Code that runs plugin mods the plugin posts it itself; the agent's turn waits up to five seconds for it and is told whether it went out, and posts it itself when the server refused it. Two @agent comments in one thread on one poll get one *On it…*, and an event a re-armed listener receives again is not answered twice. A human's reply in a thread the agent already answered gets none. On the Monitor path the agent posts it, as the protocol line now says. The plugin's hook allows a `comment_reply` on the Unpaged server only when its text is exactly *On it…*; every other reply goes through your own rules.
 
-### Added (unpaged-codex)
+## [unpaged-codex 0.7.0] - 2026-10-08
+
+### Added
 
 - The Unpaged for Codex review instructions have the agent reply *On it…* on the thread of an @agent comment right after it claims the event, before it reads or changes the board ([#34](https://github.com/unpaged/plugins/pull/34)). Once per event, never for a reply or on recovery; it is not the completion reply.
 
@@ -178,7 +182,9 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/unpaged/plugins/releases/tag/v1.7.0
+[unpaged-codex 0.7.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.7.0
 [1.6.0]: https://github.com/unpaged/plugins/releases/tag/v1.6.0
 [1.5.0]: https://github.com/unpaged/plugins/releases/tag/v1.5.0
 [unpaged-codex 0.6.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.6.0
