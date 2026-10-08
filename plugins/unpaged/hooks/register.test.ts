@@ -2,7 +2,8 @@
 // engine with the world beneath the mod answered by the test's own hooks.
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, frame, keyFileFor, page, statusFileFor, unpagedServer, until, world } from './test-world'
+import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, THREAD, frame, keyFileFor, page, statusFileFor, unpagedServer, until, world } from './test-world'
+import type { World } from './test-world'
 
 const KEY_FILE = keyFileFor(DOCUMENT)
 const STATUS_FILE = statusFileFor(DOCUMENT)
@@ -76,7 +77,10 @@ describe('delivery', () => {
     expect(w.calls.submits).toHaveLength(1)
     const lines = w.calls.submits[0].split('\n')
     expect(lines[0]).toContain('Unpaged @agent event')
-    expect(lines.slice(1).map(l => JSON.parse(l).id)).toEqual(['e1', 'e2'])
+    expect(lines.slice(1, 3).map(l => JSON.parse(l).id)).toEqual(['e1', 'e2'])
+    // Both comments are in one thread: one "On it…" answers them, and one line says so.
+    expect(w.calls.mcp.filter(c => c.tool === 'comment_reply')).toHaveLength(1)
+    expect(lines.slice(3)).toEqual([expect.stringContaining('already replied "On it…"')])
     expect(w.calls.submits[0]).not.toContain(KEY)
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ unread: 2 }))
     // The replay of e2 on the next page is not delivered again.
@@ -139,6 +143,65 @@ describe('delivery', () => {
     await clock.advance(7_000)
     await clock.advance(30_000)
     expect(fetches).toBe(2)
+  })
+})
+
+describe('"On it…"', () => {
+  const replies = (w: World) => w.calls.mcp.filter(c => c.tool === 'comment_reply')
+  const deliver = async (w: World, submits = 1) => {
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    await until(() => w.calls.submits.length >= submits)
+  }
+
+  test('an @agent comment gets "On it…" on its thread before the turn starts, and the turn is told so', async ($, on) => {
+    const w = world(on, { pages: [page(), page([frame('e1')])] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await deliver(w)
+    expect(replies(w)).toEqual([{ tool: 'comment_reply', args: { documentId: DOCUMENT, threadId: THREAD, text: 'On it…' } }])
+    expect(w.calls.submitsAtReply).toEqual([0])
+    const lines = w.calls.submits[0].split('\n')
+    expect(JSON.parse(lines[1]).id).toBe('e1')
+    expect(lines.at(-1)).toBe(`The unpaged plugin already replied "On it…" on thread ${THREAD}; do not post another.`)
+  })
+
+  test('a reply in a thread the agent took part in gets no "On it…"', async ($, on) => {
+    const w = world(on, { pages: [page(), page([frame('r1', 'thanks', DOCUMENT, 'reply')])] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await deliver(w)
+    expect(replies(w)).toEqual([])
+    expect(w.calls.submits[0].split('\n')).toHaveLength(2)
+  })
+
+  test('an event replayed to a new listener is not answered twice', async ($, on) => {
+    const w = world(on, { pages: [page(), page([frame('e1')]), page(), page([frame('e1')])] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await deliver(w)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await deliver(w, 2)
+    expect(replies(w)).toHaveLength(1)
+    expect(w.calls.submits[1]).toContain(`already replied "On it…" on thread ${THREAD}`)
+  })
+
+  test('a refused reply tells the agent to post it', async ($, on) => {
+    const w = world(on, { pages: [page(), page([frame('e1')])], ack: 'refused' })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await deliver(w)
+    expect(replies(w)).toHaveLength(1)
+    expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin could not reply "On it…" on thread ${THREAD}; post it there yourself first.`)
+  })
+
+  test('a reply that does not answer holds the turn five seconds, then the turn starts without posting another', async ($, on) => {
+    const w = world(on, { pages: [page(), page([frame('e1')])], ack: 'hang' })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    await until(() => false, 20)
+    expect(w.calls.submits).toEqual([])
+    await w.clock.advance(5_000)
+    await until(() => w.calls.submits.length > 0)
+    expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin is replying "On it…" on thread ${THREAD}; do not post another.`)
   })
 })
 

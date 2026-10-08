@@ -4,6 +4,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Added
+
+- An @agent comment gets the reply *On it…* on its thread the moment it reaches the session, before the agent starts on it, so the person who wrote it sees it was picked up ([#34](https://github.com/unpaged/plugins/pull/34)). On a Claude Code that runs plugin mods the plugin posts it itself; the agent's turn waits up to five seconds for it and is told whether it went out, and posts it itself when the server refused it. Two @agent comments in one thread on one poll get one *On it…*, and an event a re-armed listener receives again is not answered twice. A human's reply in a thread the agent already answered gets none. On the Monitor path the agent posts it, as the protocol line now says. The plugin's hook allows a `comment_reply` on the Unpaged server only when its text is exactly *On it…*; every other reply goes through your own rules.
+
 ## [1.6.0] - 2026-10-07
 
 ### Added
