@@ -4,9 +4,11 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-08
+
 ### Fixed
 
-- Arming a canvas by hand works again ([#35](https://github.com/unpaged/plugins/pull/35)). Since 1.6.0, `/unpaged-listen arm` and the `listen_arm` tool, which `/unpaged:visual-plan` uses to listen to the canvas it creates, answered *Not minted: this session already listens to …* and armed nothing. The plugin's own request for the key reached the check that refuses keys the agent mints by hand, and that check refused it. The check now lets the plugin's own request through; a key the agent or another plugin mints by hand for a canvas the session listens to is still refused. Canvases armed on their own after a create or a change kept working.
+- Arming a canvas by hand works again ([#35](https://github.com/unpaged/plugins/pull/35)). In 1.6.0 and 1.7.0, `/unpaged-listen arm` and the `listen_arm` tool, which `/unpaged:visual-plan` uses to listen to the canvas it creates, answered *Not minted: this session already listens to …* and armed nothing. The plugin's own request for the key reached the check that refuses keys the agent mints by hand, and that check refused it. The check now lets the plugin's own request through; a key the agent or another plugin mints by hand for a canvas the session listens to is still refused. Canvases armed on their own after a create or a change kept working.
 
 ## [1.7.0] - 2026-10-08
 
@@ -186,7 +188,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/unpaged/plugins/releases/tag/v1.7.1
 [1.7.0]: https://github.com/unpaged/plugins/releases/tag/v1.7.0
 [unpaged-codex 0.7.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.7.0
 [1.6.0]: https://github.com/unpaged/plugins/releases/tag/v1.6.0
