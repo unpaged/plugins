@@ -4,6 +4,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Fixed
+
+- Arming a canvas by hand works again ([#35](https://github.com/unpaged/plugins/pull/35)). Since 1.6.0, `/unpaged-listen arm` and the `listen_arm` tool, which `/unpaged:visual-plan` uses to listen to the canvas it creates, answered *Not minted: this session already listens to …* and armed nothing. The plugin's own request for the key reached the check that refuses keys the agent mints by hand, and that check refused it. The check now lets the plugin's own request through; a key the agent or another plugin mints by hand for a canvas the session listens to is still refused. Canvases armed on their own after a create or a change kept working.
+
 ## [1.6.0] - 2026-10-07
 
 ### Added
