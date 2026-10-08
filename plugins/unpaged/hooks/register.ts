@@ -1,7 +1,8 @@
 // The Unpaged listener mod: a session listens to a canvas's @agent comments
 // from inside Claude Code. Arming mints the listener key, the poll loop runs
 // in this module on the host's fetch, each new comment shows as a toast and
-// starts one reply turn through a submitted prompt. No model step is needed
+// starts one reply turn through a submitted prompt. An @agent comment gets an
+// "On it…" reply on its thread before that turn starts. No model step is needed
 // to listen, and the key never enters the model's context: it is read from
 // the key file, sent in a request header, and never logged or shown.
 //
@@ -17,6 +18,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { ArmedCanvas } from '../types'
 import {
+  ACK_TEXT,
   KEY_DIR_RELATIVE,
   PROTOCOL_PREAMBLE,
   STATUS_DIR_RELATIVE,
@@ -49,6 +51,10 @@ type Loop = {
   done: Promise<unknown>
   pending: string[]
   pendingEvents: number
+  /** The "On it…" replies the next flush waits for, each answering the line the agent reads about it. */
+  acks: Array<Promise<string | null>>
+  /** Threads those replies go to: two @agent comments in one thread on one poll get one "On it…". */
+  ackThreads: Set<string>
   flush: { cancel: () => void } | null
   settled: Promise<string>
 }
@@ -57,6 +63,10 @@ const MCP_SERVER = 'unpaged'
 const PANE = 'unpaged-listening'
 const FIRST_POLL_WAIT_MS = 8000
 const FLUSH_DELAY_MS = 50
+/** How long a turn waits for its "On it…" replies before it starts without them. */
+const ACK_WAIT_MS = 5000
+/** Event ids already answered with "On it…", kept so a reload's replayed poll does not answer them twice. */
+const ACKED_LIMIT = 200
 /** session.end reasons that end listening; `clear` and `resume` keep it. */
 const ENDING_REASONS = new Set(['logout', 'prompt_input_exit', 'other'])
 
@@ -86,6 +96,7 @@ const EDITS = [
 const armed = atom({ plugin: 'unpaged', key: 'armed' } as const, [] as ArmedCanvas[])
 const replying = atom({ plugin: 'unpaged', key: 'replying' } as const, [] as string[])
 const armedOnce = atom({ plugin: 'unpaged', key: 'armedOnce' } as const, [] as string[])
+const acked = atom({ plugin: 'unpaged', key: 'acked' } as const, [] as string[])
 
 // Module records: the truth for what this module runs. The atoms are the
 // band's view of them, rewritten on every change; after a hot reload the
@@ -96,6 +107,8 @@ const loops = new Map<string, Loop>()
 const arming = new Map<string, Promise<ArmResult>>()
 /** Every canvas this session has armed, by hand or on its own; only a canvas not in it is armed on its own. */
 const armedBefore = new Set<string>()
+/** Event ids answered with "On it…", oldest first. */
+const ackedEvents = new Set<string>()
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
 
@@ -174,6 +187,7 @@ async function sync($: Api) {
   const list = [...canvases.values()].sort((a, b) => a.armedAt - b.armedAt)
   await update($, armed, () => list)
   await update($, armedOnce, () => [...armedBefore])
+  await update($, acked, () => [...ackedEvents])
 }
 
 function record(documentId: string, changes: Partial<ArmedCanvas>) {
@@ -237,6 +251,41 @@ function isEventLine(line: string) {
   }
 }
 
+/**
+ * Replies "On it…" on the thread of an @agent comment, once per event: a
+ * reload's first poll replays the last two minutes, and an id already
+ * answered is not answered again. Resolves to the line the agent reads about
+ * it, within ACK_WAIT_MS; a reply still on its way by then is not posted twice.
+ */
+function acknowledge($: Api, documentId: string, event: Record<string, unknown>): Promise<string | null> {
+  const id = text(event.id)
+  const threadId = text(event.threadId)
+  if (event.reason !== 'mention' || !id || !isDocumentId(threadId)) return Promise.resolve(null)
+  const posted = `The unpaged plugin already replied "${ACK_TEXT}" on thread ${threadId}; do not post another, and it is not your answer.`
+  const reply = (async () => {
+    try {
+      if (ackedEvents.has(id)) return posted
+      ackedEvents.add(id)
+      if (ackedEvents.size > ACKED_LIMIT) ackedEvents.delete(ackedEvents.values().next().value as string)
+      await update($, acked, () => [...ackedEvents])
+      const result = (await $.mcp.call(await mcpServer($), 'comment_reply', { documentId, threadId, text: ACK_TEXT })) as { isError?: boolean }
+      if (!result.isError) return posted
+    } catch {
+      // the agent posts it instead
+    }
+    return `The unpaged plugin could not reply "${ACK_TEXT}" on thread ${threadId}; post it there yourself first.`
+  })()
+  return new Promise(resolve => {
+    const late = $.clock.after(ACK_WAIT_MS, () =>
+      resolve(`The unpaged plugin is replying "${ACK_TEXT}" on thread ${threadId}; do not post another, and it is not your answer.`),
+    )
+    void reply.then(note => {
+      late.cancel()
+      resolve(note)
+    })
+  })
+}
+
 /** One submitted prompt per poll: the preamble once, then every new line. The toast is per event. */
 function sayWith($: Api, documentId: string) {
   return async (line: string) => {
@@ -255,6 +304,11 @@ function sayWith($: Api, documentId: string) {
         await sync($)
         const who = text(event.authorName) || 'someone'
         $.ui.toast(`${who} @agent on ${canvas.title || documentId}: ${text(event.textPreview).slice(0, 120)}`, { timeoutMs: 8000 })
+        const thread = text(event.threadId)
+        if (event.reason === 'mention' && !loop.ackThreads.has(thread)) {
+          loop.ackThreads.add(thread)
+          loop.acks.push(acknowledge($, documentId, event))
+        }
       } else {
         $.ui.toast(line.slice(0, 160), { timeoutMs: 8000 })
       }
@@ -264,14 +318,17 @@ function sayWith($: Api, documentId: string) {
     loop.flush?.cancel()
     loop.flush = $.clock.after(FLUSH_DELAY_MS, () => {
       const lines = loop.pending.splice(0)
+      const acks = loop.acks.splice(0)
+      loop.ackThreads.clear()
       const events = loop.pendingEvents
       loop.pendingEvents = 0
       loop.flush = null
       if (lines.length === 0) return
+      // The "On it…" replies go out before the turn starts, so they come first on the canvas.
+      const submit = (notes: Array<string | null>) => $.prompt.submit({ text: [...lines, ...notes.filter(Boolean)].join('\n') })
       // The submit resolves when its turn starts; from then until turn.complete
       // the canvas counts as covered, and only when the turn was handed a comment.
-      void $.prompt
-        .submit({ text: lines.join('\n') })
+      void (acks.length === 0 ? submit([]) : Promise.all(acks).then(submit))
         .then(() => (events > 0 ? update($, replying, list => (list.includes(documentId) ? list : [...list, documentId])) : undefined))
         .catch(() => undefined)
     })
@@ -305,7 +362,7 @@ async function startLoop($: Api, config: ListenerConfig) {
   const settled = new Promise<string>(resolve => {
     settle = resolve
   })
-  const loop: Loop = { config, controller, done: Promise.resolve(), pending: [], pendingEvents: 0, flush: null, settled }
+  const loop: Loop = { config, controller, done: Promise.resolve(), pending: [], pendingEvents: 0, acks: [], ackThreads: new Set(), flush: null, settled }
   loops.set(documentId, loop)
   const reportStatus = async (state: string, reason: string | null | undefined, metadata: { lastSuccessfulPollAt?: string | null }) => {
     const known = state === 'connecting' || state === 'connected' || state === 'reconnecting' || state === 'stopped' ? state : 'reconnecting'
@@ -478,6 +535,7 @@ async function statusText($: Api) {
 
 async function restoreAfterReload($: Api) {
   for (const documentId of await read($, armedOnce)) armedBefore.add(documentId)
+  for (const id of await read($, acked)) ackedEvents.add(id)
   const kept = await read($, armed)
   for (const canvas of kept) {
     armedBefore.add(canvas.documentId)
