@@ -8,6 +8,18 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 - Arming a canvas by hand works again ([#35](https://github.com/unpaged/plugins/pull/35)). Since 1.6.0, `/unpaged-listen arm` and the `listen_arm` tool, which `/unpaged:visual-plan` uses to listen to the canvas it creates, answered *Not minted: this session already listens to …* and armed nothing. The plugin's own request for the key reached the check that refuses keys the agent mints by hand, and that check refused it. The check now lets the plugin's own request through; a key the agent or another plugin mints by hand for a canvas the session listens to is still refused. Canvases armed on their own after a create or a change kept working.
 
+## [1.7.0] - 2026-10-08
+
+### Added
+
+- An @agent comment gets the reply *On it…* on its thread the moment it reaches the session, before the agent starts on it, so the person who wrote it sees it was picked up ([#34](https://github.com/unpaged/plugins/pull/34)). On a Claude Code that runs plugin mods the plugin posts it itself; the agent's turn waits up to five seconds for it and is told whether it went out, and posts it itself when the server refused it. Two @agent comments in one thread on one poll get one *On it…*, and an event a re-armed listener receives again is not answered twice. A human's reply in a thread the agent already answered gets none. On the Monitor path the agent posts it, as the protocol line now says. The protocol line and the plugin's note both tell the agent that *On it…* is never the answer, so a comment still gets one until an agent reply other than *On it…* follows it, and a comment another session already answered is not answered again. The plugin's hook allows a `comment_reply` on the Unpaged server only when its text is exactly *On it…*; every other reply goes through your own rules.
+
+## [unpaged-codex 0.7.0] - 2026-10-08
+
+### Added
+
+- The Unpaged for Codex review instructions have the agent reply *On it…* on the thread of an @agent comment once it has claimed the event and read the thread open, before it changes the board ([#34](https://github.com/unpaged/plugins/pull/34)). Once per event; never for a reply, a resolved or skipped thread, or on recovery. It is never the completion reply or recovery evidence, in the skill and in the native instructions alike.
+
 ## [1.6.0] - 2026-10-07
 
 ### Added
@@ -174,7 +186,9 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/unpaged/plugins/releases/tag/v1.7.0
+[unpaged-codex 0.7.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.7.0
 [1.6.0]: https://github.com/unpaged/plugins/releases/tag/v1.6.0
 [1.5.0]: https://github.com/unpaged/plugins/releases/tag/v1.5.0
 [unpaged-codex 0.6.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.6.0

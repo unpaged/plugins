@@ -25,6 +25,8 @@ declare module 'claude-code' {
       replying: string[]
       /** Every canvas this session has armed, by hand or on its own: a canvas is armed on its own only once. */
       armedOnce: string[]
+      /** Event ids already answered with "On it…", oldest first, at most 200: a replayed poll does not answer them again. */
+      acked: string[]
     }
   }
 }

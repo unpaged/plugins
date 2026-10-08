@@ -15,9 +15,11 @@ export const statusFileFor = (documentId: string) => `/home/t/.claude/unpaged/mo
 export const keyIdFor = (documentId: string) => (documentId === DOCUMENT ? 'key-1' : `key-${documentId.slice(0, 8)}`)
 export const titleFor = (documentId: string) => (documentId === DOCUMENT ? 'Plan canvas' : `Canvas ${documentId.slice(0, 4)}`)
 
-export const frame = (id: string, textPreview = 'hello @agent', documentId = DOCUMENT) => ({
-  type: 'agent-inbox-event', id, documentId, nodeId: 'node', threadId: 'thread', commentId: 'comment',
-  reason: 'mention', authorRole: 'owner', resolved: false, createdAt: '2026-09-21T00:00:00.000Z',
+export const THREAD = '44444444-4444-4444-8444-444444444444'
+
+export const frame = (id: string, textPreview = 'hello @agent', documentId = DOCUMENT, reason = 'mention') => ({
+  type: 'agent-inbox-event', id, documentId, nodeId: 'node', threadId: THREAD, commentId: 'comment',
+  reason, authorRole: 'owner', resolved: false, createdAt: '2026-09-21T00:00:00.000Z',
   documentTitle: titleFor(documentId), nodeTitle: 'root', authorName: 'Ilie', textPreview,
   boardUrl: `https://unpaged.io/document/${documentId}/edit`, anchorElementId: null,
 })
@@ -28,7 +30,16 @@ export type World = ReturnType<typeof world>
 
 export function world(
   on: On,
-  settings: { pages?: Page[]; mintError?: boolean; openExit?: number; hangPolls?: boolean; holdMint?: boolean; hangRevoke?: boolean } = {},
+  settings: {
+    pages?: Page[]
+    mintError?: boolean
+    openExit?: number
+    hangPolls?: boolean
+    holdMint?: boolean
+    hangRevoke?: boolean
+    /** How the server answers the "On it…" reply: posted (the default), refused, or never. */
+    ack?: 'posted' | 'refused' | 'hang'
+  } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
@@ -42,6 +53,8 @@ export function world(
     mcp: [] as { tool: string; args: Record<string, unknown> }[],
     fetch: [] as { url: string; authorization?: string }[],
     submits: [] as string[],
+    /** How many prompts had been submitted when each comment_reply reached the server. */
+    submitsAtReply: [] as number[],
     toasts: [] as string[],
     opened: [] as string[],
   }
@@ -130,6 +143,12 @@ export function world(
       return { value: { content: [{ type: 'text', text: JSON.stringify(mint) }], isError: false } }
     }
     if (e.tool === 'agent_listener_key_revoke') return { value: { content: [{ type: 'text', text: '{"revoked":true}' }], isError: false } }
+    if (e.tool === 'comment_reply') {
+      calls.submitsAtReply.push(calls.submits.length)
+      if (settings.ack === 'hang') return new Promise(() => {}) as never
+      if (settings.ack === 'refused') return { value: { content: [{ type: 'text', text: 'Error: refused' }], isError: true } }
+      return { value: { content: [{ type: 'text', text: '{"commentId":"reply-1"}' }], isError: false } }
+    }
     return { value: { content: [], isError: true } }
   })
   let served = 0

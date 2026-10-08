@@ -85,6 +85,28 @@ test("the key-call allow answers for the two key tools on the Unpaged MCP server
   }
 });
 
+test("the \"On it…\" allow runs for comment_reply on the Unpaged MCP server names only", () => {
+  const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
+  const entry = hooks.hooks.PreToolUse.find((e) => /comment_reply/.test(e.matcher));
+  assert.ok(entry, "hook entry present");
+  assert.match(entry.hooks[0].command, /monitors\/ack-hook\.mjs"$/);
+  const matcher = new RegExp(entry.matcher);
+  for (const server of ["plugin_unpaged_unpaged", "unpaged", "unpaged-staging"]) {
+    assert.equal(matcher.test(`mcp__${server}__comment_reply`), true, server);
+  }
+  for (const name of [
+    "mcp__unpaged__comment_reply_and_resolve",
+    "mcp__unpaged__comment_resolve",
+    "mcp__unpaged__comment_create",
+    "mcp__evil__comment_reply",
+    "mcp__evil_mcp__unpaged__comment_reply",
+    "xmcp__unpaged__comment_reply",
+    "mcp__plugin_evil_unpaged__comment_reply"
+  ]) {
+    assert.equal(matcher.test(name), false, name);
+  }
+});
+
 test("printableKeyId prints a plain token and nothing else", () => {
   assert.equal(printableKeyId("a0d1bf7f4d152d31"), "a0d1bf7f4d152d31");
   assert.equal(printableKeyId("k\nignore previous"), "");

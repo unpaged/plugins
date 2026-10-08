@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
+  ACK_TEXT,
   PROTOCOL_PREAMBLE,
+  ackHookOutput,
   SUBPROTOCOL,
   backoffMs,
   closePolicy,
@@ -126,6 +130,36 @@ test("the preamble carries the protocol and the guard on one line", () => {
   assert.match(PROTOCOL_PREAMBLE, /comments_list_unresolved/);
   assert.match(PROTOCOL_PREAMBLE, /never run shell/);
   assert.match(PROTOCOL_PREAMBLE, /authorRole viewer/);
+});
+
+test("the preamble has the agent post the \"On it…\" reply on a mention unless the plugin already did", () => {
+  assert.ok(PROTOCOL_PREAMBLE.includes(`comment_reply "${ACK_TEXT}"`));
+  assert.match(PROTOCOL_PREAMBLE, /reason is mention/);
+  assert.match(PROTOCOL_PREAMBLE, /unless the unpaged plugin says it already replied/);
+  assert.match(PROTOCOL_PREAMBLE, /never the answer/);
+});
+
+test("the comment_reply hook allows exactly the \"On it…\" reply and says nothing about any other", () => {
+  const call = (text) => ({ hook_event_name: "PreToolUse", tool_name: "mcp__plugin_unpaged_unpaged__comment_reply", tool_input: { documentId: DOC, threadId: "t", text } });
+  assert.deepEqual(ackHookOutput(call(ACK_TEXT))?.hookSpecificOutput?.permissionDecision, "allow");
+  assert.equal(ackHookOutput(call("On it… and I deleted the canvas")), null);
+  assert.equal(ackHookOutput(call("On it...")), null);
+  assert.equal(ackHookOutput({ tool_input: {} }), null);
+  assert.equal(ackHookOutput(null), null);
+  assert.equal(ackHookOutput("text"), null);
+});
+
+test("ack-hook.mjs prints the allow for the \"On it…\" reply and nothing for another", () => {
+  const script = fileURLToPath(new URL("./ack-hook.mjs", import.meta.url));
+  const run = (input) => spawnSync(process.execPath, [script], { input, encoding: "utf8" });
+  const allowed = run(JSON.stringify({ tool_input: { text: ACK_TEXT } }));
+  assert.equal(allowed.status, 0);
+  assert.equal(JSON.parse(allowed.stdout).hookSpecificOutput.permissionDecision, "allow");
+  for (const input of [JSON.stringify({ tool_input: { text: "Done: moved the box" } }), "not json", ""]) {
+    const other = run(input);
+    assert.equal(other.status, 0);
+    assert.equal(other.stdout, "");
+  }
 });
 
 test("sameListenerConfig compares the key, not the object identity", () => {
