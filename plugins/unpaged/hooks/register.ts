@@ -618,7 +618,10 @@ export const register: Register = on => {
 
   // A key minted by hand for a canvas this session listens to would take the
   // canvas over and stop that listener (the newest key wins): the mod answers.
+  // The mod's own mint is a tool call these hooks see too, raised under this
+  // plugin's name; it goes on to the server.
   on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, ($, e, next) => {
+    if (next.origin.plugin === $.plugin.name) return next(e)
     const documentId = text((e as unknown as Record<string, unknown>).documentId)
     if (!loops.has(documentId) && !arming.has(documentId)) return next(e)
     const title = canvases.get(documentId)?.title || documentId

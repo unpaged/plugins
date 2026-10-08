@@ -1,7 +1,7 @@
 // Tests of the listener mod's arming, delivery and stopping, run against the
 // engine with the world beneath the mod answered by the test's own hooks.
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, Plugin } from 'claude-code/testing'
 import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, frame, keyFileFor, page, statusFileFor, unpagedServer, until, world } from './test-world'
 
 const KEY_FILE = keyFileFor(DOCUMENT)
@@ -347,5 +347,32 @@ describe('arming on its own', () => {
     const called = unpagedServer(on)
     await $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId: SECOND } as never)
     expect(called).toEqual(['agent_listener_key_create'])
+  })
+
+  // Another plugin minting by hand: its call reaches the mod's hooks under its
+  // own name, as the model's does under the engine's. The mod's own mint is a
+  // tool call under the mod's name in a session; here the world answers it as
+  // `mcp.call`, so it never reaches the guard. An inline plugin loads on its
+  // own, so it spells the tool name out.
+  const handMinter: Plugin = {
+    name: 'hand-minter',
+    register: on => {
+      on('command.run', { command: 'hand-mint' }, async ($, e) => ({
+        text: JSON.stringify(await $.tool.call({ tool: 'mcp__plugin_unpaged_unpaged__agent_listener_key_create', documentId: e.args } as never)),
+      }))
+    },
+  }
+
+  test('/unpaged-listen arm mints its key, and a key another plugin mints meanwhile is answered by the plugin', { plugins: [handMinter] }, async ($, on) => {
+    const w = world(on, { holdMint: true })
+    const called = unpagedServer(on)
+    const arming = $.command.run({ command: 'unpaged-listen', args: `arm ${DOCUMENT}` } as never)
+    await until(() => mints(w).length === 1)
+    const byHand = await $.command.run({ command: 'hand-mint', args: DOCUMENT } as never)
+    expect(byHand.text).toContain(`Not minted: this session already listens to ${DOCUMENT}`)
+    w.releaseMint()
+    expect((await arming).text).toContain('Listening on Plan canvas')
+    expect(called).toEqual([])
+    expect(mints(w)).toHaveLength(1)
   })
 })
