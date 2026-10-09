@@ -4,9 +4,17 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-09
+
 ### Changed
 
-- The listener polls at the interval the Unpaged server names ([#36](https://github.com/unpaged/plugins/pull/36)), in Unpaged for Claude Code and Unpaged for Codex alike. Each successful poll carries two headers, the seconds until the next poll and until the next one after an idle hour, and the listener follows the latest ones from 5 to 60 seconds; a missing or other value keeps its own 30 and 60 seconds. The server sends 30 and 60, so nothing changes yet: a later change of interval needs a server release, not a plugin release. Older plugins ignore the headers.
+- The listener polls at the interval the Unpaged server names ([#36](https://github.com/unpaged/plugins/pull/36)). Each successful poll carries two headers, the seconds until the next poll and until the next one after an idle hour, and the listener follows the latest ones from 5 to 60 seconds; a missing or other value keeps its own 30 and 60 seconds. The server sends 30 and 60, so nothing changes yet: a later change of interval needs a server release, not a plugin release. Older plugins ignore the headers.
+
+## [unpaged-codex 0.8.0] - 2026-10-09
+
+### Changed
+
+- The receiver polls at the interval the Unpaged server names, as in Unpaged for Claude Code 1.8.0 ([#36](https://github.com/unpaged/plugins/pull/36)): it follows the headers of the latest successful poll from 5 to 60 seconds and otherwise keeps its own 30 and 60 seconds.
 
 ## [1.7.1] - 2026-10-08
 
@@ -192,7 +200,9 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/unpaged/plugins/releases/tag/v1.8.0
+[unpaged-codex 0.8.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.8.0
 [1.7.1]: https://github.com/unpaged/plugins/releases/tag/v1.7.1
 [1.7.0]: https://github.com/unpaged/plugins/releases/tag/v1.7.0
 [unpaged-codex 0.7.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.7.0
