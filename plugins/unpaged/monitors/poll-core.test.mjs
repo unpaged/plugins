@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAX_FRAME_BYTES, MAX_POLL_EVENTS, isTerminalStatus, parseEnvelope, pollRequest, validCursor } from "./poll-core.mjs";
+import { MAX_FRAME_BYTES, MAX_POLL_EVENTS, isTerminalStatus, parseEnvelope, pollCadence, pollRequest, validCursor } from "./poll-core.mjs";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
 const SECRET = "k".repeat(43);
@@ -33,6 +33,17 @@ test("an invalid binding or cursor is refused before any request, with no creden
   for (const cursor of ["", "a b", "x".repeat(129), 5]) assert.equal(reasonOf(() => pollRequest(binding, cursor)), "invalid_poll_configuration");
   assert.equal(validCursor(null), true);
   assert.equal(validCursor("page_1"), true);
+});
+
+test("the cadence headers name whole seconds from 5 to 60, and anything else is left out", () => {
+  const read = (headers) => pollCadence((name) => headers[name]);
+  assert.deepEqual(read({ "unpaged-poll-interval": "10", "unpaged-idle-poll-interval": "60" }), { intervalMs: 10000, idleIntervalMs: 60000 });
+  assert.deepEqual(read({ "unpaged-poll-interval": "5" }), { intervalMs: 5000 });
+  assert.deepEqual(read({ "unpaged-idle-poll-interval": "45" }), { idleIntervalMs: 45000 });
+  assert.deepEqual(read({}), {});
+  for (const value of ["4", "61", "0", "100", "-5", "10.5", "1e1", "", " 10", "ten", 10]) {
+    assert.deepEqual(read({ "unpaged-poll-interval": value, "unpaged-idle-poll-interval": value }), {});
+  }
 });
 
 test("only 401 and 409 are terminal", () => {

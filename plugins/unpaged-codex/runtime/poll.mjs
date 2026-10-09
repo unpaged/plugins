@@ -8,6 +8,21 @@ export const POLL_TIMEOUT_MS = 15000;
 const failure = (reason) => Object.assign(new Error(reason), { reason });
 const validCursor = (value) => value === null || (typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value));
 
+// A successful poll names the polling interval in two headers, in whole
+// seconds (ADR-043 v7): the next poll, and the next one after an idle hour.
+// A missing value, or one that is not 5 to 60, is left out and the worker
+// keeps its own default.
+const intervalMs = (value) => typeof value === "string" && /^\d{1,2}$/.test(value) &&
+  Number(value) >= 5 && Number(value) <= 60 ? Number(value) * 1000 : undefined;
+export function pollCadence(headers) {
+  const cadence = {};
+  const normal = intervalMs(headers?.get("unpaged-poll-interval"));
+  const idle = intervalMs(headers?.get("unpaged-idle-poll-interval"));
+  if (normal !== undefined) cadence.intervalMs = normal;
+  if (idle !== undefined) cadence.idleIntervalMs = idle;
+  return cadence;
+}
+
 function cancel(body) {
   try { void body?.cancel().catch(() => {}); } catch { /* No remote diagnostics. */ }
 }
@@ -83,7 +98,7 @@ export async function pollInbox(binding, { fetch: request = globalThis.fetch, si
       if (!event) throw failure("poll_invalid_response");
       return event;
     });
-    return { events, nextCursor: envelope.nextCursor ?? null };
+    return { events, nextCursor: envelope.nextCursor ?? null, cadence: pollCadence(response.headers) };
   };
   try {
     return await Promise.race([operation(), aborted]);

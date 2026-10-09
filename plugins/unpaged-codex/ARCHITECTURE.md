@@ -300,7 +300,9 @@ The cursor contains only an event ID. A successful authenticated response, inclu
 `{ "events": [] }`, records `lastSuccessfulPollAt` and sets `connected`.
 `lastEventAt` advances only for newly persisted event IDs; replay does not reset
 the idle clock. The normal interval is 30 seconds and becomes 60 seconds after
-one hour without a new event. Healthy waits do not create reconciliation gaps.
+one hour without a new event. A successful response's `Unpaged-Poll-Interval`
+and `Unpaged-Idle-Poll-Interval` headers replace either, in whole seconds from
+5 to 60; a missing or other value keeps the default. Healthy waits do not create reconciliation gaps.
 These intervals are not end-to-end delivery or model-response deadlines.
 
 Transport, service and rate-limit failures report `reconnecting`, mark a gap,

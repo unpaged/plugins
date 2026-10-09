@@ -58,10 +58,10 @@ function fixture(t, options = {}) {
     await until(() => requests.some((request) => !request.replied && !request.aborted));
     return requests.find((request) => !request.replied && !request.aborted);
   };
-  const reply = async (value, status = 200) => {
+  const reply = async (value, status = 200, headers = {}) => {
     const request = await pending();
     request.replied = true;
-    request.resolve(new Response(JSON.stringify(value), { status }));
+    request.resolve(new Response(JSON.stringify(value), { status, headers }));
     await pause(1);
     return request;
   };
@@ -469,6 +469,32 @@ test("HTTP cadence is independent from the queue pump and only new events reset 
   assert.equal(timers[0].delay, 60000);
   assert.equal(f.store.getBinding(DOCUMENT).lastEventAt, lastActivity);
   assert.equal(f.calls.length, 1);
+});
+
+test("the latest successful response's cadence headers set the next poll, and a value they leave out falls back", async (t) => {
+  const f = fixture(t);
+  const origin = Date.parse("2026-09-21T00:00:00.000Z");
+  let time = origin;
+  const timers = [];
+  const delays = [];
+  f.start({ now: () => time, pollIntervalMs: 30000, idlePollIntervalMs: 60000,
+    setTimeout: (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; },
+    clearTimeout: (timer) => { if (timer) timer.cancelled = true; }
+  });
+  const answer = async (headers) => {
+    await f.reply({ events: [] }, 200, headers);
+    await until(() => timers.length > 0);
+    const timer = timers.shift();
+    delays.push(timer.delay);
+    timer.callback();
+  };
+  const fast = { "unpaged-poll-interval": "10", "unpaged-idle-poll-interval": "20" };
+  await answer(fast);
+  await answer({});
+  time = origin + 3600000;
+  await answer(fast);
+  await answer({ "unpaged-poll-interval": "10", "unpaged-idle-poll-interval": "61" });
+  assert.deepEqual(delays, [10000, 30000, 20000, 60000]);
 });
 
 test("persisted event activity keeps the idle cadence across worker restarts", async (t) => {

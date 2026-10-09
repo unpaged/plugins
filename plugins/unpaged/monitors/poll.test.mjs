@@ -26,7 +26,17 @@ test("poll uses only the canonical endpoint and a header credential, returning t
   assert.equal(calls[0][1].cache, "no-store");
   assert.equal(result.events[0].id, "event-1");
   assert.deepEqual(result.events[0], frame());
-  assert.deepEqual(await pollInbox(binding, { fetch: async () => response({ events: [] }) }), { events: [], nextCursor: null });
+  assert.deepEqual(await pollInbox(binding, { fetch: async () => response({ events: [] }) }), { events: [], nextCursor: null, cadence: {} });
+});
+
+test("a successful poll carries the cadence its headers name, from 5 to 60 seconds", async () => {
+  const cadence = async (headers) => (await pollInbox(binding, { fetch: async () =>
+    response({ events: [] }, { headers: { "content-type": "application/json", ...headers } }) })).cadence;
+  assert.deepEqual(await cadence({ "Unpaged-Poll-Interval": "10", "Unpaged-Idle-Poll-Interval": "60" }), { intervalMs: 10000, idleIntervalMs: 60000 });
+  assert.deepEqual(await cadence({ "unpaged-poll-interval": "30" }), { intervalMs: 30000 });
+  for (const value of ["4", "61", "10.5", "ten"]) {
+    assert.deepEqual(await cadence({ "unpaged-poll-interval": value, "unpaged-idle-poll-interval": value }), {});
+  }
 });
 
 test("only 401 and 409 are terminal, and status error bodies are never read", async () => {
@@ -79,7 +89,7 @@ test("bounded streaming preserves split UTF-8 while refusing invalid JSON or byt
 
 test("both advertised length and streamed bytes obey the response limit", async () => {
   const text = JSON.stringify({ events: [] });
-  assert.deepEqual(await pollInbox(binding, { maxBytes: Buffer.byteLength(text), fetch: async () => new Response(text) }), { events: [], nextCursor: null });
+  assert.deepEqual(await pollInbox(binding, { maxBytes: Buffer.byteLength(text), fetch: async () => new Response(text) }), { events: [], nextCursor: null, cadence: {} });
   for (const advertise of [false, true]) {
     let cancelled = false;
     const body = new ReadableStream({ start(controller) { controller.enqueue(Buffer.from("x".repeat(65))); }, cancel() { cancelled = true; } });
@@ -139,10 +149,10 @@ test("a bounded page cursor is the only permitted query value and absent respons
   } });
   assert.equal(calls[0].url, `${POLL_URL}?cursor=event_200-end`);
   assert.equal(calls[0].settings.headers.Authorization, `Bearer ${SECRET}`);
-  assert.deepEqual(result, { events: [], nextCursor: "event_400-end" });
+  assert.deepEqual(result, { events: [], nextCursor: "event_400-end", cadence: {} });
   for (const nextCursor of [undefined, null]) {
     assert.deepEqual(await pollInbox(binding, { cursor: "last-page", fetch: async () => response({ events: [], nextCursor }) }),
-      { events: [], nextCursor: null });
+      { events: [], nextCursor: null, cadence: {} });
   }
   for (const cursor of ["", "a".repeat(129), "&key=secret", "a/b", 42, {}]) {
     let called = false;

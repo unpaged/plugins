@@ -216,7 +216,7 @@ async function list() {
   say(rows.length ? rows.join("\n") : "none");
 }
 
-/** A poll at most this old proves the in-session listener still runs (it polls every 30–60 s). */
+/** A poll at most this old proves the in-session listener still runs (it polls every 5–60 s, 30–60 s unless the server names other intervals). */
 export const MOD_STATUS_FRESH_MS = 3 * 60 * 1000;
 
 /** The in-session listener's status line, from the file the mod writes (transport mod-v1). */
