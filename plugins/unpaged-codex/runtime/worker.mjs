@@ -174,9 +174,11 @@ export async function runWorker(documentId, options = {}) {
     } catch { failStore(); }
   };
 
+  // The latest successful response's cadence; a value it leaves out falls back to the worker's own.
+  let cadence = {};
   const interval = (current) => {
     const activity = current.lastEventAt ? Date.parse(current.lastEventAt) : startedAt;
-    return now() - activity >= idleAfterMs ? idleIntervalMs : intervalMs;
+    return now() - activity >= idleAfterMs ? cadence.idleIntervalMs ?? idleIntervalMs : cadence.intervalMs ?? intervalMs;
   };
   const later = (delay) => {
     if (!finished) requestTimer = schedule(poll, delay);
@@ -219,6 +221,7 @@ export async function runWorker(documentId, options = {}) {
           // The cursor is a temporary scan position, never a receipt. Restart
           // from the first page and let the durable event journal deduplicate.
           cursor = result.nextCursor;
+          cadence = result.cadence ?? {};
           retryAttempt = 0;
           binding = currentBinding();
           if (!binding) return;

@@ -29,7 +29,7 @@ import {
   parseListenerConfig,
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
-import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollRequest } from '../monitors/poll-core.mjs'
+import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
 
 type On = Parameters<Register>[0]
 type Hook = Extract<Parameters<On>[number], (...args: never[]) => unknown>
@@ -201,7 +201,10 @@ function pollWith($: Api) {
   return async (
     binding: ListenerConfig,
     settings: { signal?: AbortSignal; cursor: string | null; timeoutMs: number },
-  ): Promise<{ events: Array<Record<string, unknown>>; nextCursor: string | null } | { terminal: number }> => {
+  ): Promise<
+    | { events: Array<Record<string, unknown>>; nextCursor: string | null; cadence: { intervalMs?: number; idleIntervalMs?: number } }
+    | { terminal: number }
+  > => {
     const { url, headers } = pollRequest(binding, settings.cursor)
     let rejectLate: (error: Error) => void = () => {}
     const timedOut = new Promise<never>((_resolve, reject) => {
@@ -219,7 +222,8 @@ function pollWith($: Api) {
       if (isTerminalStatus(response.status)) return { terminal: response.status }
       if (response.status !== 200) throw failure('poll_http_error')
       if (byteLength(response.text) > MAX_POLL_BYTES) throw failure('poll_body_limit')
-      return parseEnvelope(response.text, binding.documentId)
+      // The host hands the headers over with lower-cased names.
+      return { ...parseEnvelope(response.text, binding.documentId), cadence: pollCadence(name => response.headers?.[name]) }
     } finally {
       deadline.cancel()
     }

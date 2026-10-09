@@ -83,6 +83,19 @@ test("only a new event resets the idle hour", async (t) => {
   assert.equal(f.sleeps.at(-1), 30000);
 });
 
+test("the latest page's cadence sets the next sleep, and a value it leaves out falls back", async (t) => {
+  let now = Date.parse("2026-09-21T00:00:00.000Z");
+  const f = fixture(t, { now: () => now });
+  const fast = { intervalMs: 10000, idleIntervalMs: 20000 };
+  await f.answer({ ...page(), cadence: fast });
+  await f.answer(page());
+  now += 3600000;
+  await f.answer({ ...page(), cadence: fast });
+  await f.answer({ ...page(), cadence: { intervalMs: 10000 } });
+  await f.answer({ ...page([frame()]), cadence: { intervalMs: 15000 } });
+  assert.deepEqual(f.sleeps, [10000, 30000, 20000, 60000, 15000]);
+});
+
 test("a rejected poll reports reconnecting, keeps the cursor and backs off to the cap", async (t) => {
   const f = fixture(t);
   await f.answer(page([], "page_9"));

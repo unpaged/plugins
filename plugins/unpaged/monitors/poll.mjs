@@ -1,7 +1,7 @@
 // One bounded, receive-only HTTP poll for the Monitor script: Node's fetch
 // with a streamed, byte-capped body. The request it makes and the validation
 // of what comes back live in poll-core.mjs, shared with the Claude Code mod.
-import { failure, isTerminalStatus, MAX_POLL_BYTES, MAX_POLL_EVENTS, parseEnvelope, pollRequest, POLL_TIMEOUT_MS } from "./poll-core.mjs";
+import { failure, isTerminalStatus, MAX_POLL_BYTES, MAX_POLL_EVENTS, parseEnvelope, pollCadence, pollRequest, POLL_TIMEOUT_MS } from "./poll-core.mjs";
 
 export { MAX_POLL_BYTES, MAX_POLL_EVENTS, POLL_TIMEOUT_MS };
 
@@ -65,7 +65,7 @@ export async function pollInbox(binding, { fetch: request = globalThis.fetch, si
     let text;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes)); }
     catch { throw failure("poll_invalid_response"); }
-    return parseEnvelope(text, binding.documentId);
+    return { ...parseEnvelope(text, binding.documentId), cadence: pollCadence((name) => response.headers?.get(name)) };
   };
   try {
     return await Promise.race([operation(), aborted]);

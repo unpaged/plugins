@@ -90,6 +90,19 @@ describe('delivery', () => {
     expect(w.calls.submits).toHaveLength(1)
   })
 
+  test("a page's cadence headers set when the next poll goes out; a page without them restores thirty seconds", async ($, on) => {
+    const fast = { ...page(), headers: { 'unpaged-poll-interval': '10', 'unpaged-idle-poll-interval': '20' } }
+    const w = world(on, { pages: [fast, page()] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    expect(w.calls.fetch).toHaveLength(1)
+    await w.clock.advance(10_000)
+    expect(w.calls.fetch).toHaveLength(2)
+    await w.clock.advance(29_000)
+    expect(w.calls.fetch).toHaveLength(2)
+    await w.clock.advance(1_000)
+    expect(w.calls.fetch).toHaveLength(3)
+  })
+
   test('HTTP 401 retires the key by its id, stops the loop and tells the model push is off', async ($, on) => {
     const w = world(on, { pages: [page(), { status: 401 }] })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)

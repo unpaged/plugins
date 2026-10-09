@@ -319,7 +319,8 @@ creates a replacement task. It does not install a login service or wake a
 sleeping computer.
 
 The receiver polls every 30 seconds, slowing to 60 seconds after an hour without
-a new event. New feedback returns it to the normal interval. These are polling
+a new event. New feedback returns it to the normal interval. The Unpaged server
+can name other intervals, from 5 to 60 seconds, and the receiver follows them. These are polling
 intervals, not maximum response times: network availability and the assigned
 task's state also affect delivery and processing.
 

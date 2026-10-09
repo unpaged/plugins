@@ -4,6 +4,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- The listener polls at the interval the Unpaged server names, in Unpaged for Claude Code and Unpaged for Codex alike. Each successful poll carries two headers, the seconds until the next poll and until the next one after an idle hour, and the listener follows the latest ones from 5 to 60 seconds; a missing or other value keeps its own 30 and 60 seconds. The server sends 30 and 60, so nothing changes yet: a later change of interval needs a server release, not a plugin release. Older plugins ignore the headers.
+
 ## [1.7.1] - 2026-10-08
 
 ### Fixed

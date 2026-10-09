@@ -14,6 +14,12 @@ export const MAX_FRAME_BYTES = 65536;
 export const POLL_TIMEOUT_MS = 15000;
 /** HTTP statuses that end a listener: 401 the key is gone, 409 a newer key owns the board. */
 export const TERMINAL_STATUSES = Object.freeze([401, 409]);
+// A successful poll names the polling interval in two headers, in whole
+// seconds (ADR-043 v7): the next poll, and the next one after an idle hour.
+export const POLL_INTERVAL_HEADER = "unpaged-poll-interval";
+export const IDLE_POLL_INTERVAL_HEADER = "unpaged-idle-poll-interval";
+export const MIN_POLL_INTERVAL_SECONDS = 5;
+export const MAX_POLL_INTERVAL_SECONDS = 60;
 
 export const failure = (reason) => Object.assign(new Error(reason), { reason });
 export const validCursor = (value) => value === null || (typeof value === "string" && ID.test(value));
@@ -35,6 +41,26 @@ export function validFrame(frame, documentId) {
   if (frame.anchorElementId !== null && (typeof frame.anchorElementId !== "string" || !ID.test(frame.anchorElementId))) return false;
   return typeof frame.createdAt === "string" && Number.isFinite(Date.parse(frame.createdAt)) &&
     new Date(frame.createdAt).toISOString() === frame.createdAt;
+}
+
+function intervalMs(value) {
+  if (typeof value !== "string" || !/^\d{1,2}$/.test(value)) return undefined;
+  const seconds = Number(value);
+  return seconds >= MIN_POLL_INTERVAL_SECONDS && seconds <= MAX_POLL_INTERVAL_SECONDS ? seconds * 1000 : undefined;
+}
+
+/**
+ * The cadence a successful response names, each header read through
+ * `header(name)`. A missing value, or one that is not a whole number of
+ * seconds from 5 to 60, is left out, and the loop keeps its own default.
+ */
+export function pollCadence(header) {
+  const cadence = {};
+  const normal = intervalMs(header(POLL_INTERVAL_HEADER));
+  const idle = intervalMs(header(IDLE_POLL_INTERVAL_HEADER));
+  if (normal !== undefined) cadence.intervalMs = normal;
+  if (idle !== undefined) cadence.idleIntervalMs = idle;
+  return cadence;
 }
 
 /**

@@ -47,7 +47,11 @@ export async function runListener(config, options = {}) {
   let attempt = 0;
   let cursor = null;
   let preambleSent = false;
-  const interval = () => now() - lastEventAt >= idleAfterMs ? idleIntervalMs : intervalMs;
+  // The latest successful response's cadence; a value it leaves out falls back to the loop's own.
+  let cadence = {};
+  const interval = () => now() - lastEventAt >= idleAfterMs
+    ? cadence.idleIntervalMs ?? idleIntervalMs
+    : cadence.intervalMs ?? intervalMs;
   const reportStatus = async (state, reason) => {
     if (!signal?.aborted) await report(state, reason, { lastSuccessfulPollAt });
   };
@@ -87,6 +91,7 @@ export async function runListener(config, options = {}) {
       return { reason: `http-${result.terminal}` };
     }
     lastSuccessfulPollAt = new Date(now()).toISOString();
+    cadence = result.cadence ?? {};
     await reportStatus("connected");
     if (signal?.aborted) break;
     for (const event of result.events) {

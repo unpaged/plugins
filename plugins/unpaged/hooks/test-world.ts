@@ -23,7 +23,7 @@ export const frame = (id: string, textPreview = 'hello @agent', documentId = DOC
   documentTitle: titleFor(documentId), nodeTitle: 'root', authorName: 'Ilie', textPreview,
   boardUrl: `https://unpaged.io/document/${documentId}/edit`, anchorElementId: null,
 })
-export type Page = { status: number; body?: unknown }
+export type Page = { status: number; body?: unknown; headers?: Record<string, string> }
 export const page = (events: unknown[] = [], nextCursor: string | null = null): Page => ({ status: 200, body: { events, nextCursor } })
 
 export type World = ReturnType<typeof world>
@@ -161,7 +161,7 @@ export function world(
     const next = pages[Math.min(served, Math.max(pages.length - 1, 0))] ?? page()
     served += 1
     calls.fetch.push({ url: e.url, authorization: e.init?.headers?.Authorization })
-    return { value: { status: next.status, ok: next.status === 200, headers: {}, text: JSON.stringify(next.body ?? {}) } }
+    return { value: { status: next.status, ok: next.status === 200, headers: next.headers ?? {}, text: JSON.stringify(next.body ?? {}) } }
   })
   // A submitted prompt starts a turn only when the session is idle: the test
   // decides when, with startTurn(), as the engine would.
