@@ -4,6 +4,22 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-13
+
+### Changed
+
+- The plugin grants itself no permission, as the Claude plugin directory requires. Its mod no longer answers *allow* for its own `listen_arm`, `listen_stop` and `listen_status` tools, and the two `PreToolUse` hooks that allowed `agent_listener_key_create`, `agent_listener_key_revoke` and the *On it…* `comment_reply` are gone (`hooks/allow-key-calls.json`, `monitors/ack-hook.mjs`). Those calls now go through your own permission rules, like the agent's: in the default mode Claude Code asks before the plugin starts or stops a listener, auto mode's classifier decides, and a headless session refuses what no rule allows. The README's new *Permissions* section lists the rules that let it listen without asking.
+- The mod posts *On it…* on an @agent comment only where your rules already allow `comment_reply`. It asks them first, a check that runs nothing and opens no dialog; otherwise the reply turn starts at once and tells the agent to post *On it…* itself.
+- The README says what the plugin runs, reads and sends: the programs it starts, the tools it calls itself, the host it polls, what it sends there, what it reads, the prompts it submits, each event it hooks and the one credential it keeps.
+
+### Added
+
+- The plugin's icon, and `privacyPolicyUrl` in `plugin.json`.
+
+### Fixed
+
+- The listener helpers the mod imports no longer touch Node's `process`, which a mod does not have: the Node scripts pass their own process id to `retireKeyFile` and `monitorStatus`.
+
 ## [1.8.0] - 2026-10-09
 
 ### Changed

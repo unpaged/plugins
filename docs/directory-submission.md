@@ -10,7 +10,7 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 | Display name | Unpaged |
 | Repository | https://github.com/unpaged/plugins |
 | Plugin path in the repo | `plugins/unpaged` — this repo's own `marketplace.json` lists it as the relative path `./plugins/unpaged`; the community catalog records monorepo entries as `{ source: "git-subdir", url, path, ref, sha }`, so give the form the repo URL plus this path |
-| Release / ref | `v1.0.1` — the first tag whose tree carries the manifest fields and README links added for the submission; never submit an older ref |
+| Release / ref | `v1.9.0` — the first version whose tree passes the directory policy: no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`; never submit an older ref |
 | Homepage | https://unpaged.io |
 | Privacy policy | https://unpaged.io/privacy |
 | Terms | https://unpaged.io/terms |
@@ -38,6 +38,8 @@ Turn Claude Code plans into whiteboards on Unpaged: review on the canvas, commen
 
 - **External network calls: yes.** MCP over HTTPS to `mcp.unpaged.io` (OAuth 2.0, the user's own Unpaged account, free tier works) and short authenticated HTTPS polls per armed canvas to the same host. Nothing else.
 - **Installs additional software: no.** The listener is plain Node ≥ 22 with no dependencies; the MCP server is remote (`type: http`), no `npx`/`uvx` launcher.
+- **Programs run:** `node` on the plugin's own `monitors/keys.mjs` (writing, listing and retiring key and status files, which a mod's file calls cannot do with mode 600 and an atomic rename), and `open` / `xdg-open` on the canvas link only when the user presses *open*. No shell. The plugin README's *What the plugin runs, reads and sends* lists every call.
+- **Permissions:** the plugin grants itself none. No hook answers *allow*; the key mint and revoke the mod makes itself, its three tools, and the *On it…* reply go through the user's own permission rules (the mod posts *On it…* only where those rules already allow `comment_reply`, otherwise the agent does). The plugin README's *Permissions* section lists the rules for listening without being asked.
 - **Credentials:** the listener key is minted by Unpaged for one canvas, stored at `~/.claude/unpaged/listeners/<documentId>.json` (mode 600), sent only to Unpaged, revocable from the command or from Unpaged. The plugin reads no other credential store.
 - **Comments are data, not instructions:** an `@agent` comment is acted on only with Unpaged tools on that one canvas; never shell, file, git or network actions. Viewers get an answer, not a change.
 - **Data sent:** the plan text and the elements drawn, the user's comments and the agent's replies, the Decision log rows the session writes while it implements, and — with `/unpaged:as-built` — file paths, commit subjects, diff summaries and the agent's description of the change (never file contents beyond a quoted identifier) — under the user's own account. No telemetry.
@@ -50,6 +52,9 @@ A free Unpaged account with a sample canvas is created for the submission and ha
 ## Pre-submission checklist
 
 - [ ] `claude plugin validate --strict plugins/unpaged` and `--strict .claude-plugin/marketplace.json` pass
+- [ ] no hook answers a permission decision: the validator lists no `tool.check` hook, and `hooks/hooks.json` has no `PreToolUse` entry (`node --test` checks the latter)
+- [ ] `plugins/unpaged/.claude-plugin/icon.png` is a square PNG of 512 to 2048 px under 2 MB, and `plugin.json` names `privacyPolicyUrl`
+- [ ] `plugin.json` keeps `types`: the directory lists it as an unknown field, but Claude Code's validator refuses the mod's `$.state` keys without it
 - [ ] every URL in the READMEs resolves
 - [ ] the submitted tag's tree contains the `plugin.json` version, `homepage`/`repository`/`license`/`keywords`, and the marketplace description (`git show <tag>:plugins/unpaged/.claude-plugin/plugin.json`)
 - [ ] reviewer account created, sample canvas shared with it, three prompts re-run on it
