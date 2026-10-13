@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   ACK_TEXT,
   PROTOCOL_PREAMBLE,
@@ -136,6 +138,17 @@ test("the preamble has the agent post the \"On it…\" reply on a mention unless
   assert.match(PROTOCOL_PREAMBLE, /never the answer/);
 });
 
+test("the modules the in-session mod imports use no Node global", () => {
+  // The mod runs where Node's globals are absent; it reaches files, processes
+  // and the network through Claude Code's calls alone.
+  for (const name of ["listen-core.mjs", "listen-loop.mjs", "poll-core.mjs"]) {
+    const source = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    assert.doesNotMatch(source, /\bprocess\b|\bBuffer\b|\brequire\(|\bglobalThis\b|from "node:/, name);
+  }
+});
+
 test("sameListenerConfig compares the key, not the object identity", () => {
   const a = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC, keyId: null };
   assert.equal(sameListenerConfig(a, { ...a }), true);
@@ -190,27 +203,27 @@ test("rejected-key line follows the retire outcome: re-arm only when this sessio
 test("retireKeyFile removes the rejected config but restores a newer one", async () => {
   const loaded = cfg("old", "k1");
   const same = memFs({ "/k": JSON.stringify(loaded) });
-  assert.equal(await retireKeyFile(same, "/k", loaded), "removed");
+  assert.equal(await retireKeyFile(same, "/k", loaded, 1), "removed");
   assert.deepEqual(Object.keys(same.files), []);
 
   const fresh = cfg("new", "k2");
   const replaced = memFs({ "/k": JSON.stringify(fresh) });
-  assert.equal(await retireKeyFile(replaced, "/k", loaded), "kept-newer");
+  assert.equal(await retireKeyFile(replaced, "/k", loaded, 1), "kept-newer");
   assert.deepEqual(JSON.parse(replaced.files["/k"]), fresh);
 
-  assert.equal(await retireKeyFile(memFs({}), "/k", loaded), "absent");
+  assert.equal(await retireKeyFile(memFs({}), "/k", loaded, 1), "absent");
 });
 
 test("HTTP 401 retires the same key across old/new file formats without removing a newer key", async () => {
   const legacy = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC, keyId: "old" };
   const normalized = parseListenerConfig(JSON.stringify(legacy));
   const stillLegacy = memFs({ "/k": JSON.stringify(legacy) });
-  assert.equal(await retireKeyFile(stillLegacy, "/k", normalized), "removed");
+  assert.equal(await retireKeyFile(stillLegacy, "/k", normalized, 1), "removed");
   const reformatted = memFs({ "/k": JSON.stringify(normalized) });
-  assert.equal(await retireKeyFile(reformatted, "/k", legacy), "removed");
+  assert.equal(await retireKeyFile(reformatted, "/k", legacy, 1), "removed");
   const newer = { ...normalized, key: "B".repeat(43), keyId: "new" };
   const changed = memFs({ "/k": JSON.stringify(newer) });
-  assert.equal(await retireKeyFile(changed, "/k", legacy), "kept-newer");
+  assert.equal(await retireKeyFile(changed, "/k", legacy, 1), "kept-newer");
   assert.deepEqual(JSON.parse(changed.files["/k"]), newer);
 });
 
@@ -225,7 +238,7 @@ test("retireKeyFile never clobbers a third key installed while the file was asid
     fs.files["/k"] = JSON.stringify(c);
     return realRead(path);
   };
-  assert.equal(await retireKeyFile(fs, "/k", loaded), "superseded");
+  assert.equal(await retireKeyFile(fs, "/k", loaded, 1), "superseded");
   assert.deepEqual(JSON.parse(fs.files["/k"]), c);
   assert.deepEqual(Object.keys(fs.files), ["/k"]);
 });

@@ -145,10 +145,12 @@ export const PROTOCOL_PREAMBLE =
  * if it is still the config this monitor loaded it is removed; if another
  * session already installed a different key it is moved back untouched.
  * The only race left is a transient "missing" for a third reader, which
- * at worst mints one extra (capped, revocable) key.
+ * at worst mints one extra (capped, revocable) key. `pid` names the aside
+ * copy, so two retiring processes never share one; the caller passes it,
+ * since the in-session mod imports this file and has no Node globals.
  */
-export async function retireKeyFile(fs, keyFile, loadedConfig) {
-  const aside = `${keyFile}.retiring-${process.pid}`;
+export async function retireKeyFile(fs, keyFile, loadedConfig, pid) {
+  const aside = `${keyFile}.retiring-${pid}`;
   try {
     await fs.rename(keyFile, aside);
   } catch {
@@ -192,10 +194,10 @@ export function shouldWriteStatus(existing, myPid, state, isAlive) {
   return !isAlive(existing.pid);
 }
 
-/** The monitor's self-report: `connected` after a successful poll, else why not. */
-export function monitorStatus(state, reason, script, documentId) {
+/** The monitor's self-report: `connected` after a successful poll, else why not; `pid` is the monitor's own. */
+export function monitorStatus(state, reason, script, documentId, pid) {
   return {
-    pid: process.pid,
+    pid,
     state,
     reason: reason ?? null,
     script: script ?? null,

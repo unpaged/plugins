@@ -326,7 +326,7 @@ async function retire(documentId, keyId) {
     say("unmatched");
     return;
   }
-  say(await retireKeyFile({ rename, readFile, rm, link }, keyFile, loaded));
+  say(await retireKeyFile({ rename, readFile, rm, link }, keyFile, loaded, process.pid));
 }
 
 /** The in-session listener's status file, written as the Monitor writes its own: tmp + rename, mode 600. */
