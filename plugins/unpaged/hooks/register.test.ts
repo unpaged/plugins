@@ -27,6 +27,14 @@ describe('listen_arm', () => {
     expect(w.calls.submits).toEqual([])
   })
 
+  test('the plugin grants itself no permission: its own tools are left to the permission rules', async ($, on) => {
+    const w = world(on)
+    for (const tool of ['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status']) {
+      expect(await $.tool.check({ tool, input: { documentId: DOCUMENT } })).toEqual({ decision: 'ask' })
+    }
+    expect(w.calls.checks).toEqual(['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status'])
+  })
+
   test('a refused mint arms nothing', async ($, on) => {
     const w = world(on, { mintError: true })
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -172,6 +180,7 @@ describe('"On it…"', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await deliver(w)
     expect(replies(w)).toEqual([{ tool: 'comment_reply', args: { documentId: DOCUMENT, threadId: THREAD, text: 'On it…' } }])
+    expect(w.calls.checks).toEqual(['mcp__unpaged__comment_reply'])
     expect(w.calls.submitsAtReply).toEqual([0])
     const lines = w.calls.submits[0].split('\n')
     expect(JSON.parse(lines[1]).id).toBe('e1')
@@ -204,6 +213,18 @@ describe('"On it…"', () => {
     expect(replies(w)).toHaveLength(1)
     expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin could not reply "On it…" on thread ${THREAD}; post it there yourself first.`)
   })
+
+  for (const rule of ['ask', 'deny'] as const) {
+    test(`where the permission rules ${rule === 'ask' ? 'would ask' : 'refuse'}, the plugin posts nothing and the turn tells the agent to post it, at once`, async ($, on) => {
+      const w = world(on, { pages: [page(), page([frame('e1')])], replyRule: rule })
+      await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+      await deliver(w)
+      expect(replies(w)).toEqual([])
+      expect(w.calls.submits[0].split('\n').at(-1)).toBe(
+        `The unpaged plugin leaves "On it…" on thread ${THREAD} to you (your permission rules do not let it reply on its own); post it there yourself first.`,
+      )
+    })
+  }
 
   test('a reply that does not answer holds the turn five seconds, then the turn starts without posting another', async ($, on) => {
     const w = world(on, { pages: [page(), page([frame('e1')])], ack: 'hang' })

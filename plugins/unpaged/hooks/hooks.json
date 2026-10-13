@@ -3,26 +3,6 @@
     "./register.ts"
   ],
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^mcp__(plugin_unpaged_)?unpaged[A-Za-z0-9-]*__agent_listener_key_(create|revoke)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/hooks/allow-key-calls.json\""
-          }
-        ]
-      },
-      {
-        "matcher": "^mcp__(plugin_unpaged_)?unpaged[A-Za-z0-9-]*__comment_reply$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/monitors/ack-hook.mjs\""
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "matcher": "ExitPlanMode",

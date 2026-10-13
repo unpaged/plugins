@@ -366,23 +366,6 @@ export function printableKeyId(value) {
  */
 export const ACK_TEXT = "On it…";
 
-/**
- * The PreToolUse hook's answer for a `comment_reply` call: allowed when it
- * posts exactly ACK_TEXT, so the mod's own reply never waits on a permission
- * prompt or auto mode's check. Any other reply gets no answer from the hook
- * and goes through the user's own rules.
- */
-export function ackHookOutput(input) {
-  if (!input || typeof input !== "object" || input.tool_input?.text !== ACK_TEXT) return null;
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      permissionDecisionReason: `Unpaged "${ACK_TEXT}" reply: allowed by the unpaged plugin`
-    }
-  };
-}
-
 /** What the PostToolUse hook hands back to the model once the key file is written. */
 export function hookStoredContext(config) {
   const keyId = printableKeyId(config.keyId);

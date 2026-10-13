@@ -2,9 +2,14 @@
 // from inside Claude Code. Arming mints the listener key, the poll loop runs
 // in this module on the host's fetch, each new comment shows as a toast and
 // starts one reply turn through a submitted prompt. An @agent comment gets an
-// "On it…" reply on its thread before that turn starts. No model step is needed
-// to listen, and the key never enters the model's context: it is read from
-// the key file, sent in a request header, and never logged or shown.
+// "On it…" reply on its thread before that turn starts, where the person's
+// permission rules let the plugin post it. No model step is needed to listen,
+// and the key never enters the model's context: it is read from the key file,
+// sent in a request header, and never logged or shown.
+//
+// The mod grants itself no permission: its own calls of the Unpaged tools (the
+// key mint and revoke, "On it…") and the model's calls of its three tools go
+// through the person's own permission rules, as any tool call does.
 //
 // A canvas the session creates or changes through the Unpaged tools is armed
 // on its own, the moment the call succeeds, once per canvas per session: a
@@ -148,6 +153,22 @@ async function mcpServer($: Api) {
   return MCP_SERVER
 }
 
+/** An MCP tool as the person's permission rules name it: `mcp__plugin_unpaged_unpaged__comment_reply` installed with this plugin. */
+const ruleName = (server: string, tool: string) => `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__${tool}`
+
+/**
+ * Whether the person's own permission rules already let `tool` run: asked
+ * without running it, so no dialog opens and no classifier is asked. The
+ * mod's own calls of MCP tools go through those rules either way.
+ */
+async function isAllowed($: Api, server: string, tool: string, input: Record<string, unknown>) {
+  try {
+    return (await $.tool.check({ tool: ruleName(server, tool), input })).decision === 'allow'
+  } catch {
+    return false
+  }
+}
+
 function mcpText(result: { content?: Array<{ type?: string; text?: string }>; structuredContent?: unknown }) {
   const block = result.content?.find(b => b.type === 'text' && typeof b.text === 'string')
   return block?.text ?? (result.structuredContent === undefined ? '' : JSON.stringify(result.structuredContent))
@@ -258,8 +279,11 @@ function isEventLine(line: string) {
 /**
  * Replies "On it…" on the thread of an @agent comment, once per event: a
  * reload's first poll replays the last two minutes, and an id already
- * answered is not answered again. Resolves to the line the agent reads about
- * it, within ACK_WAIT_MS; a reply still on its way by then is not posted twice.
+ * answered is not answered again. Only where the person's own permission
+ * rules already allow `comment_reply`: otherwise the agent posts it in its
+ * turn, under those rules, and the plugin raises no dialog of its own.
+ * Resolves to the line the agent reads about it, within ACK_WAIT_MS; a reply
+ * still on its way by then is not posted twice.
  */
 function acknowledge($: Api, documentId: string, event: Record<string, unknown>): Promise<string | null> {
   const id = text(event.id)
@@ -272,7 +296,12 @@ function acknowledge($: Api, documentId: string, event: Record<string, unknown>)
       ackedEvents.add(id)
       if (ackedEvents.size > ACKED_LIMIT) ackedEvents.delete(ackedEvents.values().next().value as string)
       await update($, acked, () => [...ackedEvents])
-      const result = (await $.mcp.call(await mcpServer($), 'comment_reply', { documentId, threadId, text: ACK_TEXT })) as { isError?: boolean }
+      const server = await mcpServer($)
+      const args = { documentId, threadId, text: ACK_TEXT }
+      if (!(await isAllowed($, server, 'comment_reply', args))) {
+        return `The unpaged plugin leaves "${ACK_TEXT}" on thread ${threadId} to you (your permission rules do not let it reply on its own); post it there yourself first.`
+      }
+      const result = (await $.mcp.call(server, 'comment_reply', args)) as { isError?: boolean }
       if (!result.isError) return posted
     } catch {
       // the agent posts it instead
@@ -639,7 +668,7 @@ export const register: Register = on => {
     const input = e as unknown as { documentId?: string }
     try {
       const result = await stop($, text(input.documentId))
-      return { result: `${result.title}: stopped${result.revoked ? ', key revoked' : ', key not revoked (the server refused or was unreachable)'}` }
+      return { result: `${result.title}: stopped${result.revoked ? ', key revoked' : ', key not revoked (the permission check or the server refused, or the server was unreachable)'}` }
     } catch (err) {
       return { result: `listen_stop failed: ${String((err as Error).message ?? err)}` }
     }
@@ -691,11 +720,6 @@ export const register: Register = on => {
       deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
     }
   })
-
-  // The mod answers for its own tools: no permission prompt and no classifier.
-  for (const tool of ['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status']) {
-    on('tool.check', { tool }, async () => ({ decision: 'allow' }))
-  }
 
   // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
   on('turn.complete', async ($, e, next) => {
