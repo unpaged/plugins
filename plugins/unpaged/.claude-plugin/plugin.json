@@ -8,6 +8,7 @@
     "url": "https://unpaged.io"
   },
   "homepage": "https://unpaged.io",
+  "privacyPolicyUrl": "https://unpaged.io/privacy",
   "repository": "https://github.com/unpaged/plugins",
   "license": "MIT",
   "keywords": [
