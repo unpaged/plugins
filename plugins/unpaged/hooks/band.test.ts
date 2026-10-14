@@ -77,6 +77,20 @@ describe('band', () => {
     await band.unmount()
   })
 
+  test('clearing a canvas whose key the server rejected revokes nothing and says nothing of a live key', async ($, on) => {
+    const w = world(on, { pages: [page(), { status: 401 }], revokeRefused: true })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ state: 'stopped', reason: 'http-401' }))
+    const ui = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
+    await ui.press({ key: 'stop' })
+    expect(w.calls.armed).toEqual([])
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke')).toEqual([])
+    expect(w.calls.toasts.filter(t => t.includes('still live'))).toEqual([])
+    await ui.unmount()
+  })
+
   test('while a reply turn runs the line says so', async ($, on) => {
     const w = world(on, { pages: [page(), page([frame('e1')])] })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)

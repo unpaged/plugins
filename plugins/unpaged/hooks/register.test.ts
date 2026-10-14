@@ -240,6 +240,14 @@ describe('"On it…"', () => {
 })
 
 describe('stop', () => {
+  test('stopping a canvas this session holds no key for says there is none left, not that a revoke was refused', async ($, on) => {
+    const w = world(on)
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('no key left to revoke here')
+    expect(JSON.stringify(answer)).not.toContain('key not revoked')
+    expect(w.calls.mcp).toEqual([])
+  })
+
   test('a key whose revoke was refused is revoked by the next stop of its canvas', async ($, on) => {
     const settings = { revokeRefused: true }
     const w = world(on, settings)

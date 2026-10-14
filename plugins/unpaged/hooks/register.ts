@@ -114,7 +114,12 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
-/** Keys a stop could not revoke (refused or failed), by canvas: the next stop of that canvas revokes them. */
+/**
+ * Keys a stop could not revoke (refused or failed), by canvas: the next stop
+ * of that canvas in this module's life revokes them. Past a reload or the
+ * session, the key file the refused stop left is what `/unpaged:listen
+ * revoke` finds them by.
+ */
 const unrevoked = new Map<string, string>()
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
@@ -468,7 +473,11 @@ async function stop($: Api, documentId: string) {
     loop.controller.abort()
     await loop.done
   }
-  const keyId = loop?.config.keyId ?? canvas?.keyId ?? unrevoked.get(documentId) ?? null
+  // A key the server answered 401 is revoked or invalid already, and the loop
+  // retired its file: there is nothing to revoke and no permission to ask for.
+  const rejected = !loop && canvas?.reason === 'http-401'
+  if (rejected) unrevoked.delete(documentId)
+  const keyId = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? unrevoked.get(documentId) ?? null)
   const revoked = await revoke($, keyId)
   // The file goes only if it still holds the key just revoked: another session
   // may have re-armed the canvas and stored a newer key under the same name.
@@ -684,7 +693,12 @@ export const register: Register = on => {
     const input = e as unknown as { documentId?: string }
     try {
       const result = await stop($, text(input.documentId))
-      return { result: `${result.title}: stopped${result.revoked ? ', key revoked' : ', key not revoked (the permission check or the server refused, or the server was unreachable)'}` }
+      const key = result.revoked
+        ? ', key revoked'
+        : result.keyId
+          ? ', key not revoked (the permission check or the server refused, or the server was unreachable)'
+          : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
+      return { result: `${result.title}: stopped${key}` }
     } catch (err) {
       return { result: `listen_stop failed: ${String((err as Error).message ?? err)}` }
     }
