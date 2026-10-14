@@ -162,6 +162,7 @@ test("the runner reads legacy config without rewriting the key and persists last
   const status = JSON.parse(await readFile(join(home, STATUS_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"));
   assert.equal(status.state, "stopped");
   assert.equal(status.reason, "shutdown");
+  assert.equal(status.pid, process.pid);
   assert.deepEqual(lines, []);
   assert.ok(status.lastSuccessfulPollAt);
   assert.equal(JSON.stringify(status).includes(SECRET), false);

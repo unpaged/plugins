@@ -27,6 +27,14 @@ describe('listen_arm', () => {
     expect(w.calls.submits).toEqual([])
   })
 
+  test('the plugin grants itself no permission: its own tools are left to the permission rules', async ($, on) => {
+    const w = world(on)
+    for (const tool of ['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status']) {
+      expect(await $.tool.check({ tool, input: { documentId: DOCUMENT } })).toEqual({ decision: 'ask' })
+    }
+    expect(w.calls.checks).toEqual(['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status'])
+  })
+
   test('a refused mint arms nothing', async ($, on) => {
     const w = world(on, { mintError: true })
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -62,6 +70,39 @@ describe('listen_arm', () => {
     const tools = w.calls.mcp.map(c => `${c.tool}:${c.args.keyId ?? ''}`)
     expect(tools).toEqual(['agent_listener_key_create:', 'agent_listener_key_revoke:key-old'])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    expect(w.calls.toasts).toEqual([])
+  })
+
+  test('a 401 on the new key leaves the older key an arm could not revoke for the stop to revoke', async ($, on) => {
+    const settings = { revokeRefused: true, pages: [page(), { status: 401 }] }
+    const w = world(on, settings)
+    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await until(() => w.calls.toasts.length > 0)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ state: 'stopped', reason: 'http-401' }))
+    settings.revokeRefused = false
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old', 'key-old'])
+  })
+
+  test('a refused revoke of the key an arm replaced is said, and the next stop revokes it with the new one', async ($, on) => {
+    const settings = { revokeRefused: true }
+    const w = world(on, settings)
+    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await until(() => w.calls.toasts.length > 0)
+    expect(w.calls.toasts).toEqual([
+      'Listening on Plan canvas with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.',
+    ])
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    settings.revokeRefused = false
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old', 'key-1', 'key-old'])
+    expect(w.files.has(KEY_FILE)).toBe(false)
   })
 })
 
@@ -172,6 +213,7 @@ describe('"On it…"', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await deliver(w)
     expect(replies(w)).toEqual([{ tool: 'comment_reply', args: { documentId: DOCUMENT, threadId: THREAD, text: 'On it…' } }])
+    expect(w.calls.checks).toEqual(['mcp__unpaged__comment_reply'])
     expect(w.calls.submitsAtReply).toEqual([0])
     const lines = w.calls.submits[0].split('\n')
     expect(JSON.parse(lines[1]).id).toBe('e1')
@@ -205,6 +247,18 @@ describe('"On it…"', () => {
     expect(w.calls.submits[0].split('\n').at(-1)).toBe(`The unpaged plugin could not reply "On it…" on thread ${THREAD}; post it there yourself first.`)
   })
 
+  for (const rule of ['ask', 'deny'] as const) {
+    test(`where the permission rules ${rule === 'ask' ? 'would ask' : 'refuse'}, the plugin posts nothing and the turn tells the agent to post it, at once`, async ($, on) => {
+      const w = world(on, { pages: [page(), page([frame('e1')])], replyRule: rule })
+      await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+      await deliver(w)
+      expect(replies(w)).toEqual([])
+      expect(w.calls.submits[0].split('\n').at(-1)).toBe(
+        `The unpaged plugin leaves "On it…" on thread ${THREAD} to you (your permission rules do not let it reply on its own); post it there yourself first.`,
+      )
+    })
+  }
+
   test('a reply that does not answer holds the turn five seconds, then the turn starts without posting another', async ($, on) => {
     const w = world(on, { pages: [page(), page([frame('e1')])], ack: 'hang' })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -219,6 +273,29 @@ describe('"On it…"', () => {
 })
 
 describe('stop', () => {
+  test('stopping a canvas this session holds no key for says there is none left, not that a revoke was refused', async ($, on) => {
+    const w = world(on)
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('no key left to revoke here')
+    expect(JSON.stringify(answer)).not.toContain('key not revoked')
+    expect(w.calls.mcp).toEqual([])
+  })
+
+  test('a key whose revoke was refused is revoked by the next stop of its canvas', async ($, on) => {
+    const settings = { revokeRefused: true }
+    const w = world(on, settings)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    const refused = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(refused)).toContain('key not revoked')
+    expect(w.calls.armed).toEqual([])
+    expect(w.files.has(KEY_FILE)).toBe(true)
+    settings.revokeRefused = false
+    const again = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(again)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-1', 'key-1'])
+    expect(w.files.has(KEY_FILE)).toBe(false)
+  })
+
   test('stops the loop, revokes the key by its id and forgets the file', async ($, on) => {
     const w = world(on)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -381,6 +458,16 @@ describe('arming on its own', () => {
     await until(() => w.calls.armed.length === 0)
     expect(w.calls.armed).toEqual([])
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+  })
+
+  test('deleting a canvas whose revoke is refused says its key is still live', async ($, on) => {
+    const w = world(on, { revokeRefused: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    await until(() => w.calls.armed.length === 0 && w.calls.toasts.length > 0)
+    expect(w.calls.toasts).toEqual([`Stopped listening to Scratch; its key is still live: /unpaged:listen revoke ${SECOND}`])
   })
 
   test('a delete answers without waiting for the revoke of its key', async ($, on) => {

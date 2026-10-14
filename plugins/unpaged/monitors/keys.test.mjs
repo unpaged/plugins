@@ -58,52 +58,19 @@ test("the key-store hook fires for the Unpaged MCP server names only", () => {
   }
 });
 
-test("the key-call allow answers for the two key tools on the Unpaged MCP server names only", () => {
+test("the plugin's settings hooks grant no permission: none runs before a tool call, none answers a decision", () => {
   const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
-  const entry = hooks.hooks.PreToolUse.find((e) => /agent_listener_key_/.test(e.matcher));
-  assert.ok(entry, "hook entry present");
-  assert.match(entry.hooks[0].command, /allow-key-calls\.json"$/);
-  const answer = JSON.parse(readFileSync(fileURLToPath(new URL("../hooks/allow-key-calls.json", import.meta.url)), "utf8"));
-  assert.equal(answer.hookSpecificOutput.hookEventName, "PreToolUse");
-  assert.equal(answer.hookSpecificOutput.permissionDecision, "allow");
-  const matcher = new RegExp(entry.matcher);
-  for (const server of ["plugin_unpaged_unpaged", "unpaged", "unpaged-staging"]) {
-    for (const tool of ["agent_listener_key_create", "agent_listener_key_revoke"]) {
-      assert.equal(matcher.test(`mcp__${server}__${tool}`), true, `${server} ${tool}`);
+  assert.equal(hooks.hooks.PreToolUse, undefined);
+  assert.equal(hooks.hooks.PermissionRequest, undefined);
+  for (const entries of Object.values(hooks.hooks)) {
+    for (const entry of entries) {
+      for (const hook of entry.hooks) {
+        const bundled = hook.command.match(/\/hooks\/([\w-]+\.json)"$/);
+        if (!bundled) continue;
+        const answer = readFileSync(fileURLToPath(new URL(`../hooks/${bundled[1]}`, import.meta.url)), "utf8");
+        assert.doesNotMatch(answer, /permissionDecision|"decision"/, bundled[1]);
+      }
     }
-  }
-  for (const name of [
-    "mcp__unpaged__agent_listener_keys_list",
-    "mcp__unpaged__document_create",
-    "mcp__unpaged__agent_listener_key_revoke_all",
-    "mcp__evil__agent_listener_key_revoke",
-    "mcp__evil_mcp__unpaged__agent_listener_key_create",
-    "xmcp__unpaged__agent_listener_key_create",
-    "mcp__plugin_evil_unpaged__agent_listener_key_revoke"
-  ]) {
-    assert.equal(matcher.test(name), false, name);
-  }
-});
-
-test("the \"On it…\" allow runs for comment_reply on the Unpaged MCP server names only", () => {
-  const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
-  const entry = hooks.hooks.PreToolUse.find((e) => /comment_reply/.test(e.matcher));
-  assert.ok(entry, "hook entry present");
-  assert.match(entry.hooks[0].command, /monitors\/ack-hook\.mjs"$/);
-  const matcher = new RegExp(entry.matcher);
-  for (const server of ["plugin_unpaged_unpaged", "unpaged", "unpaged-staging"]) {
-    assert.equal(matcher.test(`mcp__${server}__comment_reply`), true, server);
-  }
-  for (const name of [
-    "mcp__unpaged__comment_reply_and_resolve",
-    "mcp__unpaged__comment_resolve",
-    "mcp__unpaged__comment_create",
-    "mcp__evil__comment_reply",
-    "mcp__evil_mcp__unpaged__comment_reply",
-    "xmcp__unpaged__comment_reply",
-    "mcp__plugin_evil_unpaged__comment_reply"
-  ]) {
-    assert.equal(matcher.test(name), false, name);
   }
 });
 

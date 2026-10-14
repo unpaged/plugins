@@ -2,9 +2,14 @@
 // from inside Claude Code. Arming mints the listener key, the poll loop runs
 // in this module on the host's fetch, each new comment shows as a toast and
 // starts one reply turn through a submitted prompt. An @agent comment gets an
-// "On it…" reply on its thread before that turn starts. No model step is needed
-// to listen, and the key never enters the model's context: it is read from
-// the key file, sent in a request header, and never logged or shown.
+// "On it…" reply on its thread before that turn starts, where the person's
+// permission rules let the plugin post it. No model step is needed to listen,
+// and the key never enters the model's context: it is read from the key file,
+// sent in a request header, and never logged or shown.
+//
+// The mod grants itself no permission: its own calls of the Unpaged tools (the
+// key mint and revoke, "On it…") and the model's calls of its three tools go
+// through the person's own permission rules, as any tool call does.
 //
 // A canvas the session creates or changes through the Unpaged tools is armed
 // on its own, the moment the call succeeds, once per canvas per session: a
@@ -109,6 +114,26 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
+/**
+ * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
+ * next stop of that canvas in this module's life revokes them with its own.
+ * Past a reload or the session, the key file a refused stop left is what
+ * `/unpaged:listen revoke` finds its key by; a key an arm replaced has no file
+ * any longer, and only `/unpaged:listen revoke all` (by this machine's label)
+ * or Unpaged reaches it then. The newer key already shuts it out of polling.
+ */
+const unrevoked = new Map<string, string[]>()
+
+function rememberUnrevoked(documentId: string, keyId: string) {
+  const ids = unrevoked.get(documentId) ?? []
+  if (!ids.includes(keyId)) unrevoked.set(documentId, [...ids, keyId])
+}
+
+function forgetUnrevoked(documentId: string, keyId: string) {
+  const ids = (unrevoked.get(documentId) ?? []).filter(id => id !== keyId)
+  if (ids.length > 0) unrevoked.set(documentId, ids)
+  else unrevoked.delete(documentId)
+}
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
 
@@ -146,6 +171,22 @@ async function mcpServer($: Api) {
     // fall through to the manifest name
   }
   return MCP_SERVER
+}
+
+/** An MCP tool as the person's permission rules name it: `mcp__plugin_unpaged_unpaged__comment_reply` installed with this plugin. */
+const ruleName = (server: string, tool: string) => `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__${tool}`
+
+/**
+ * Whether the person's own permission rules already let `tool` run: asked
+ * without running it, so no dialog opens and no classifier is asked. The
+ * mod's own calls of MCP tools go through those rules either way.
+ */
+async function isAllowed($: Api, server: string, tool: string, input: Record<string, unknown>) {
+  try {
+    return (await $.tool.check({ tool: ruleName(server, tool), input })).decision === 'allow'
+  } catch {
+    return false
+  }
 }
 
 function mcpText(result: { content?: Array<{ type?: string; text?: string }>; structuredContent?: unknown }) {
@@ -258,8 +299,11 @@ function isEventLine(line: string) {
 /**
  * Replies "On it…" on the thread of an @agent comment, once per event: a
  * reload's first poll replays the last two minutes, and an id already
- * answered is not answered again. Resolves to the line the agent reads about
- * it, within ACK_WAIT_MS; a reply still on its way by then is not posted twice.
+ * answered is not answered again. Only where the person's own permission
+ * rules already allow `comment_reply`: otherwise the agent posts it in its
+ * turn, under those rules, and the plugin raises no dialog of its own.
+ * Resolves to the line the agent reads about it, within ACK_WAIT_MS; a reply
+ * still on its way by then is not posted twice.
  */
 function acknowledge($: Api, documentId: string, event: Record<string, unknown>): Promise<string | null> {
   const id = text(event.id)
@@ -272,7 +316,12 @@ function acknowledge($: Api, documentId: string, event: Record<string, unknown>)
       ackedEvents.add(id)
       if (ackedEvents.size > ACKED_LIMIT) ackedEvents.delete(ackedEvents.values().next().value as string)
       await update($, acked, () => [...ackedEvents])
-      const result = (await $.mcp.call(await mcpServer($), 'comment_reply', { documentId, threadId, text: ACK_TEXT })) as { isError?: boolean }
+      const server = await mcpServer($)
+      const args = { documentId, threadId, text: ACK_TEXT }
+      if (!(await isAllowed($, server, 'comment_reply', args))) {
+        return `The unpaged plugin leaves "${ACK_TEXT}" on thread ${threadId} to you (your permission rules do not let it reply on its own); post it there yourself first.`
+      }
+      const result = (await $.mcp.call(server, 'comment_reply', args)) as { isError?: boolean }
       if (!result.isError) return posted
     } catch {
       // the agent posts it instead
@@ -410,8 +459,18 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   await update($, armedOnce, () => [...armedBefore])
   const previous = await loadConfig($, documentId)
   const config = await mint($, documentId)
-  if (previous?.keyId && previous.keyId !== config.keyId) void revoke($, previous.keyId)
   const name = title || config.title || previous?.title || documentId
+  // The key this one replaces: the new key already shuts it out of polling, so
+  // the arm does not wait on it; a revoke refused or failed is said, and kept
+  // for the canvas's next stop.
+  const replaced = previous?.keyId && previous.keyId !== config.keyId ? previous.keyId : null
+  if (replaced) {
+    void revoke($, replaced).then(isRevoked => {
+      if (isRevoked) return forgetUnrevoked(documentId, replaced)
+      rememberUnrevoked(documentId, replaced)
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.`, { timeoutMs: 10000 })
+    })
+  }
   canvases.set(documentId, {
     documentId,
     keyId: config.keyId,
@@ -437,17 +496,40 @@ async function stop($: Api, documentId: string) {
     loop.controller.abort()
     await loop.done
   }
-  const keyId = loop?.config.keyId ?? canvas?.keyId ?? null
-  const revoked = await revoke($, keyId)
-  // The file goes only if it still holds the key just revoked: another session
-  // may have re-armed the canvas and stored a newer key under the same name.
-  if (revoked) {
-    if (loop) await retireKeyFile($, loop.config)
-    else if (keyId) await keysVerb($, 'retire', [documentId, keyId], '')
+  // A key the server answered 401 is revoked or invalid already, and the loop
+  // retired its file: there is nothing to revoke and no permission to ask for.
+  // The older keys this session could not revoke are not covered by that 401.
+  const rejected = !loop && canvas?.reason === 'http-401'
+  const current = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? null)
+  const keyIds = [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
+  unrevoked.delete(documentId)
+  for (const keyId of keyIds) {
+    if (!(await revoke($, keyId))) {
+      rememberUnrevoked(documentId, keyId)
+      continue
+    }
+    // The file goes only if it still holds the key just revoked: another session
+    // may have re-armed the canvas and stored a newer key under the same name.
+    if (loop && keyId === loop.config.keyId) await retireKeyFile($, loop.config)
+    else await keysVerb($, 'retire', [documentId, keyId], '')
   }
   canvases.delete(documentId)
   await sync($)
-  return { title: canvas?.title ?? documentId, revoked, keyId }
+  const left = unrevoked.get(documentId) ?? []
+  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null }
+}
+
+/**
+ * A stop no answer reports (a press, a delete): when the revoke was refused
+ * or failed, a toast says the key is still live, as `/unpaged-listen stop`
+ * says it in its answer.
+ */
+async function stopAndSay($: Api, documentId: string) {
+  const result = await stop($, documentId)
+  if (!result.revoked && result.keyId) {
+    $.ui.toast(`Stopped listening to ${result.title}; its key is still live: /unpaged:listen revoke ${documentId}`, { timeoutMs: 10000 })
+  }
+  return result
 }
 
 /** The new document a create tool answered with: in the JSON the model reads, or in the tool's own record. */
@@ -503,7 +585,7 @@ async function openCanvas($: Api, documentId: string) {
 }
 
 async function stopAll($: Api) {
-  for (const documentId of [...canvases.keys()]) await stop($, documentId)
+  for (const documentId of [...canvases.keys()]) await stopAndSay($, documentId)
 }
 
 function statusLabel(canvas: ArmedCanvas, isWorking: boolean, isReplying: boolean) {
@@ -639,7 +721,12 @@ export const register: Register = on => {
     const input = e as unknown as { documentId?: string }
     try {
       const result = await stop($, text(input.documentId))
-      return { result: `${result.title}: stopped${result.revoked ? ', key revoked' : ', key not revoked (the server refused or was unreachable)'}` }
+      const key = result.revoked
+        ? ', key revoked'
+        : result.keyId
+          ? ', key not revoked (the permission check or the server refused, or the server was unreachable)'
+          : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
+      return { result: `${result.title}: stopped${key}` }
     } catch (err) {
       return { result: `listen_stop failed: ${String((err as Error).message ?? err)}` }
     }
@@ -672,7 +759,7 @@ export const register: Register = on => {
       // Mid-mint, wait for the canvas to be recorded; once it is, stop it at once.
       const recorded = canvases.has(documentId) ? undefined : arming.get(documentId)?.catch(() => undefined)
       void Promise.resolve(recorded)
-        .then(() => (canvases.has(documentId) ? stop($, documentId) : undefined))
+        .then(() => (canvases.has(documentId) ? stopAndSay($, documentId) : undefined))
         .catch(() => undefined)
     }
     return ran
@@ -691,11 +778,6 @@ export const register: Register = on => {
       deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
     }
   })
-
-  // The mod answers for its own tools: no permission prompt and no classifier.
-  for (const tool of ['mcp__unpaged__listen_arm', 'mcp__unpaged__listen_stop', 'mcp__unpaged__listen_status']) {
-    on('tool.check', { tool }, async () => ({ decision: 'allow' }))
-  }
 
   // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
   on('turn.complete', async ($, e, next) => {
@@ -729,7 +811,7 @@ export const register: Register = on => {
               Text({ wrap: 'truncate-end', children: [list[0].title] }),
               Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
               button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
-              button('stop', 'stop', '2', () => void stop($, list[0].documentId)),
+              button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
         : Box({
@@ -769,7 +851,7 @@ export const register: Register = on => {
               key: `stop-${canvas.documentId}`,
               label: 'stop',
               onPress: () => {
-                void stop($, canvas.documentId).then(() => (canvases.size === 0 ? $.ui.close({ id: PANE }) : undefined))
+                void stopAndSay($, canvas.documentId).then(() => (canvases.size === 0 ? $.ui.close({ id: PANE }) : undefined))
               },
             }),
           ],

@@ -58,7 +58,7 @@ export async function runMonitor(documentId, options = {}) {
     try {
       await mkdir(dirname(statusFile), { recursive: true, mode: 0o700 });
       const tmp = `${statusFile}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
-      await writeFile(tmp, JSON.stringify({ ...monitorStatus(state, reason, scriptPath, documentId),
+      await writeFile(tmp, JSON.stringify({ ...monitorStatus(state, reason, scriptPath, documentId, process.pid),
         transport: "poll-v1", ownerId: ownership?.ownerId, ...metadata }), { mode: 0o600 });
       await rename(tmp, statusFile);
     } catch { /* Advisory state never prints credential-bearing diagnostics. */ }
@@ -79,7 +79,7 @@ export async function runMonitor(documentId, options = {}) {
     try { config = parseListenerConfig(await readFile(keyFile, "utf8")); } catch { return { reason: "not-armed" }; }
     if (!config || config.documentId !== documentId) return { reason: "not-armed" };
     return await runListener(config, { ...options, signal: controller.signal, reportStatus,
-      retireKey: () => retireKeyFile({ rename, readFile, rm, link }, keyFile, config) });
+      retireKey: () => retireKeyFile({ rename, readFile, rm, link }, keyFile, config, process.pid) });
   } finally {
     // A replacement cannot obtain its kernel quorum until every old HTTP,
     // stdout and advisory-status operation has finished.

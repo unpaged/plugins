@@ -37,8 +37,12 @@ export function world(
     hangPolls?: boolean
     holdMint?: boolean
     hangRevoke?: boolean
+    /** The revoke is refused, as a permission check or the server refuses it. */
+    revokeRefused?: boolean
     /** How the server answers the "On it…" reply: posted (the default), refused, or never. */
     ack?: 'posted' | 'refused' | 'hang'
+    /** The person's permission rules on comment_reply, as `$.tool.check` reads them: allowed (the default) or not. */
+    replyRule?: 'allow' | 'ask' | 'deny'
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -57,6 +61,8 @@ export function world(
     submitsAtReply: [] as number[],
     toasts: [] as string[],
     opened: [] as string[],
+    /** The tools the plugin asked the permission rules about, by the name the rules use. */
+    checks: [] as string[],
   }
   // The band's view of the armed set, as the plugin writes it.
   on('state.set', (_$, e, next) => {
@@ -129,6 +135,12 @@ export function world(
     return ok('')
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
+  // The person's permission rules, as a query reads them: nothing runs.
+  on('tool.check', (_$, e) => {
+    calls.checks.push(e.tool)
+    if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
+    return { decision: 'ask' }
+  })
   // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
   let releaseMint: () => void = () => {}
   const minted = settings.holdMint ? new Promise<void>(resolve => (releaseMint = resolve)) : Promise.resolve()
@@ -142,6 +154,7 @@ export function world(
       const mint = { pollUrl: POLL_URL, key: KEY, documentId, keyId: keyIdFor(documentId), title: titleFor(documentId) }
       return { value: { content: [{ type: 'text', text: JSON.stringify(mint) }], isError: false } }
     }
+    if (e.tool === 'agent_listener_key_revoke' && settings.revokeRefused) return { value: { content: [{ type: 'text', text: 'Error: refused' }], isError: true } }
     if (e.tool === 'agent_listener_key_revoke') return { value: { content: [{ type: 'text', text: '{"revoked":true}' }], isError: false } }
     if (e.tool === 'comment_reply') {
       calls.submitsAtReply.push(calls.submits.length)

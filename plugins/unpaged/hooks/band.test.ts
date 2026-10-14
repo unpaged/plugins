@@ -50,6 +50,44 @@ describe('band', () => {
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-1' } })
     expect(w.calls.armed).toEqual([])
     expect(await ui.find({ text: /Listening/ })).toBeUndefined()
+    expect(w.calls.toasts.filter(t => t.includes('still live'))).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a stop whose revoke is refused says the key is still live, from the band, the pane and stop all', async ($, on) => {
+    const w = world(on, { revokeRefused: true })
+    const live = (documentId: string, title: string) => `Stopped listening to ${title}; its key is still live: /unpaged:listen revoke ${documentId}`
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    const one = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
+    await one.press({ key: 'stop' })
+    expect(w.calls.armed).toEqual([])
+    expect(w.calls.toasts).toEqual([live(DOCUMENT, 'Plan canvas')])
+    await one.unmount()
+    for (const documentId of [DOCUMENT, SECOND, THIRD]) {
+      await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId } as never)
+    }
+    const pane = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'Pane', props: paneProps(), requestId: PANE })
+    await pane.press({ key: `stop-${SECOND}` })
+    expect(w.calls.toasts.at(-1)).toBe(live(SECOND, 'Canvas 2222'))
+    await pane.unmount()
+    const band = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
+    await band.press({ key: 'stop-all' })
+    expect(w.calls.armed).toEqual([])
+    expect(w.calls.toasts.slice(-2)).toEqual([live(DOCUMENT, 'Plan canvas'), live(THIRD, 'Canvas 3333')])
+    await band.unmount()
+  })
+
+  test('clearing a canvas whose key the server rejected revokes nothing and says nothing of a live key', async ($, on) => {
+    const w = world(on, { pages: [page(), { status: 401 }], revokeRefused: true })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ state: 'stopped', reason: 'http-401' }))
+    const ui = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
+    await ui.press({ key: 'stop' })
+    expect(w.calls.armed).toEqual([])
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke')).toEqual([])
+    expect(w.calls.toasts.filter(t => t.includes('still live'))).toEqual([])
     await ui.unmount()
   })
 
