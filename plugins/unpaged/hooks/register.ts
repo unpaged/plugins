@@ -114,6 +114,8 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
+/** Keys a stop could not revoke (refused or failed), by canvas: the next stop of that canvas revokes them. */
+const unrevoked = new Map<string, string>()
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
 
@@ -466,17 +468,31 @@ async function stop($: Api, documentId: string) {
     loop.controller.abort()
     await loop.done
   }
-  const keyId = loop?.config.keyId ?? canvas?.keyId ?? null
+  const keyId = loop?.config.keyId ?? canvas?.keyId ?? unrevoked.get(documentId) ?? null
   const revoked = await revoke($, keyId)
   // The file goes only if it still holds the key just revoked: another session
   // may have re-armed the canvas and stored a newer key under the same name.
   if (revoked) {
+    unrevoked.delete(documentId)
     if (loop) await retireKeyFile($, loop.config)
     else if (keyId) await keysVerb($, 'retire', [documentId, keyId], '')
-  }
+  } else if (keyId) unrevoked.set(documentId, keyId)
   canvases.delete(documentId)
   await sync($)
   return { title: canvas?.title ?? documentId, revoked, keyId }
+}
+
+/**
+ * A stop no answer reports (a press, a delete): when the revoke was refused
+ * or failed, a toast says the key is still live, as `/unpaged-listen stop`
+ * says it in its answer.
+ */
+async function stopAndSay($: Api, documentId: string) {
+  const result = await stop($, documentId)
+  if (!result.revoked && result.keyId) {
+    $.ui.toast(`Stopped listening to ${result.title}; its key is still live: /unpaged:listen revoke ${documentId}`, { timeoutMs: 10000 })
+  }
+  return result
 }
 
 /** The new document a create tool answered with: in the JSON the model reads, or in the tool's own record. */
@@ -532,7 +548,7 @@ async function openCanvas($: Api, documentId: string) {
 }
 
 async function stopAll($: Api) {
-  for (const documentId of [...canvases.keys()]) await stop($, documentId)
+  for (const documentId of [...canvases.keys()]) await stopAndSay($, documentId)
 }
 
 function statusLabel(canvas: ArmedCanvas, isWorking: boolean, isReplying: boolean) {
@@ -701,7 +717,7 @@ export const register: Register = on => {
       // Mid-mint, wait for the canvas to be recorded; once it is, stop it at once.
       const recorded = canvases.has(documentId) ? undefined : arming.get(documentId)?.catch(() => undefined)
       void Promise.resolve(recorded)
-        .then(() => (canvases.has(documentId) ? stop($, documentId) : undefined))
+        .then(() => (canvases.has(documentId) ? stopAndSay($, documentId) : undefined))
         .catch(() => undefined)
     }
     return ran
@@ -753,7 +769,7 @@ export const register: Register = on => {
               Text({ wrap: 'truncate-end', children: [list[0].title] }),
               Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
               button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
-              button('stop', 'stop', '2', () => void stop($, list[0].documentId)),
+              button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
         : Box({
@@ -793,7 +809,7 @@ export const register: Register = on => {
               key: `stop-${canvas.documentId}`,
               label: 'stop',
               onPress: () => {
-                void stop($, canvas.documentId).then(() => (canvases.size === 0 ? $.ui.close({ id: PANE }) : undefined))
+                void stopAndSay($, canvas.documentId).then(() => (canvases.size === 0 ? $.ui.close({ id: PANE }) : undefined))
               },
             }),
           ],

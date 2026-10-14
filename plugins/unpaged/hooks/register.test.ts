@@ -240,6 +240,21 @@ describe('"On it…"', () => {
 })
 
 describe('stop', () => {
+  test('a key whose revoke was refused is revoked by the next stop of its canvas', async ($, on) => {
+    const settings = { revokeRefused: true }
+    const w = world(on, settings)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    const refused = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(refused)).toContain('key not revoked')
+    expect(w.calls.armed).toEqual([])
+    expect(w.files.has(KEY_FILE)).toBe(true)
+    settings.revokeRefused = false
+    const again = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(again)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-1', 'key-1'])
+    expect(w.files.has(KEY_FILE)).toBe(false)
+  })
+
   test('stops the loop, revokes the key by its id and forgets the file', async ($, on) => {
     const w = world(on)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -402,6 +417,16 @@ describe('arming on its own', () => {
     await until(() => w.calls.armed.length === 0)
     expect(w.calls.armed).toEqual([])
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-22222222' } })
+  })
+
+  test('deleting a canvas whose revoke is refused says its key is still live', async ($, on) => {
+    const w = world(on, { revokeRefused: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Scratch' } as never)
+    await until(() => w.calls.armed[0]?.state === 'connected')
+    await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
+    await until(() => w.calls.armed.length === 0 && w.calls.toasts.length > 0)
+    expect(w.calls.toasts).toEqual([`Stopped listening to Scratch; its key is still live: /unpaged:listen revoke ${SECOND}`])
   })
 
   test('a delete answers without waiting for the revoke of its key', async ($, on) => {

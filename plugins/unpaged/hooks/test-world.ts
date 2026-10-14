@@ -37,6 +37,8 @@ export function world(
     hangPolls?: boolean
     holdMint?: boolean
     hangRevoke?: boolean
+    /** The revoke is refused, as a permission check or the server refuses it. */
+    revokeRefused?: boolean
     /** How the server answers the "On it…" reply: posted (the default), refused, or never. */
     ack?: 'posted' | 'refused' | 'hang'
     /** The person's permission rules on comment_reply, as `$.tool.check` reads them: allowed (the default) or not. */
@@ -152,6 +154,7 @@ export function world(
       const mint = { pollUrl: POLL_URL, key: KEY, documentId, keyId: keyIdFor(documentId), title: titleFor(documentId) }
       return { value: { content: [{ type: 'text', text: JSON.stringify(mint) }], isError: false } }
     }
+    if (e.tool === 'agent_listener_key_revoke' && settings.revokeRefused) return { value: { content: [{ type: 'text', text: 'Error: refused' }], isError: true } }
     if (e.tool === 'agent_listener_key_revoke') return { value: { content: [{ type: 'text', text: '{"revoked":true}' }], isError: false } }
     if (e.tool === 'comment_reply') {
       calls.submitsAtReply.push(calls.submits.length)

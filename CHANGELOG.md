@@ -8,7 +8,8 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Changed
 
-- The plugin grants itself no permission, as the Claude plugin directory requires. Its mod no longer answers *allow* for its own `listen_arm`, `listen_stop` and `listen_status` tools, and the two `PreToolUse` hooks that allowed `agent_listener_key_create`, `agent_listener_key_revoke` and the *On it…* `comment_reply` are gone (`hooks/allow-key-calls.json`, `monitors/ack-hook.mjs`). Those calls now go through your own permission rules, like the agent's: in the default mode Claude Code asks before the plugin starts or stops a listener, auto mode's classifier decides, and a headless session refuses what no rule allows. The README's new *Permissions* section lists the rules that let it listen without asking.
+- The plugin grants itself no permission, as the Claude plugin directory requires ([#37](https://github.com/unpaged/plugins/pull/37)). Its mod no longer answers *allow* for its own `listen_arm`, `listen_stop` and `listen_status` tools, and the two `PreToolUse` hooks that allowed `agent_listener_key_create`, `agent_listener_key_revoke` and the *On it…* `comment_reply` are gone (`hooks/allow-key-calls.json`, `monitors/ack-hook.mjs`). Those calls now go through your own permission rules, like the agent's: in the default mode Claude Code asks before the plugin starts or stops a listener, auto mode's classifier decides, and a headless session refuses what no rule allows. The README's new *Permissions* section lists the rules that let it listen without asking.
+- Stopping a listener from the line above the prompt, its pane, *stop all*, or by deleting the canvas, now says in a toast when the key's revoke was refused or failed, so a key left live is never silent; `/unpaged-listen stop` and `listen_stop` already said so in their answers. The plugin remembers that key, so the next stop of the canvas (`/unpaged:listen revoke <documentId>`) revokes it; until now that stop found no key to revoke.
 - The mod posts *On it…* on an @agent comment only where your rules already allow `comment_reply`. It asks them first, a check that runs nothing and opens no dialog; otherwise the reply turn starts at once and tells the agent to post *On it…* itself.
 - The README says what the plugin runs, reads and sends: the programs it starts, the tools it calls itself, the host it polls, what it sends there, what it reads, the prompts it submits, each event it hooks and the one credential it keeps.
 
@@ -216,7 +217,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/unpaged/plugins/releases/tag/v1.9.0
 [1.8.0]: https://github.com/unpaged/plugins/releases/tag/v1.8.0
 [unpaged-codex 0.8.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.8.0
 [1.7.1]: https://github.com/unpaged/plugins/releases/tag/v1.7.1

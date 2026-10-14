@@ -214,6 +214,19 @@ test("retireKeyFile removes the rejected config but restores a newer one", async
   assert.equal(await retireKeyFile(memFs({}), "/k", loaded, 1), "absent");
 });
 
+test("retireKeyFile names its aside copy after the pid it is given", async () => {
+  const loaded = cfg("old", "k1");
+  const fs = memFs({ "/k": JSON.stringify(loaded) });
+  const renames = [];
+  const rename = fs.rename.bind(fs);
+  fs.rename = async (from, to) => {
+    renames.push([from, to]);
+    return rename(from, to);
+  };
+  assert.equal(await retireKeyFile(fs, "/k", loaded, 4242), "removed");
+  assert.deepEqual(renames, [["/k", "/k.retiring-4242"]]);
+});
+
 test("HTTP 401 retires the same key across old/new file formats without removing a newer key", async () => {
   const legacy = { url: "wss://mcp.unpaged.io/events", protocols: [SUBPROTOCOL, KEY], documentId: DOC, keyId: "old" };
   const normalized = parseListenerConfig(JSON.stringify(legacy));
