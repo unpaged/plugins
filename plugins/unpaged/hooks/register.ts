@@ -118,7 +118,9 @@ const ackedEvents = new Set<string>()
  * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
  * next stop of that canvas in this module's life revokes them with its own.
  * Past a reload or the session, the key file a refused stop left is what
- * `/unpaged:listen revoke` finds them by.
+ * `/unpaged:listen revoke` finds its key by; a key an arm replaced has no file
+ * any longer, and only `/unpaged:listen revoke all` (by this machine's label)
+ * or Unpaged reaches it then. The newer key already shuts it out of polling.
  */
 const unrevoked = new Map<string, string[]>()
 
@@ -466,7 +468,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
     void revoke($, replaced).then(isRevoked => {
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
-      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live, and stopping the canvas revokes it too.`, { timeoutMs: 10000 })
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.`, { timeoutMs: 10000 })
     })
   }
   canvases.set(documentId, {
@@ -496,10 +498,10 @@ async function stop($: Api, documentId: string) {
   }
   // A key the server answered 401 is revoked or invalid already, and the loop
   // retired its file: there is nothing to revoke and no permission to ask for.
-  // The keys it replaced were shut out of polling by it, so they are let go too.
+  // The older keys this session could not revoke are not covered by that 401.
   const rejected = !loop && canvas?.reason === 'http-401'
   const current = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? null)
-  const keyIds = rejected ? [] : [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
+  const keyIds = [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
   unrevoked.delete(documentId)
   for (const keyId of keyIds) {
     if (!(await revoke($, keyId))) {

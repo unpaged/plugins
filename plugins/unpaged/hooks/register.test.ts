@@ -73,13 +73,30 @@ describe('listen_arm', () => {
     expect(w.calls.toasts).toEqual([])
   })
 
+  test('a 401 on the new key leaves the older key an arm could not revoke for the stop to revoke', async ($, on) => {
+    const settings = { revokeRefused: true, pages: [page(), { status: 401 }] }
+    const w = world(on, settings)
+    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await until(() => w.calls.toasts.length > 0)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ state: 'stopped', reason: 'http-401' }))
+    settings.revokeRefused = false
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old', 'key-old'])
+  })
+
   test('a refused revoke of the key an arm replaced is said, and the next stop revokes it with the new one', async ($, on) => {
     const settings = { revokeRefused: true }
     const w = world(on, settings)
     w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
-    expect(w.calls.toasts).toEqual(['Listening on Plan canvas with a new key; the key it replaced is still live, and stopping the canvas revokes it too.'])
+    expect(w.calls.toasts).toEqual([
+      'Listening on Plan canvas with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.',
+    ])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
     settings.revokeRefused = false
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
