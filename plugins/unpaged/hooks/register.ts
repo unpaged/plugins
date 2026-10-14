@@ -115,12 +115,23 @@ const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
 /**
- * Keys a stop could not revoke (refused or failed), by canvas: the next stop
- * of that canvas in this module's life revokes them. Past a reload or the
- * session, the key file the refused stop left is what `/unpaged:listen
- * revoke` finds them by.
+ * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
+ * next stop of that canvas in this module's life revokes them with its own.
+ * Past a reload or the session, the key file a refused stop left is what
+ * `/unpaged:listen revoke` finds them by.
  */
-const unrevoked = new Map<string, string>()
+const unrevoked = new Map<string, string[]>()
+
+function rememberUnrevoked(documentId: string, keyId: string) {
+  const ids = unrevoked.get(documentId) ?? []
+  if (!ids.includes(keyId)) unrevoked.set(documentId, [...ids, keyId])
+}
+
+function forgetUnrevoked(documentId: string, keyId: string) {
+  const ids = (unrevoked.get(documentId) ?? []).filter(id => id !== keyId)
+  if (ids.length > 0) unrevoked.set(documentId, ids)
+  else unrevoked.delete(documentId)
+}
 
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
 
@@ -446,8 +457,18 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   await update($, armedOnce, () => [...armedBefore])
   const previous = await loadConfig($, documentId)
   const config = await mint($, documentId)
-  if (previous?.keyId && previous.keyId !== config.keyId) void revoke($, previous.keyId)
   const name = title || config.title || previous?.title || documentId
+  // The key this one replaces: the new key already shuts it out of polling, so
+  // the arm does not wait on it; a revoke refused or failed is said, and kept
+  // for the canvas's next stop.
+  const replaced = previous?.keyId && previous.keyId !== config.keyId ? previous.keyId : null
+  if (replaced) {
+    void revoke($, replaced).then(isRevoked => {
+      if (isRevoked) return forgetUnrevoked(documentId, replaced)
+      rememberUnrevoked(documentId, replaced)
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live, and stopping the canvas revokes it too.`, { timeoutMs: 10000 })
+    })
+  }
   canvases.set(documentId, {
     documentId,
     keyId: config.keyId,
@@ -475,20 +496,25 @@ async function stop($: Api, documentId: string) {
   }
   // A key the server answered 401 is revoked or invalid already, and the loop
   // retired its file: there is nothing to revoke and no permission to ask for.
+  // The keys it replaced were shut out of polling by it, so they are let go too.
   const rejected = !loop && canvas?.reason === 'http-401'
-  if (rejected) unrevoked.delete(documentId)
-  const keyId = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? unrevoked.get(documentId) ?? null)
-  const revoked = await revoke($, keyId)
-  // The file goes only if it still holds the key just revoked: another session
-  // may have re-armed the canvas and stored a newer key under the same name.
-  if (revoked) {
-    unrevoked.delete(documentId)
-    if (loop) await retireKeyFile($, loop.config)
-    else if (keyId) await keysVerb($, 'retire', [documentId, keyId], '')
-  } else if (keyId) unrevoked.set(documentId, keyId)
+  const current = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? null)
+  const keyIds = rejected ? [] : [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
+  unrevoked.delete(documentId)
+  for (const keyId of keyIds) {
+    if (!(await revoke($, keyId))) {
+      rememberUnrevoked(documentId, keyId)
+      continue
+    }
+    // The file goes only if it still holds the key just revoked: another session
+    // may have re-armed the canvas and stored a newer key under the same name.
+    if (loop && keyId === loop.config.keyId) await retireKeyFile($, loop.config)
+    else await keysVerb($, 'retire', [documentId, keyId], '')
+  }
   canvases.delete(documentId)
   await sync($)
-  return { title: canvas?.title ?? documentId, revoked, keyId }
+  const left = unrevoked.get(documentId) ?? []
+  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null }
 }
 
 /**

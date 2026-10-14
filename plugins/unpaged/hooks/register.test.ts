@@ -70,6 +70,22 @@ describe('listen_arm', () => {
     const tools = w.calls.mcp.map(c => `${c.tool}:${c.args.keyId ?? ''}`)
     expect(tools).toEqual(['agent_listener_key_create:', 'agent_listener_key_revoke:key-old'])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    expect(w.calls.toasts).toEqual([])
+  })
+
+  test('a refused revoke of the key an arm replaced is said, and the next stop revokes it with the new one', async ($, on) => {
+    const settings = { revokeRefused: true }
+    const w = world(on, settings)
+    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await until(() => w.calls.toasts.length > 0)
+    expect(w.calls.toasts).toEqual(['Listening on Plan canvas with a new key; the key it replaced is still live, and stopping the canvas revokes it too.'])
+    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    settings.revokeRefused = false
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(answer)).toContain('key revoked')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old', 'key-1', 'key-old'])
+    expect(w.files.has(KEY_FILE)).toBe(false)
   })
 })
 
