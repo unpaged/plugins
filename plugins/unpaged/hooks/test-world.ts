@@ -45,7 +45,7 @@ export function world(
     replyRule?: 'allow' | 'ask' | 'deny'
     /** The rules on agent_listener_key_create: allowed (the default) lets the plugin mint on its own. */
     keyRule?: 'allow' | 'ask' | 'deny'
-    /** The rules on agent_listener_key_revoke: asked (the default) leaves a replaced key to the agent where it minted. */
+    /** The rules on agent_listener_key_revoke: allowed (the default) lets the plugin revoke on its own; otherwise a stop the agent makes, or a replaced key where it minted, is left to the agent. */
     revokeRule?: 'allow' | 'ask' | 'deny'
     /** No `hostname` program, as on some Linux images: `uname -n` answers instead. */
     noHostname?: boolean
@@ -124,7 +124,7 @@ export function world(
     calls.checks.push(e.tool)
     if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
     if (e.tool === 'mcp__unpaged__agent_listener_key_create') return { decision: settings.keyRule ?? 'allow' }
-    if (e.tool === 'mcp__unpaged__agent_listener_key_revoke') return { decision: settings.revokeRule ?? 'ask' }
+    if (e.tool === 'mcp__unpaged__agent_listener_key_revoke') return { decision: settings.revokeRule ?? 'allow' }
     return { decision: 'ask' }
   })
   // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
