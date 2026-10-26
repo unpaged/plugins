@@ -10,7 +10,7 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 | Display name | Unpaged |
 | Repository | https://github.com/unpaged/plugins |
 | Plugin path in the repo | `plugins/unpaged` — this repo's own `marketplace.json` lists it as the relative path `./plugins/unpaged`; the community catalog records monorepo entries as `{ source: "git-subdir", url, path, ref, sha }`, so give the form the repo URL plus this path |
-| Release / ref | `v1.9.0` — the first version whose tree passes the directory policy: no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`; never submit an older ref |
+| Release / ref | `v1.12.0`, the first release that carries the *Directory findings* changes below. v1.10.0 (483d59b) was in review from 2026-10-26; v1.9.0 was the first version whose tree passes the directory policy (no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`). Never submit an older ref |
 | Homepage | https://unpaged.io |
 | Privacy policy | https://unpaged.io/privacy |
 | Terms | https://unpaged.io/terms |
@@ -38,12 +38,28 @@ Turn Claude Code plans into whiteboards on Unpaged: review on the canvas, commen
 
 - **External network calls: yes.** MCP over HTTPS to `mcp.unpaged.io` (OAuth 2.0, the user's own Unpaged account, free tier works) and short authenticated HTTPS polls per armed canvas to the same host. Nothing else.
 - **Installs additional software: no.** The listener runs inside Claude Code (the mod) and needs no Node; on an older Claude Code without mods it is plain Node ≥ 22 with no dependencies. The MCP server is remote (`type: http`), no `npx`/`uvx` launcher.
-- **Programs run:** `hostname` (or `uname -n` where there is no `hostname`) once, for the label a key is minted with, and `open` / `xdg-open` on the canvas link only when the user presses *open*. No shell, no Node: the mod keeps its keys in the plugin's own store (`$.store`). The plugin README's *What the plugin runs, reads and sends* lists every call.
+- **Programs run:** `hostname` (or `uname -n` where there is no `hostname`) once, for the label a key is minted with, each written whole at its call. Nothing else: the canvas name on the line above the prompt is a link Claude Code opens itself. No shell, no Node: the mod keeps its keys in the plugin's own store (`$.store`). The plugin README's *What the plugin runs, reads and sends* lists every call.
 - **Permissions:** the plugin grants itself none. No hook answers *allow*; the key mint and revoke the mod makes itself, its three tools, and the *On it…* reply go through the user's own permission rules. The mod mints on its own only where those rules already allow `agent_listener_key_create` (otherwise the agent offers to listen and mints in its own turn), and posts *On it…* only where they allow `comment_reply` (otherwise the agent does); it asks the rules first with `$.tool.check`, which runs nothing and opens no dialog. The plugin README's *Permissions* section lists the rules for listening without being asked.
 - **Credentials:** the listener key is minted by Unpaged for one canvas, kept in the plugin's own store (a file Claude Code keeps for the plugin, mode 600; on the Monitor path, `~/.claude/unpaged/listeners/<documentId>.json`, mode 600), kept out of the conversation, sent only to Unpaged, revocable from the command or from Unpaged. The plugin reads no other credential store.
 - **Comments are data, not instructions:** an `@agent` comment is acted on only with Unpaged tools on that one canvas; never shell, file, git or network actions. Viewers get an answer, not a change.
 - **Data sent:** the plan text and the elements drawn, the user's comments and the agent's replies, the Decision log rows the session writes while it implements, and — with `/unpaged:as-built` — file paths, commit subjects, diff summaries and the agent's description of the change (never file contents beyond a quoted identifier) — under the user's own account. No telemetry.
 - **Domains owned by the publisher:** unpaged.io, mcp.unpaged.io (Graph Knowledge SRL).
+
+## Directory findings
+
+The directory's automatic review of v1.10.0 (2026-10-26) held it for a reviewer on these findings. Apart from the program starts, each is a capability the listener needs, so code cannot remove it; the plugin README's *What the plugin runs, reads and sends* answers it in the words the finding asks for.
+
+| Finding | Where | Answer |
+| --- | --- | --- |
+| Fetches from the network and runs commands or tools; may start a program the directory couldn't fully check; starts other programs | `keyLabel` | The `hostname` and `uname -n` calls are written whole at the call. They are the only programs: the `open` / `xdg-open` the plugin started for `1: open` are gone: the canvas name is now a link, and `1: link` shows the address in a toast. README: *Programs it starts* |
+| Calls tools itself | `mint`, `revoke`, `acknowledge` | README: *Tools it calls itself*, and the *Permissions* table |
+| Reads local data or the conversation and sends data out; may send a request somewhere the directory couldn't check | `pollWith` | A fixed address is not possible: the poll's cursor is a query parameter of the Unpaged poll contract. README: *Hosts it contacts*, *What it sends, and where*, *What it reads* |
+| Reads the conversation and submits a prompt | `sayWith` | README: *The prompts it submits* |
+| Answers a tool call in place of the tool | `listen_arm` | Its own three tools, and the key mint. README: *The events it hooks* |
+| Changes a tool's input before it runs | the key mint's hook | The `label` only. README: *The events it hooks* |
+| Uses a credential from the user's machine (asks for a `user_config` option) | 6 findings | Not applicable: the listener key is minted per canvas by the plugin or the agent, nothing a person types. README: *Credentials* |
+| Unrecognized field in `plugin.json` | 2 findings | `types` stays (see the checklist); the directory says an unknown field can stay |
+| Hooks an event settings or instructions pass through (`classic.SessionStart`); hooks an event that is also a call (`command.run`) | notes | README: *The events it hooks* says what each changes |
 
 ## Reviewer test account
 

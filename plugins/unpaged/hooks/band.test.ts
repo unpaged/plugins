@@ -16,17 +16,19 @@ describe('band', () => {
     }
   })
 
-  test('one canvas: the line, its two hotkeys, and open resets the count', async ($, on) => {
+  test('one canvas: the line, its title linking to the canvas, link and stop hotkeys, and the count', async ($, on) => {
     const w = world(on, { pages: [page(), page([frame('e1'), frame('e2')])] })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ plugin: 'unpaged', surface, component: 'AbovePrompt', props: bandProps() })
       expect((await ui.find({ type: 'Text', text: 'Listening' }))?.text).toBe('Listening')
-      expect(await ui.find({ text: 'Plan canvas' })).toBeDefined()
+      const link = await ui.find({ type: 'Link' })
+      expect(link?.text).toContain('Plan canvas')
+      expect(link?.props.href).toBe(`https://unpaged.io/document/${DOCUMENT}/edit`)
       expect(await ui.find({ text: /no new comments/ })).toBeDefined()
       const buttons = await ui.findAll({ type: 'Button' })
       expect(buttons.map(b => [b.key, b.props.hotkey])).toEqual([
-        ['open', '1'],
+        ['link', '1'],
         ['stop', '2'],
       ])
       await ui.unmount()
@@ -35,11 +37,12 @@ describe('band', () => {
     await w.clock.advance(30_000)
     await w.clock.advance(50)
     expect(await ui.find({ text: /2 new/ })).toBeDefined()
-    await ui.press({ key: 'open' })
-    expect(w.calls.opened).toEqual([`https://unpaged.io/document/${DOCUMENT}/edit`])
-    expect(w.calls.armed[0]).toEqual(expect.objectContaining({ unread: 0 }))
-    expect(await ui.find({ text: /no new comments/ })).toBeDefined()
+    // Where the terminal draws no links and the band cuts the address, link shows it whole.
+    await ui.press({ key: 'link' })
+    expect(w.calls.toasts.at(-1)).toBe(`https://unpaged.io/document/${DOCUMENT}/edit`)
     await ui.unmount()
+    // The link is Claude Code's to open: the only program the plugin started is hostname, for the key's label.
+    expect(w.calls.process.map(c => c.argv)).toEqual([['hostname']])
   })
 
   test('the stop hotkey revokes the key and the band goes quiet', async ($, on) => {
@@ -107,7 +110,7 @@ describe('band', () => {
     await ui.unmount()
   })
 
-  test('three canvases: one line, the pane lists each with its own buttons, stop all clears them', async ($, on) => {
+  test('three canvases: one line, the pane lists each with its link, link and stop buttons, stop all clears them', async ($, on) => {
     const w = world(on)
     for (const documentId of [DOCUMENT, SECOND, THIRD]) {
       await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId } as never)
@@ -119,13 +122,17 @@ describe('band', () => {
       expect((await band.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['canvases', 'stop-all'])
       const pane = await $.ui.mount({ plugin: 'unpaged', surface, component: 'Pane', props: paneProps(), requestId: PANE })
       expect((await pane.findAll({ type: 'Button' })).map(b => b.key)).toEqual([
-        `open-${DOCUMENT}`, `stop-${DOCUMENT}`, `open-${SECOND}`, `stop-${SECOND}`, `open-${THIRD}`, `stop-${THIRD}`,
+        `link-${DOCUMENT}`, `stop-${DOCUMENT}`, `link-${SECOND}`, `stop-${SECOND}`, `link-${THIRD}`, `stop-${THIRD}`,
       ])
-      expect(await pane.find({ text: 'Plan canvas' })).toBeDefined()
+      const links = await pane.findAll({ type: 'Link' })
+      expect(links.map(l => l.props.href)).toEqual([DOCUMENT, SECOND, THIRD].map(id => `https://unpaged.io/document/${id}/edit`))
+      expect(links.map((l, i) => l.text?.includes(['Plan canvas', 'Canvas 2222', 'Canvas 3333'][i]))).toEqual([true, true, true])
       await pane.unmount()
       await band.unmount()
     }
     const pane = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'Pane', props: paneProps(), requestId: PANE })
+    await pane.press({ key: `link-${THIRD}` })
+    expect(w.calls.toasts.at(-1)).toBe(`https://unpaged.io/document/${THIRD}/edit`)
     await pane.press({ key: `stop-${SECOND}` })
     expect(w.calls.armed.map(c => c.documentId)).toEqual([DOCUMENT, THIRD])
     await pane.unmount()

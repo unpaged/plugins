@@ -189,23 +189,20 @@ async function retireStored($: Api, documentId: string, matches: (stored: Listen
 
 let hostName: string | null = null
 
+/** The host up to its first dot, from a run that exited 0, else null. */
+const shortHost = (ran: { exitCode: number; stdout: string } | null) => (ran?.exitCode === 0 ? ran.stdout.trim().split('.')[0] : '') || null
+
 /**
  * The label a key is minted with, `claude-code on <host>`: `/unpaged:listen
  * revoke all` knows this machine's keys by it. The host is what `hostname`
  * prints (macOS, Windows and most Linux), else `uname -n` (some Linux images
  * ship no `hostname`), up to its first dot: the name Node's `os.hostname()`
- * gives the Monitor path's key script.
+ * gives the Monitor path's key script. Each command is written whole at its
+ * call, so the plugin directory reads what runs off the source.
  */
 async function keyLabel($: Api) {
-  for (const argv of [['hostname'], ['uname', '-n']]) {
-    if (hostName) break
-    try {
-      const ran = await $.process.run(argv, { timeoutMs: 5000 })
-      hostName = (ran.exitCode === 0 ? ran.stdout.trim().split('.')[0] : '') || null
-    } catch {
-      hostName = null
-    }
-  }
+  if (!hostName) hostName = shortHost(await $.process.run(['hostname'], { timeoutMs: 5000 }).catch(() => null))
+  if (!hostName) hostName = shortHost(await $.process.run(['uname', '-n'], { timeoutMs: 5000 }).catch(() => null))
   return `claude-code on ${hostName ?? 'this machine'}`
 }
 
@@ -719,20 +716,8 @@ const timeLabel = (at: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Opens the canvas in the browser: macOS `open`, then `xdg-open`, else the link as a toast. */
-async function openCanvas($: Api, documentId: string) {
-  const canvas = canvases.get(documentId)
-  if (!canvas) return
-  record(documentId, { unread: 0 })
-  await sync($)
-  for (const argv of [['open', canvas.boardUrl], ['xdg-open', canvas.boardUrl]]) {
-    try {
-      const ran = await $.process.run(argv, { timeoutMs: 10000 })
-      if (ran.exitCode === 0) return
-    } catch {
-      // try the next opener
-    }
-  }
+/** The canvas's address whole, as a toast: a terminal that draws no links cuts it on the band. */
+function showLink($: Api, canvas: ArmedCanvas) {
   $.ui.toast(canvas.boardUrl, { timeoutMs: 10000 })
 }
 
@@ -1018,21 +1003,26 @@ export const register: Register = on => {
     if (list.length === 0 || e.props.hasSurvey) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
+    // The title is the canvas's link, which Claude Code itself opens: the
+    // plugin starts no program for it. A terminal that draws no links writes
+    // the address after the title, so only the title gives way to the width
+    // (the rest never wraps), and `1: link` shows the address whole.
     const ours =
       list.length === 1
         ? Box({
             flexDirection: 'row',
             columnGap: 2,
             children: [
-              Text({ color: dotColor(list[0]), children: ['●'] }),
-              Text({ bold: true, children: ['Listening'] }),
-              Text({ wrap: 'truncate-end', children: [list[0].title] }),
-              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
-              button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
+              fixed(Text({ color: dotColor(list[0]), children: ['●'] })),
+              fixed(Text({ bold: true, children: ['Listening'] })),
+              Text({ wrap: 'truncate-end', children: [Link({ href: list[0].boardUrl, children: [list[0].title] })] }),
+              fixed(Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] })),
+              button('link', 'link', '1', () => showLink($, list[0])),
               button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
@@ -1052,12 +1042,13 @@ export const register: Register = on => {
     return Box({ flexDirection: 'column', children })
   })
 
-  // The pane past one canvas: each with its own open and stop.
+  // The pane past one canvas: each title its canvas's link, each with its own link and stop.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const list = await read($, armed)
     const covered = await read($, replying)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     if (list.length === 0) return Box({ children: [Text({ dimColor: true, children: ['Nothing is armed in this session.'] })] })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
     return Box({
       flexDirection: 'column',
       children: list.map(canvas =>
@@ -1065,10 +1056,10 @@ export const register: Register = on => {
           flexDirection: 'row',
           columnGap: 2,
           children: [
-            Text({ color: dotColor(canvas), children: ['●'] }),
-            Text({ wrap: 'truncate-end', children: [canvas.title] }),
-            Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] }),
-            Button({ key: `open-${canvas.documentId}`, label: 'open', onPress: () => void openCanvas($, canvas.documentId) }),
+            fixed(Text({ color: dotColor(canvas), children: ['●'] })),
+            Text({ wrap: 'truncate-end', children: [Link({ href: canvas.boardUrl, children: [canvas.title] })] }),
+            fixed(Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] })),
+            Button({ key: `link-${canvas.documentId}`, label: 'link', onPress: () => showLink($, canvas) }),
             Button({
               key: `stop-${canvas.documentId}`,
               label: 'stop',

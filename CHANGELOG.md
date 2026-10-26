@@ -4,6 +4,13 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-26
+
+### Changed
+
+- **The canvas's name is its link** ([#40](https://github.com/unpaged/plugins/pull/40)). On the line above the prompt and in its pane, the canvas's name opens the canvas in your browser when you click it. A terminal that draws no links shows the address after the name, cut to fit, so `1: open` becomes `1: link`, which shows the whole address in a message, and the pane's *open* buttons become *link* buttons. The plugin no longer starts `open` or `xdg-open`; `2` still stops listening. Opening a canvas no longer clears its count of new comments: the reply turn does.
+- The README says outright which tool input the plugin changes (the key mint's `label`), which calls it answers in place of a tool (its own three tools, and the key mint), and why the listener key is no `user_config` option, and the `hostname` and `uname -n` calls are written whole in the code, as the Claude plugin directory's review asked.
+
 ## [1.11.0] - 2026-10-26
 
 ### Changed
@@ -241,7 +248,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/unpaged/plugins/releases/tag/v1.12.0
 [1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
 [1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0
 [1.9.0]: https://github.com/unpaged/plugins/releases/tag/v1.9.0
