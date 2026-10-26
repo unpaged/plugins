@@ -4,6 +4,11 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- **The canvas's name is its link.** On the line above the prompt and in its pane, the canvas's name opens the canvas in your browser when you click it (in a terminal that draws no links, the address is shown too). The `1: open` key and the pane's *open* buttons are gone, and with them the `open` and `xdg-open` programs the plugin started; `2` still stops listening. Opening a canvas no longer clears its count of new comments: the reply turn does.
+- The README says outright which tool input the plugin changes (the key mint's `label`), which calls it answers in place of a tool (its own three tools, and the key mint), and why the listener key is no `user_config` option, and the `hostname` and `uname -n` calls are written whole in the code, as the Claude plugin directory's review asked.
+
 ## [1.10.0] - 2026-10-26
 
 ### Changed
