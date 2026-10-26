@@ -4,8 +4,10 @@
 // starts one reply turn through a submitted prompt. An @agent comment gets an
 // "On it…" reply on its thread before that turn starts, where the person's
 // permission rules let the plugin post it. No model step is needed to listen,
-// and the key never enters the model's context: it is read from the key file,
-// sent in a request header, and never logged or shown.
+// and the key never enters the model's context: it is kept in the plugin's
+// own store (Claude Code's file for this plugin), sent in a request header,
+// and never logged or shown. Nothing here runs Node: the key files and the
+// key script under monitors/ belong to the Monitor that older clients run.
 //
 // The mod grants itself no permission: its own calls of the Unpaged tools (the
 // key mint and revoke, "On it…") and the model's calls of its three tools go
@@ -24,14 +26,12 @@ import type { Register } from 'claude-code'
 import type { ArmedCanvas } from '../types'
 import {
   ACK_TEXT,
-  KEY_DIR_RELATIVE,
   PROTOCOL_PREAMBLE,
-  STATUS_DIR_RELATIVE,
   extractMint,
   isDocumentId,
-  keyFileFor,
   listenerConfigFromMint,
   parseListenerConfig,
+  sameListenerConfig,
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
@@ -117,10 +117,9 @@ const ackedEvents = new Set<string>()
 /**
  * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
  * next stop of that canvas in this module's life revokes them with its own.
- * Past a reload or the session, the key file a refused stop left is what
- * `/unpaged:listen revoke` finds its key by; a key an arm replaced has no file
- * any longer, and only `/unpaged:listen revoke all` (by this machine's label)
- * or Unpaged reaches it then. The newer key already shuts it out of polling.
+ * Past a reload or the session, `/unpaged:listen revoke` finds them on the
+ * server by this machine's label, and Unpaged lists them too. The newer key
+ * already shuts a replaced one out of polling.
  */
 const unrevoked = new Map<string, string[]>()
 
@@ -140,27 +139,55 @@ type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: st
 const boardUrlFor = (documentId: string) => `https://unpaged.io/document/${documentId}/edit`
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
-async function paths($: Api) {
-  const home = (await $.env.get('HOME')) ?? ''
-  return {
-    keyDir: `${home}/${KEY_DIR_RELATIVE}`,
-    statusDir: `${home}/${STATUS_DIR_RELATIVE}`,
-    keys: `${$.plugin.root}/monitors/keys.mjs`,
-  }
-}
-
-async function keysVerb($: Api, verb: string, args: string[], stdin?: string) {
-  const { keys } = await paths($)
-  const ran = await $.process.run(['node', keys, verb, ...args], stdin === undefined ? undefined : { stdin })
-  return { exitCode: ran.exitCode, lines: ran.stdout.split('\n').map(l => l.trim()).filter(Boolean) }
-}
+/**
+ * A canvas's key in the plugin's store, one entry per canvas. Claude Code
+ * keeps that store in a file of the plugin's own under its configuration
+ * directory (mode 600), shared by this machine's sessions and kept between
+ * them, so an arm can revoke the key an earlier session stored.
+ */
+const STORED_KEY = 'listener:'
+const storedKeyFor = (documentId: string) => `${STORED_KEY}${documentId}`
 
 async function loadConfig($: Api, documentId: string): Promise<ListenerConfig | null> {
-  const { keyDir } = await paths($)
-  const file = keyFileFor(keyDir, documentId)
-  if (!file || !(await $.fs.exists(file))) return null
-  const config = parseListenerConfig(await $.fs.read(file)) as ListenerConfig | null
+  if (!isDocumentId(documentId)) return null
+  const stored = await $.store.get(storedKeyFor(documentId))
+  if (stored === undefined) return null
+  const config = parseListenerConfig(JSON.stringify(stored)) as ListenerConfig | null
   return config && config.documentId === documentId ? config : null
+}
+
+/**
+ * Forgets a canvas's stored key only if it is still the one `matches`
+ * names: another session may have stored a newer key for the canvas. The
+ * store has no compare-and-delete, so a newer key stored between the read
+ * and the delete is lost to that session's reload and next arm; its
+ * listener goes on polling from memory.
+ */
+async function retireStored($: Api, documentId: string, matches: (stored: ListenerConfig) => boolean) {
+  const stored = await loadConfig($, documentId)
+  if (!stored) return 'absent'
+  if (!matches(stored)) return 'kept-newer'
+  await $.store.delete(storedKeyFor(documentId))
+  return 'removed'
+}
+
+let hostName: string | null = null
+
+/**
+ * The label a key is minted with, `claude-code on <host>`: `/unpaged:listen
+ * revoke all` knows this machine's keys by it. The host is what `hostname`
+ * prints (macOS, Linux and Windows all have it), up to its first dot.
+ */
+async function keyLabel($: Api) {
+  if (!hostName) {
+    try {
+      const ran = await $.process.run(['hostname'], { timeoutMs: 5000 })
+      hostName = (ran.exitCode === 0 ? ran.stdout.trim().split('.')[0] : '') || null
+    } catch {
+      hostName = null
+    }
+  }
+  return `claude-code on ${hostName ?? 'this machine'}`
 }
 
 async function mcpServer($: Api) {
@@ -194,22 +221,26 @@ function mcpText(result: { content?: Array<{ type?: string; text?: string }>; st
   return block?.text ?? (result.structuredContent === undefined ? '' : JSON.stringify(result.structuredContent))
 }
 
-/** Mints a fresh key for the canvas and stores it through the key helper (tmp + rename, mode 600). */
+/** Mints a fresh key for the canvas and keeps it in the plugin's store. */
 async function mint($: Api, documentId: string): Promise<ListenerConfig> {
   const server = await mcpServer($)
-  const host = (await keysVerb($, 'check', [documentId])).lines.find(l => l.startsWith('host '))?.slice(5) ?? 'this machine'
   const result = (await $.mcp.call(server, 'agent_listener_key_create', {
     documentId,
-    label: `claude-code on ${host}`,
+    label: await keyLabel($),
   })) as { content?: Array<{ type?: string; text?: string }>; isError?: boolean; structuredContent?: unknown }
   const body = mcpText(result)
   if (result.isError) throw new Error(`the server refused to mint a listener key: ${body.slice(0, 200)}`)
   const found = extractMint(result.structuredContent ?? body)
   if (!found) throw new Error('the mint result carried no listener key')
-  const stored = await keysVerb($, 'store', [documentId], JSON.stringify(found))
-  if (!stored.lines.some(l => l.startsWith('stored '))) throw new Error('the key helper could not store the key')
+  return storeMint($, documentId, found)
+}
+
+/** Keeps a mint in the plugin's store, under the canvas it was asked for and only that one. */
+async function storeMint($: Api, documentId: string, found: unknown): Promise<ListenerConfig> {
   const config = listenerConfigFromMint(found, { cwd: await $.session.cwd(), createdAt: new Date().toISOString() }) as ListenerConfig | null
-  if (!config) throw new Error('the stored key does not parse as a listener config')
+  if (!config) throw new Error('the mint result is not a valid listener config (it must name an Unpaged HTTPS polling endpoint)')
+  if (config.documentId !== documentId) throw new Error(`the mint is for canvas ${config.documentId}, not ${documentId}`)
+  await $.store.set(storedKeyFor(documentId), config)
   return config
 }
 
@@ -388,25 +419,6 @@ function sayWith($: Api, documentId: string) {
   }
 }
 
-/** The status file, written by the key script the way the Monitor writes its own (tmp + rename, mode 600). */
-async function writeStatus($: Api, documentId: string, state: string, reason: string | null, lastSuccessfulPollAt: string | null) {
-  try {
-    await keysVerb(
-      $,
-      'status',
-      [documentId],
-      JSON.stringify({ state, reason, script: null, documentId, sessionId: await $.session.id(), lastSuccessfulPollAt }),
-    )
-  } catch {
-    // Advisory state: a missed write costs one "unverified" status line, nothing more.
-  }
-}
-
-/** Retires the key file only if it still holds `config`'s key: the Monitor's own rule, through the key script. */
-async function retireKeyFile($: Api, config: ListenerConfig) {
-  return (await keysVerb($, 'retire', [config.documentId], JSON.stringify(config))).lines[0] ?? 'absent'
-}
-
 /** Starts the loop for a stored key. The caller has already recorded the canvas. */
 async function startLoop($: Api, config: ListenerConfig) {
   const { documentId } = config
@@ -417,11 +429,10 @@ async function startLoop($: Api, config: ListenerConfig) {
   })
   const loop: Loop = { config, controller, done: Promise.resolve(), pending: [], pendingEvents: 0, acks: [], ackThreads: new Set(), flush: null, settled }
   loops.set(documentId, loop)
-  const reportStatus = async (state: string, reason: string | null | undefined, metadata: { lastSuccessfulPollAt?: string | null }) => {
+  const reportStatus = async (state: string, reason: string | null | undefined) => {
     const known = state === 'connecting' || state === 'connected' || state === 'reconnecting' || state === 'stopped' ? state : 'reconnecting'
     record(documentId, { state: known, reason: reason ?? null })
     await sync($)
-    await writeStatus($, documentId, state, reason ?? null, metadata?.lastSuccessfulPollAt ?? null)
     if (state !== 'connecting') settle(state)
   }
   loop.done = runListener(config, {
@@ -430,7 +441,7 @@ async function startLoop($: Api, config: ListenerConfig) {
     say: sayWith($, documentId),
     now: () => Date.now(),
     reportStatus,
-    retireKey: () => retireKeyFile($, config),
+    retireKey: () => retireStored($, documentId, stored => sameListenerConfig(stored, config)),
     signal: controller.signal,
   })
     .catch(() => ({ reason: 'failed' }))
@@ -508,10 +519,10 @@ async function stop($: Api, documentId: string) {
       rememberUnrevoked(documentId, keyId)
       continue
     }
-    // The file goes only if it still holds the key just revoked: another session
-    // may have re-armed the canvas and stored a newer key under the same name.
-    if (loop && keyId === loop.config.keyId) await retireKeyFile($, loop.config)
-    else await keysVerb($, 'retire', [documentId, keyId], '')
+    // The stored key goes only if it is still the one just revoked: another
+    // session may have re-armed the canvas and stored a newer key for it.
+    const config = loop && keyId === loop.config.keyId ? loop.config : null
+    await retireStored($, documentId, stored => (config ? sameListenerConfig(stored, config) : stored.keyId === keyId))
   }
   canvases.delete(documentId)
   await sync($)
@@ -612,10 +623,15 @@ function describe(canvas: ArmedCanvas | undefined, first?: string) {
 
 async function statusText($: Api) {
   const lines = [...canvases.values()].map(c => describe(c))
-  const files = await keysVerb($, 'list', [])
+  const stored: string[] = []
+  for (const name of await $.store.keys()) {
+    if (!name.startsWith(STORED_KEY)) continue
+    const config = await loadConfig($, name.slice(STORED_KEY.length))
+    if (config) stored.push(`${config.title || config.documentId} (${config.documentId}): key ${config.keyId ?? 'with no id'}, stored ${config.createdAt ?? 'at an unknown time'}`)
+  }
   return [
     lines.length ? `Listening in this session:\n${lines.join('\n')}` : 'Nothing is armed in this session.',
-    `Stored keys on this machine:\n${files.lines.join('\n') || 'none'}`,
+    `Keys the plugin stores on this machine:\n${stored.join('\n') || 'none'}`,
   ].join('\n\n')
 }
 

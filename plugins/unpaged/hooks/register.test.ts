@@ -2,29 +2,36 @@
 // engine with the world beneath the mod answered by the test's own hooks.
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, Plugin } from 'claude-code/testing'
-import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, THREAD, frame, keyFileFor, page, statusFileFor, unpagedServer, until, world } from './test-world'
+import { DOCUMENT, KEY, POLL_URL, SECOND, THIRD, THREAD, frame, page, storedKeyFor, unpagedServer, until, world } from './test-world'
 import type { World } from './test-world'
 
-const KEY_FILE = keyFileFor(DOCUMENT)
-const STATUS_FILE = statusFileFor(DOCUMENT)
+const STORED = storedKeyFor(DOCUMENT)
+const OLD_KEY = { pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }
 
 describe('listen_arm', () => {
-  test('mints a key, stores it through the key helper, polls with it in a header, and answers after the first poll', async ($, on) => {
+  test("mints a key under this machine's label, keeps it in the plugin's store, polls with it in a header, and answers after the first poll", async ($, on) => {
     const w = world(on)
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
     const text = JSON.stringify(answer)
     expect(text).toContain('Listening on Plan canvas')
     expect(text).toContain('connected')
     expect(text).not.toContain(KEY)
-    expect(w.calls.mcp.map(c => c.tool)).toEqual(['agent_listener_key_create'])
-    const store = w.calls.process.find(c => c.argv[2] === 'store')
-    expect(store?.stdin).toContain(KEY)
-    expect(w.calls.process.every(c => !c.argv.join(' ').includes(KEY))).toBe(true)
+    expect(w.calls.mcp).toEqual([{ tool: 'agent_listener_key_create', args: { documentId: DOCUMENT, label: 'claude-code on testbox' } }])
+    expect(w.store.get(STORED)).toEqual(expect.objectContaining({ key: KEY, keyId: 'key-1', documentId: DOCUMENT, cwd: '/repo' }))
     expect(w.calls.fetch).toEqual([{ url: POLL_URL, authorization: `Bearer ${KEY}` }])
-    expect(w.calls.process.some(c => c.argv[2] === 'status' && c.argv[3] === DOCUMENT && (c.stdin ?? '').includes('"state":"connected"'))).toBe(true)
-    expect(JSON.parse(w.files.get(STATUS_FILE) ?? '{}')).toEqual(expect.objectContaining({ transport: 'mod-v1', state: 'connected', documentId: DOCUMENT, sessionId: 'session-1' }))
     expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: DOCUMENT, keyId: 'key-1', title: 'Plan canvas', state: 'connected', unread: 0 })])
     expect(w.calls.submits).toEqual([])
+  })
+
+  test('runs no Node and writes no file: the only program it starts is hostname, once', async ($, on) => {
+    const w = world(on, { pages: [page(), { status: 401 }] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: SECOND } as never)
+    await w.clock.advance(30_000)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: SECOND } as never)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never)
+    expect(w.calls.process.map(c => c.argv)).toEqual([['hostname']])
+    expect(w.files.size).toBe(0)
   })
 
   test('the plugin grants itself no permission: its own tools are left to the permission rules', async ($, on) => {
@@ -40,7 +47,7 @@ describe('listen_arm', () => {
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     expect(JSON.stringify(answer)).toContain('Push is not armed')
     expect(w.calls.fetch).toEqual([])
-    expect(w.files.has(KEY_FILE)).toBe(false)
+    expect(w.store.has(STORED)).toBe(false)
     expect(w.calls.armed).toEqual([])
   })
 
@@ -63,20 +70,21 @@ describe('listen_arm', () => {
     expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_create')).toHaveLength(1)
   })
 
-  test('re-arming replaces a key file from an earlier session and revokes that key', async ($, on) => {
+  test('re-arming replaces the key an earlier session stored and revokes that key', async ($, on) => {
     const w = world(on)
-    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    w.store.set(STORED, OLD_KEY)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     const tools = w.calls.mcp.map(c => `${c.tool}:${c.args.keyId ?? ''}`)
     expect(tools).toEqual(['agent_listener_key_create:', 'agent_listener_key_revoke:key-old'])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    expect(w.store.get(STORED)).toEqual(expect.objectContaining({ keyId: 'key-1' }))
     expect(w.calls.toasts).toEqual([])
   })
 
   test('a 401 on the new key leaves the older key an arm could not revoke for the stop to revoke', async ($, on) => {
     const settings = { revokeRefused: true, pages: [page(), { status: 401 }] }
     const w = world(on, settings)
-    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    w.store.set(STORED, OLD_KEY)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
     await w.clock.advance(30_000)
@@ -91,7 +99,7 @@ describe('listen_arm', () => {
   test('a refused revoke of the key an arm replaced is said, and the next stop revokes it with the new one', async ($, on) => {
     const settings = { revokeRefused: true }
     const w = world(on, settings)
-    w.files.set(KEY_FILE, JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-old', title: 'Plan canvas' }))
+    w.store.set(STORED, OLD_KEY)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
     expect(w.calls.toasts).toEqual([
@@ -102,7 +110,7 @@ describe('listen_arm', () => {
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(answer)).toContain('key revoked')
     expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old', 'key-1', 'key-old'])
-    expect(w.files.has(KEY_FILE)).toBe(false)
+    expect(w.store.has(STORED)).toBe(false)
   })
 })
 
@@ -144,15 +152,12 @@ describe('delivery', () => {
     expect(w.calls.fetch).toHaveLength(3)
   })
 
-  test('HTTP 401 retires the key by its id, stops the loop and tells the model push is off', async ($, on) => {
+  test('HTTP 401 forgets the stored key, stops the loop and tells the model push is off', async ($, on) => {
     const w = world(on, { pages: [page(), { status: 401 }] })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await w.clock.advance(30_000)
     await w.clock.advance(50)
-    const retire = w.calls.process.find(c => c.argv[2] === 'retire' && c.argv[3] === DOCUMENT)
-    expect(retire?.stdin).toContain(KEY)
-    expect(retire?.argv).toHaveLength(4)
-    expect(w.files.has(KEY_FILE)).toBe(false)
+    expect(w.store.has(STORED)).toBe(false)
     expect(w.calls.submits).toHaveLength(1)
     expect(w.calls.submits[0]).toContain('revoked')
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ state: 'stopped', reason: 'http-401' }))
@@ -163,22 +168,9 @@ describe('delivery', () => {
   test('a poll that never answers is given up at the deadline and retried', async ($, on) => {
     const clock = mock.clock(on, { now: 1_000_000 })
     mock.store(on)
-    mock.env(on, { HOME: '/home/t' })
-    const files = new Map<string, string>()
-    on('fs.exists', (_$, e) => ({ value: files.has(e.path) }))
-    on('fs.read', (_$, e) => ({ value: files.get(e.path) ?? '' }))
-    on('fs.write', (_$, e) => {
-      files.set(e.path, e.text)
-      return { value: undefined }
-    })
     on('session.cwd', () => ({ value: '/repo' }))
     on('session.id', () => ({ value: 'session-1' }))
-    on('process.run', (_$, e) => {
-      const verb = e.argv[2]
-      if (verb === 'store') files.set(KEY_FILE, e.init?.stdin ?? '')
-      const stdout = verb === 'check' ? 'missing\nhost testbox\n' : verb === 'store' ? 'stored key-1\n' : ''
-      return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    })
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'testbox\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
     on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
     on('mcp.call', () => ({
       value: { content: [{ type: 'text', text: JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-1', title: 'Plan canvas' }) }], isError: false },
@@ -288,40 +280,47 @@ describe('stop', () => {
     const refused = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(refused)).toContain('key not revoked')
     expect(w.calls.armed).toEqual([])
-    expect(w.files.has(KEY_FILE)).toBe(true)
+    expect(w.store.has(STORED)).toBe(true)
     settings.revokeRefused = false
     const again = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(again)).toContain('key revoked')
     expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-1', 'key-1'])
-    expect(w.files.has(KEY_FILE)).toBe(false)
+    expect(w.store.has(STORED)).toBe(false)
   })
 
-  test('stops the loop, revokes the key by its id and forgets the file', async ($, on) => {
+  test('stops the loop, revokes the key by its id and forgets the stored key', async ($, on) => {
     const w = world(on)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(answer)).toContain('key revoked')
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-1' } })
-    const retire = w.calls.process.find(c => c.argv[2] === 'retire')
-    expect(retire?.argv.slice(3)).toEqual([DOCUMENT])
-    expect(retire?.stdin).toContain(KEY)
-    expect(w.files.has(KEY_FILE)).toBe(false)
+    expect(w.store.has(STORED)).toBe(false)
     expect(w.calls.armed).toEqual([])
     await w.clock.advance(60_000)
     expect(w.calls.fetch).toHaveLength(1)
   })
 
-  test('stop leaves a key file that another session replaced meanwhile', async ($, on) => {
+  test('stop leaves a stored key that another session replaced meanwhile', async ($, on) => {
     const w = world(on)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
-    // Another session re-armed the canvas: the file now holds a newer key.
-    const newer = JSON.stringify({ pollUrl: POLL_URL, key: 'n'.repeat(43), documentId: DOCUMENT, keyId: 'key-newer', title: 'Plan canvas' })
-    w.files.set(KEY_FILE, newer)
+    // Another session re-armed the canvas: the store now holds a newer key.
+    const newer = { pollUrl: POLL_URL, key: 'n'.repeat(43), documentId: DOCUMENT, keyId: 'key-newer', title: 'Plan canvas' }
+    w.store.set(STORED, newer)
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(answer)).toContain('key revoked')
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-1' } })
-    expect(w.calls.process.some(c => c.argv[2] === 'forget')).toBe(false)
-    expect(w.files.get(KEY_FILE)).toBe(newer)
+    expect(w.store.get(STORED)).toEqual(newer)
+  })
+
+  test('a 401 leaves a stored key that another session replaced meanwhile', async ($, on) => {
+    const w = world(on, { pages: [page(), { status: 401 }] })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    const newer = { pollUrl: POLL_URL, key: 'n'.repeat(43), documentId: DOCUMENT, keyId: 'key-newer', title: 'Plan canvas' }
+    w.store.set(STORED, newer)
+    await w.clock.advance(30_000)
+    await w.clock.advance(50)
+    expect(w.calls.submits[0]).toContain('a newer key for this canvas is already stored by another session')
+    expect(w.store.get(STORED)).toEqual(newer)
   })
 
   test('status names what this session listens to and the stored keys', async ($, on) => {
@@ -352,7 +351,6 @@ describe('arming on its own', () => {
     expect(mints(w).map(c => c.args.documentId)).toEqual([SECOND])
     expect(w.calls.fetch).toEqual([{ url: POLL_URL, authorization: `Bearer ${KEY}` }])
     expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: SECOND, title: 'Owl detective', state: 'connecting' })])
-    expect(w.calls.process.every(c => !c.argv.join(' ').includes(KEY))).toBe(true)
   })
 
   test('a canvas made with template_clone is armed, read from the tool record when the model reads a file pointer', async ($, on) => {
@@ -502,7 +500,7 @@ describe('arming on its own', () => {
     expect(JSON.stringify(answer)).toContain('Not minted: this session already listens to Plan canvas')
     expect(called).toEqual(['batch_create_elements'])
     expect(mints(w)).toHaveLength(1)
-    expect(w.calls.process.filter(c => c.argv[2] === 'store')).toHaveLength(1)
+    expect([...w.store.keys()]).toEqual([STORED])
   })
 
   test('a key minted by hand for a canvas the session does not listen to goes to the server', async ($, on) => {

@@ -10,8 +10,8 @@ export const SECOND = '22222222-2222-4222-8222-222222222222'
 export const THIRD = '33333333-3333-4333-8333-333333333333'
 export const KEY = 'k'.repeat(43)
 export const POLL_URL = 'https://mcp.unpaged.io/events/poll'
-export const keyFileFor = (documentId: string) => `/home/t/.claude/unpaged/listeners/${documentId}.json`
-export const statusFileFor = (documentId: string) => `/home/t/.claude/unpaged/monitors/${documentId}.json`
+/** Where the plugin keeps a canvas's key in its store. */
+export const storedKeyFor = (documentId: string) => `listener:${documentId}`
 export const keyIdFor = (documentId: string) => (documentId === DOCUMENT ? 'key-1' : `key-${documentId.slice(0, 8)}`)
 export const titleFor = (documentId: string) => (documentId === DOCUMENT ? 'Plan canvas' : `Canvas ${documentId.slice(0, 4)}`)
 
@@ -46,9 +46,20 @@ export function world(
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on)
-  mock.env(on, { HOME: '/home/t' })
+  mock.env(on, {})
   const files = new Map<string, string>()
+  // The plugin's own store, as the engine keeps it between sessions.
+  const store = new Map<string, unknown>()
+  on('store.get', (_$, e) => ({ value: store.has(e.key) ? JSON.parse(JSON.stringify(store.get(e.key))) : undefined }))
+  on('store.set', (_$, e) => {
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('store.delete', (_$, e) => {
+    store.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
   const calls = {
     armed: [] as Array<Record<string, unknown>>,
     replying: [] as string[],
@@ -97,42 +108,8 @@ export function world(
       if (exit === 0) calls.opened.push(argv[1] ?? '')
       return ok('', exit)
     }
-    const verb = argv[2]
-    const id = argv[3] ?? ''
-    if (verb === 'check') return ok(`${files.has(keyFileFor(id)) ? `armed ${keyIdFor(id)}` : 'missing'}\nhost testbox\n`)
-    if (verb === 'store') {
-      files.set(keyFileFor(id), e.init?.stdin ?? '')
-      return ok(`stored ${keyIdFor(id)}\n`)
-    }
-    if (verb === 'retire') {
-      // The script's rule: the file goes only if it still holds the key being retired.
-      const stored = files.get(keyFileFor(id))
-      if (!stored) return ok('absent\n')
-      const current = JSON.parse(stored) as { key?: string; keyId?: string }
-      const given = e.init?.stdin ? (JSON.parse(e.init.stdin) as { key?: string }) : null
-      const keyId = argv[4]
-      if (!given && !keyId) return ok('unmatched\n')
-      const same = given ? given.key === current.key : current.keyId === keyId
-      if (!same) return ok('kept-newer\n')
-      files.delete(keyFileFor(id))
-      return ok('removed\n')
-    }
-    if (verb === 'status') {
-      files.set(statusFileFor(id), JSON.stringify({ ...(JSON.parse(e.init?.stdin ?? '{}') as object), pid: 0, transport: 'mod-v1' }))
-      return ok('written\n')
-    }
-    if (verb === 'forget') {
-      files.delete(keyFileFor(id))
-      return ok('forgotten 1\n')
-    }
-    if (verb === 'list') {
-      const rows = [...files.keys()]
-        .filter(p => p.includes('/listeners/'))
-        .map(p => p.slice(p.lastIndexOf('/') + 1, -5))
-        .map(doc => `${doc}\tthis-folder\t2026-10-02\t${titleFor(doc)}\t${keyIdFor(doc)}`)
-      return ok(rows.length ? `${rows.join('\n')}\n` : 'none\n')
-    }
-    return ok('')
+    if (argv[0] === 'hostname') return ok('testbox.local\n')
+    return ok('', 127)
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
   // The person's permission rules, as a query reads them: nothing runs.
@@ -193,7 +170,7 @@ export function world(
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, calls, files, startTurn, releaseMint: () => releaseMint() }
+  return { clock, calls, files, store, startTurn, releaseMint: () => releaseMint() }
 }
 
 /**
