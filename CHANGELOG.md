@@ -4,14 +4,19 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-26
+
+### Changed
+
+- **The canvas's name is its link** ([#40](https://github.com/unpaged/plugins/pull/40)). On the line above the prompt and in its pane, the canvas's name opens the canvas in your browser when you click it. A terminal that draws no links shows the address after the name, cut to fit, so `1: open` becomes `1: link`, which shows the whole address in a message, and the pane's *open* buttons become *link* buttons. The plugin no longer starts `open` or `xdg-open`; `2` still stops listening. Opening a canvas no longer clears its count of new comments: the reply turn does.
+- The README says outright which tool input the plugin changes (the key mint's `label`), which calls it answers in place of a tool (its own three tools, and the key mint), and why the listener key is no `user_config` option, and the `hostname` and `uname -n` calls are written whole in the code, as the Claude plugin directory's review asked.
+
 ## [1.11.0] - 2026-10-26
 
 ### Changed
 
 - **Stopping a listener revokes its key with no permission rule** ([#39](https://github.com/unpaged/plugins/pull/39)). When you ask Claude to stop listening and your rules do not allow the plugin's own revoke, which auto mode refuses, the plugin no longer tries and then reports the key still live: it stops listening and has the agent revoke the key by its id in the same turn, where auto mode sees your request, and forgets the key once it is revoked. A key id names a key; it is not the key. Where a rule denies `agent_listener_key_revoke`, `listen_stop` says the key stays live instead of asking for a revoke the rule refuses. With the rules in the README's *Permissions* section the plugin revokes on its own, as before.
 - `2: stop`, its pane, *stop all*, deleting a canvas and `/unpaged-listen stop` still make the plugin's own revoke, which the default mode asks you about. When it is refused or fails, the toast or the command's answer names the key id and says to ask Claude to stop listening to the canvas, or to revoke the key in Unpaged, instead of naming `/unpaged:listen revoke`.
-- **The canvas's name is its link** ([#40](https://github.com/unpaged/plugins/pull/40)). On the line above the prompt and in its pane, the canvas's name opens the canvas in your browser when you click it (in a terminal that draws no links, the address is shown too). The `1: open` key and the pane's *open* buttons are gone, and with them the `open` and `xdg-open` programs the plugin started; `2` still stops listening. Opening a canvas no longer clears its count of new comments: the reply turn does.
-- The README says outright which tool input the plugin changes (the key mint's `label`), which calls it answers in place of a tool (its own three tools, and the key mint), and why the listener key is no `user_config` option, and the `hostname` and `uname -n` calls are written whole in the code, as the Claude plugin directory's review asked.
 
 ## [1.10.0] - 2026-10-26
 
@@ -243,7 +248,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/unpaged/plugins/releases/tag/v1.12.0
 [1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
 [1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0
 [1.9.0]: https://github.com/unpaged/plugins/releases/tag/v1.9.0

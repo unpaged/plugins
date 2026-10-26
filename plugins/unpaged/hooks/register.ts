@@ -716,6 +716,11 @@ const timeLabel = (at: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** The canvas's address whole, as a toast: a terminal that draws no links cuts it on the band. */
+function showLink($: Api, canvas: ArmedCanvas) {
+  $.ui.toast(canvas.boardUrl, { timeoutMs: 10000 })
+}
+
 async function stopAll($: Api) {
   for (const documentId of [...canvases.keys()]) await stopAndSay($, documentId)
 }
@@ -1004,9 +1009,9 @@ export const register: Register = on => {
       Button({ key, label, hotkey, plain: true, onPress })
     const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
     // The title is the canvas's link, which Claude Code itself opens: the
-    // plugin starts no program for it. Stop keeps its `2` from when `1` opened.
-    // A terminal that draws no links writes the address after the title, so
-    // only the title gives way to the width: the rest never wraps.
+    // plugin starts no program for it. A terminal that draws no links writes
+    // the address after the title, so only the title gives way to the width
+    // (the rest never wraps), and `1: link` shows the address whole.
     const ours =
       list.length === 1
         ? Box({
@@ -1017,6 +1022,7 @@ export const register: Register = on => {
               fixed(Text({ bold: true, children: ['Listening'] })),
               Text({ wrap: 'truncate-end', children: [Link({ href: list[0].boardUrl, children: [list[0].title] })] }),
               fixed(Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] })),
+              button('link', 'link', '1', () => showLink($, list[0])),
               button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
@@ -1036,7 +1042,7 @@ export const register: Register = on => {
     return Box({ flexDirection: 'column', children })
   })
 
-  // The pane past one canvas: each title its canvas's link, each with its own stop.
+  // The pane past one canvas: each title its canvas's link, each with its own link and stop.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const list = await read($, armed)
     const covered = await read($, replying)
@@ -1053,6 +1059,7 @@ export const register: Register = on => {
             fixed(Text({ color: dotColor(canvas), children: ['●'] })),
             Text({ wrap: 'truncate-end', children: [Link({ href: canvas.boardUrl, children: [canvas.title] })] }),
             fixed(Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] })),
+            Button({ key: `link-${canvas.documentId}`, label: 'link', onPress: () => showLink($, canvas) }),
             Button({
               key: `stop-${canvas.documentId}`,
               label: 'stop',

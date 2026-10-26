@@ -10,7 +10,7 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 | Display name | Unpaged |
 | Repository | https://github.com/unpaged/plugins |
 | Plugin path in the repo | `plugins/unpaged` — this repo's own `marketplace.json` lists it as the relative path `./plugins/unpaged`; the community catalog records monorepo entries as `{ source: "git-subdir", url, path, ref, sha }`, so give the form the repo URL plus this path |
-| Release / ref | `v1.11.0`, the first release that carries the *Directory findings* changes below. v1.10.0 (483d59b) was in review from 2026-10-26; v1.9.0 was the first version whose tree passes the directory policy (no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`). Never submit an older ref |
+| Release / ref | `v1.12.0`, the first release that carries the *Directory findings* changes below. v1.10.0 (483d59b) was in review from 2026-10-26; v1.9.0 was the first version whose tree passes the directory policy (no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`). Never submit an older ref |
 | Homepage | https://unpaged.io |
 | Privacy policy | https://unpaged.io/privacy |
 | Terms | https://unpaged.io/terms |
@@ -51,7 +51,7 @@ The directory's automatic review of v1.10.0 (2026-10-26) held it for a reviewer 
 
 | Finding | Where | Answer |
 | --- | --- | --- |
-| Fetches from the network and runs commands or tools; may start a program the directory couldn't fully check; starts other programs | `keyLabel` | The `hostname` and `uname -n` calls are written whole at the call. They are the only programs: the `open` / `xdg-open` the plugin started for `1: open` are gone, since the canvas name is now a link. README: *Programs it starts* |
+| Fetches from the network and runs commands or tools; may start a program the directory couldn't fully check; starts other programs | `keyLabel` | The `hostname` and `uname -n` calls are written whole at the call. They are the only programs: the `open` / `xdg-open` the plugin started for `1: open` are gone: the canvas name is now a link, and `1: link` shows the address in a toast. README: *Programs it starts* |
 | Calls tools itself | `mint`, `revoke`, `acknowledge` | README: *Tools it calls itself*, and the *Permissions* table |
 | Reads local data or the conversation and sends data out; may send a request somewhere the directory couldn't check | `pollWith` | A fixed address is not possible: the poll's cursor is a query parameter of the Unpaged poll contract. README: *Hosts it contacts*, *What it sends, and where*, *What it reads* |
 | Reads the conversation and submits a prompt | `sayWith` | README: *The prompts it submits* |
