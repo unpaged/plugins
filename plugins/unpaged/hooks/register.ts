@@ -12,10 +12,12 @@
 // The mod grants itself no permission: its own calls of the Unpaged tools (the
 // key mint and revoke, "On it…") and the model's calls of its three tools go
 // through the person's own permission rules, as any tool call does. A mint
-// the plugin starts has no request of the person's behind it, so auto mode
-// gives it no verdict and refuses it unless a rule allows it. Where no rule
-// does, the agent mints in its own turn, where auto mode sees what the
-// person asked, and the mod listens with that key and answers in its place.
+// or revoke the plugin starts has no request of the person's behind it, so
+// auto mode gives it no verdict and refuses it unless a rule allows it. Where
+// no rule does, the agent mints in its own turn, where auto mode sees what
+// the person asked, and the mod listens with that key and answers in its
+// place; a stop the agent makes leaves the revoke to the agent the same way,
+// and the mod forgets the key once the agent has revoked it.
 //
 // A canvas the session creates or changes through the Unpaged tools is armed
 // on its own, the moment the call succeeds, once per canvas per session,
@@ -127,8 +129,9 @@ const agentMints = new Map<string, unknown>()
 /** Titles listen_arm was given for a canvas whose key it left to the agent, for the band once the agent mints. */
 const titlesAsked = new Map<string, string>()
 /**
- * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
- * next stop of that canvas in this module's life revokes them with its own.
+ * Keys a stop or an arm could not revoke (refused or failed) or left to the
+ * agent, by canvas: the next stop of that canvas in this module's life
+ * revokes them with its own, and the agent's own revoke of one forgets it.
  * Past a reload or the session, `/unpaged:listen revoke` finds them on the
  * server by this machine's label, and Unpaged lists them too. The newer key
  * already shuts a replaced one out of polling.
@@ -250,6 +253,11 @@ function mcpText(result: { content?: Array<{ type?: string; text?: string }>; st
  */
 async function mintRule($: Api, documentId: string) {
   return ruleOn($, await mcpServer($), 'agent_listener_key_create', { documentId, label: await keyLabel($) })
+}
+
+/** The rules on a key's revoke, asked as the mint's are: `allow` lets the plugin revoke on its own, `deny` lets nobody, `ask` leaves it to the agent. */
+async function revokeRule($: Api, keyId: string) {
+  return ruleOn($, await mcpServer($), 'agent_listener_key_revoke', { keyId })
 }
 
 /** Mints a fresh key for the canvas, or takes the one the agent just minted, and keeps it in the plugin's store. */
@@ -516,7 +524,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   // agent revokes it in the same turn, and the revoke hook forgets it.
   const replaced = previous?.keyId && previous.keyId !== config.keyId ? previous.keyId : null
   let leftToAgent: string | undefined
-  if (replaced && byAgent && (await ruleOn($, await mcpServer($), 'agent_listener_key_revoke', { keyId: replaced })) !== 'allow') {
+  if (replaced && byAgent && (await revokeRule($, replaced)) !== 'allow') {
     rememberUnrevoked(documentId, replaced)
     leftToAgent = replaced
   } else if (replaced) {
@@ -544,7 +552,14 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   return { already: false, canvas: canvases.get(documentId), first, leftToAgent }
 }
 
-async function stop($: Api, documentId: string) {
+/**
+ * Stops listening to a canvas and revokes its key, with the older keys this
+ * session could not revoke. With `leaveToAgent`, for a stop the agent makes in
+ * its turn, a key whose revoke the rules do not leave to the plugin is not
+ * tried: it is kept as unrevoked, in `toAgent` where the agent may revoke it
+ * (auto mode would refuse the plugin's own) and in `denied` where nobody may.
+ */
+async function stop($: Api, documentId: string, { leaveToAgent = false } = {}) {
   const loop = loops.get(documentId)
   const canvas = canvases.get(documentId)
   if (loop) {
@@ -558,7 +573,16 @@ async function stop($: Api, documentId: string) {
   const current = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? null)
   const keyIds = [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
   unrevoked.delete(documentId)
+  const toAgent: string[] = []
+  const denied: string[] = []
   for (const keyId of keyIds) {
+    const rule = leaveToAgent ? await revokeRule($, keyId) : 'allow'
+    if (rule !== 'allow') {
+      rememberUnrevoked(documentId, keyId)
+      if (rule === 'deny') denied.push(keyId)
+      else toAgent.push(keyId)
+      continue
+    }
     if (!(await revoke($, keyId))) {
       rememberUnrevoked(documentId, keyId)
       continue
@@ -571,7 +595,7 @@ async function stop($: Api, documentId: string) {
   canvases.delete(documentId)
   await sync($)
   const left = unrevoked.get(documentId) ?? []
-  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null, left }
+  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null, left, toAgent, denied }
 }
 
 /**
@@ -588,6 +612,11 @@ async function forgetRevoked($: Api, keyId: string) {
   }
 }
 
+/** What a stop with no turn of the agent's says of a key it could not revoke: asking Claude to stop listening has the agent revoke it. */
+function stillLive(result: { title: string; left: string[] }) {
+  return `its key is still live (keyId ${result.left.join(', ')}): ask Claude to stop listening to ${result.title}, or revoke it in Unpaged.`
+}
+
 /**
  * A stop no answer reports (a press, a delete): when the revoke was refused
  * or failed, a toast says the key is still live, as `/unpaged-listen stop`
@@ -596,7 +625,7 @@ async function forgetRevoked($: Api, keyId: string) {
 async function stopAndSay($: Api, documentId: string) {
   const result = await stop($, documentId)
   if (!result.revoked && result.keyId) {
-    $.ui.toast(`Stopped listening to ${result.title}; its key is still live: /unpaged:listen revoke ${documentId}`, { timeoutMs: 10000 })
+    $.ui.toast(`Stopped listening to ${result.title}; ${stillLive(result)}`, { timeoutMs: 10000 })
   }
   return result
 }
@@ -635,6 +664,16 @@ const MINT_DENIED = "Push is not armed: the person's permission rules deny agent
 /** What listen_arm answers where the rules keep the plugin from minting: the agent mints in its turn. */
 function mintYourselfLine(documentId: string) {
   return `Not listening yet: the person's permission rules do not let the plugin create this canvas's listener key on its own. Call agent_listener_key_create with documentId ${documentId} now; the plugin takes the key from its answer and starts listening, and the key never reaches you.`
+}
+
+/** What listen_stop adds where the rules keep the plugin from revoking: the agent revokes in its turn. */
+function revokeYourselfLine(keyIds: string[]) {
+  return ` Its listener key is still live: the person's permission rules do not let the plugin revoke it on its own. Revoke it now with agent_listener_key_revoke and keyId ${keyIds.join(', then keyId ')}; the plugin forgets it once it is revoked.`
+}
+
+/** What listen_stop adds where the rules deny the revoke to everyone. */
+function revokeDeniedLine(keyIds: string[]) {
+  return ` Its listener key is still live (keyId ${keyIds.join(', ')}): the person's permission rules deny agent_listener_key_revoke, so neither the plugin nor you can revoke it. Do not call it; say that it can be revoked in Unpaged, or once that rule is lifted.`
 }
 
 /**
@@ -773,7 +812,8 @@ export const register: Register = on => {
       })
       await $.tool.register({
         name: 'listen_stop',
-        description: 'Stop listening to an Unpaged canvas in this session and revoke its listener key.',
+        description:
+          'Stop listening to an Unpaged canvas in this session and revoke its listener key: revoked by the plugin where the permission rules let it (otherwise its answer asks you to call agent_listener_key_revoke with the keyId, and the plugin forgets the key once you have).',
         inputSchema: { type: 'object', properties: { documentId: { type: 'string' } }, required: ['documentId'] },
       })
       await $.tool.register({
@@ -825,7 +865,7 @@ export const register: Register = on => {
         const lines: string[] = []
         for (const id of targets) {
           const result = await stop($, id)
-          lines.push(`${result.title}: stopped${result.revoked ? ', key revoked' : result.keyId ? ', key NOT revoked (revoke it with /unpaged:listen revoke)' : ''}`)
+          lines.push(`${result.title}: stopped${result.revoked ? ', key revoked' : result.keyId ? `; ${stillLive(result)}` : ''}`)
         }
         return { text: lines.join('\n') || 'nothing to stop' }
       }
@@ -858,13 +898,18 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__unpaged__listen_stop' }, async ($, e) => {
     const input = e as unknown as { documentId?: string }
     try {
-      const result = await stop($, text(input.documentId))
+      const result = await stop($, text(input.documentId), { leaveToAgent: true })
+      // The keys the plugin tried and could not revoke; the others it did not try.
+      const failed = result.left.filter(id => !result.toAgent.includes(id) && !result.denied.includes(id))
       const key = result.revoked
         ? ', key revoked'
-        : result.keyId
-          ? `, key not revoked (the permission check or the server refused, or the server was unreachable): keyId ${result.left.join(', ')}`
-          : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
-      return { result: `${result.title}: stopped${key}` }
+        : failed.length > 0
+          ? `, key not revoked (the permission check or the server refused, or the server was unreachable): keyId ${failed.join(', ')}`
+          : result.keyId
+            ? ''
+            : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
+      const asks = `${result.toAgent.length > 0 ? revokeYourselfLine(result.toAgent) : ''}${result.denied.length > 0 ? revokeDeniedLine(result.denied) : ''}`
+      return { result: `${result.title}: stopped${key}${asks ? `.${asks}` : ''}` }
     } catch (err) {
       return { result: `listen_stop failed: ${String((err as Error).message ?? err)}` }
     }
