@@ -45,6 +45,8 @@ export function world(
     replyRule?: 'allow' | 'ask' | 'deny'
     /** The rules on agent_listener_key_create: allowed (the default) lets the plugin mint on its own. */
     keyRule?: 'allow' | 'ask' | 'deny'
+    /** No `hostname` program, as on some Linux images: `uname -n` answers instead. */
+    noHostname?: boolean
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -110,7 +112,8 @@ export function world(
       if (exit === 0) calls.opened.push(argv[1] ?? '')
       return ok('', exit)
     }
-    if (argv[0] === 'hostname') return ok('testbox.local\n')
+    if (argv[0] === 'hostname') return settings.noHostname ? ok('', 127) : ok('testbox.local\n')
+    if (argv[0] === 'uname' && argv[1] === '-n') return ok('linuxbox\n')
     return ok('', 127)
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))

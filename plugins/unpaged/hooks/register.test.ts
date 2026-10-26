@@ -23,6 +23,13 @@ describe('listen_arm', () => {
     expect(w.calls.submits).toEqual([])
   })
 
+  test('labels its key from uname -n where there is no hostname program', async ($, on) => {
+    const w = world(on, { noHostname: true })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    expect(w.calls.mcp[0]?.args).toEqual({ documentId: DOCUMENT, label: 'claude-code on linuxbox' })
+    expect(w.calls.process.map(c => c.argv)).toEqual([['hostname'], ['uname', '-n']])
+  })
+
   test('runs no Node and writes no file: the only program it starts is hostname, once', async ($, on) => {
     const w = world(on, { pages: [page(), { status: 401 }] })
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
@@ -103,7 +110,7 @@ describe('listen_arm', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
     expect(w.calls.toasts).toEqual([
-      'Listening on Plan canvas with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.',
+      'Listening on Plan canvas with a new key; the key it replaced is still live, though shut out of polling. /unpaged:listen revoke or Unpaged revokes it.',
     ])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
     settings.revokeRefused = false
@@ -627,5 +634,19 @@ describe('where the permission rules keep the plugin from minting on its own', (
     const answer = await $.command.run({ command: 'unpaged-listen', args: `arm ${DOCUMENT}` } as never)
     expect(answer.text).toContain('the server refused to mint')
     expect(answer.text).not.toContain('ask Claude')
+  })
+
+  test('a rule that denies the mint gets no offer, and listen_arm and /unpaged-listen arm say listening is off', async ($, on) => {
+    const w = world(on, { keyRule: 'deny', mintError: true })
+    unpagedServer(on)
+    const created = await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Owl detective' } as never)
+    expect(offers(created)).toBe(0)
+    expect(JSON.stringify(created)).not.toContain('agent_listener_key_create')
+    const armed = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
+    expect(JSON.stringify(armed)).toContain("permission rules deny agent_listener_key_create")
+    expect(JSON.stringify(armed)).not.toContain('now;')
+    const command = await $.command.run({ command: 'unpaged-listen', args: `arm ${SECOND}` } as never)
+    expect(command.text).not.toContain('ask Claude')
+    expect(w.calls.armed).toEqual([])
   })
 })

@@ -120,7 +120,7 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
-/** Canvases the agent was told to offer listening to, where the rules keep the plugin from minting: told once each. */
+/** Canvases whose mint the rules do not leave to the plugin: the agent was told once to offer listening (nothing, where the rules deny the mint). */
 const offered = new Set<string>()
 /** Keys the agent minted in its own turn, by canvas: the arm that follows keeps that key instead of minting another. */
 const agentMints = new Map<string, unknown>()
@@ -188,12 +188,15 @@ let hostName: string | null = null
 /**
  * The label a key is minted with, `claude-code on <host>`: `/unpaged:listen
  * revoke all` knows this machine's keys by it. The host is what `hostname`
- * prints (macOS, Linux and Windows all have it), up to its first dot.
+ * prints (macOS, Windows and most Linux), else `uname -n` (some Linux images
+ * ship no `hostname`), up to its first dot: the name Node's `os.hostname()`
+ * gives the Monitor path's key script.
  */
 async function keyLabel($: Api) {
-  if (!hostName) {
+  for (const argv of [['hostname'], ['uname', '-n']]) {
+    if (hostName) break
     try {
-      const ran = await $.process.run(['hostname'], { timeoutMs: 5000 })
+      const ran = await $.process.run(argv, { timeoutMs: 5000 })
       hostName = (ran.exitCode === 0 ? ran.stdout.trim().split('.')[0] : '') || null
     } catch {
       hostName = null
@@ -221,10 +224,16 @@ const ruleName = (server: string, tool: string) => `mcp__${server.replace(/[^A-Z
  * mod's own calls of MCP tools go through those rules either way.
  */
 async function isAllowed($: Api, server: string, tool: string, input: Record<string, unknown>) {
+  return (await ruleOn($, server, tool, input)) === 'allow'
+}
+
+/** The rules' answer for `tool`, asked the same way: `allow`, `deny`, or `ask` for anything else (no rule, or no answer). */
+async function ruleOn($: Api, server: string, tool: string, input: Record<string, unknown>): Promise<'allow' | 'deny' | 'ask'> {
   try {
-    return (await $.tool.check({ tool: ruleName(server, tool), input })).decision === 'allow'
+    const decision = (await $.tool.check({ tool: ruleName(server, tool), input })).decision
+    return decision === 'allow' || decision === 'deny' ? decision : 'ask'
   } catch {
-    return false
+    return 'ask'
   }
 }
 
@@ -234,11 +243,12 @@ function mcpText(result: { content?: Array<{ type?: string; text?: string }>; st
 }
 
 /**
- * Whether the person's permission rules let the plugin mint a canvas's key on
- * its own: asked without minting, so no dialog opens and no classifier runs.
+ * The person's permission rules on a canvas's key mint, asked without minting,
+ * so no dialog opens and no classifier runs: `allow` lets the plugin mint on
+ * its own, `deny` lets nobody mint, and `ask` leaves the mint to the agent.
  */
-async function mayMintAlone($: Api, documentId: string) {
-  return isAllowed($, await mcpServer($), 'agent_listener_key_create', { documentId, label: await keyLabel($) })
+async function mintRule($: Api, documentId: string) {
+  return ruleOn($, await mcpServer($), 'agent_listener_key_create', { documentId, label: await keyLabel($) })
 }
 
 /** Mints a fresh key for the canvas, or takes the one the agent just minted, and keeps it in the plugin's store. */
@@ -504,7 +514,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
     void revoke($, replaced).then(isRevoked => {
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
-      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.`, { timeoutMs: 10000 })
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live, though shut out of polling. /unpaged:listen revoke or Unpaged revokes it.`, { timeoutMs: 10000 })
     })
   }
   canvases.set(documentId, {
@@ -596,6 +606,9 @@ function offerLine(documentId: string, title: string | null) {
   return `The unpaged plugin can bring @agent comments on ${name} into this session while you work, but the person's permission rules do not let it create the listener key on its own. When you hand the whiteboard back, offer that in one short question. Only if they say yes, call agent_listener_key_create with documentId ${documentId}: the plugin keeps the key out of this conversation and starts listening.`
 }
 
+/** What listen_arm answers where the rules deny the mint to everyone. */
+const MINT_DENIED = "Push is not armed: the person's permission rules deny agent_listener_key_create, so no listener key can be created for this canvas, by the plugin or by you. Do not call it; say that listening needs that rule lifted."
+
 /** What listen_arm answers where the rules keep the plugin from minting: the agent mints in its turn. */
 function mintYourselfLine(documentId: string) {
   return `Not listening yet: the person's permission rules do not let the plugin create this canvas's listener key on its own. Call agent_listener_key_create with documentId ${documentId} now; the plugin takes the key from its answer and starts listening, and the key never reaches you.`
@@ -623,7 +636,7 @@ async function listenWithAgentMint($: Api, documentId: string, found: unknown) {
     agentMints.delete(documentId)
     if (keyId) rememberUnrevoked(documentId, keyId)
     return {
-      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; stopping the canvas (/unpaged:listen revoke ${documentId}) revokes it.`,
+      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; /unpaged:listen revoke ${documentId} revokes it.`,
     }
   }
 }
@@ -771,7 +784,7 @@ export const register: Register = on => {
         } catch (err) {
           // A mint this command starts has no request of the person's behind it
           // in auto mode; one the agent makes in its turn does.
-          const hint = isDocumentId(target) && !(await mayMintAlone($, target)) ? ' — ask Claude to listen to this canvas instead: it creates the key in its own turn, where auto mode sees that you asked' : ''
+          const hint = isDocumentId(target) && (await mintRule($, target)) === 'ask' ? ' — ask Claude to listen to this canvas instead: it creates the key in its own turn, where auto mode sees that you asked' : ''
           return { text: `unpaged-listen arm: ${String((err as Error).message ?? err)}${hint}` }
         }
       }
@@ -794,7 +807,9 @@ export const register: Register = on => {
     const input = e as unknown as { documentId?: string; title?: string }
     const documentId = text(input.documentId)
     try {
-      if (isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) && !(await mayMintAlone($, documentId))) {
+      const rule = isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) ? await mintRule($, documentId) : 'allow'
+      if (rule === 'deny') return { result: MINT_DENIED }
+      if (rule === 'ask') {
         if (text(input.title)) titlesAsked.set(documentId, text(input.title))
         return { result: mintYourselfLine(documentId) }
       }
@@ -844,12 +859,14 @@ export const register: Register = on => {
       title = created.title || text(input.title) || null
     }
     if (!isDocumentId(documentId) || armedBefore.has(documentId) || offered.has(documentId) || arming.has(documentId) || loops.has(documentId)) return ran
-    if (await mayMintAlone($, documentId)) {
+    const rule = await mintRule($, documentId)
+    if (rule === 'allow') {
       armOnItsOwn($, documentId, title)
       return ran
     }
+    // Asked once per canvas either way; a rule that denies the mint gets no offer.
     offered.add(documentId)
-    return { ...ran, context: [...(ran.context ?? []), offerLine(documentId, title)] }
+    return rule === 'deny' ? ran : { ...ran, context: [...(ran.context ?? []), offerLine(documentId, title)] }
   })
 
   // A deleted canvas is not listened to any longer: the server would go on
