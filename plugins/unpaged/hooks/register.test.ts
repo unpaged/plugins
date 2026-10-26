@@ -110,7 +110,7 @@ describe('listen_arm', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
     expect(w.calls.toasts).toEqual([
-      'Listening on Plan canvas with a new key; the key it replaced is still live, though shut out of polling. /unpaged:listen revoke or Unpaged revokes it.',
+      `Listening on Plan canvas with a new key; the key it replaced (key-old) is still live, though shut out of polling. Unpaged revokes it, or /unpaged:listen revoke ${DOCUMENT}, which stops listening to Plan canvas too.`,
     ])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
     settings.revokeRefused = false
@@ -339,6 +339,41 @@ describe('stop', () => {
     expect(answer).toContain('connected')
     expect(answer).toContain('key-1')
     expect(answer).not.toContain(KEY)
+    expect(answer).toContain("This machine's key label: claude-code on testbox")
+  })
+
+  test('a refused revoke names the key id, and a revoke the agent makes itself forgets the key', async ($, on) => {
+    const w = world(on, { revokeRefused: true })
+    unpagedServer(on)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    const stopped = JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never))
+    expect(stopped).toContain('key not revoked')
+    expect(stopped).toContain('keyId key-1')
+    expect(JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never))).toContain(`Keys this session could not revoke:\\n${DOCUMENT} (${DOCUMENT}): keyId key-1`)
+    await $.tool.call({ tool: 'mcp__plugin_unpaged_unpaged__agent_listener_key_revoke', keyId: 'key-1' } as never)
+    expect(w.store.has(STORED)).toBe(false)
+    expect(JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never))).toContain('Keys this session could not revoke:\\nnone')
+    // The next stop has nothing left to revoke.
+    const again = JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never))
+    expect(again).toContain('no key left to revoke here')
+  })
+
+  test('a revoke of a stored key that the server refuses keeps it', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on, { refuse: ['agent_listener_key_revoke'] })
+    w.store.set(STORED, OLD_KEY)
+    await $.tool.call({ tool: 'mcp__plugin_unpaged_unpaged__agent_listener_key_revoke', keyId: 'key-old' } as never)
+    expect(w.store.has(STORED)).toBe(true)
+  })
+
+  test('a revoke the agent makes of a stored key from an earlier session forgets it', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    w.store.set(STORED, OLD_KEY)
+    await $.tool.call({ tool: 'mcp__plugin_unpaged_unpaged__agent_listener_key_revoke', keyId: 'key-other' } as never)
+    expect(w.store.has(STORED)).toBe(true)
+    await $.tool.call({ tool: 'mcp__plugin_unpaged_unpaged__agent_listener_key_revoke', keyId: 'key-old' } as never)
+    expect(w.store.has(STORED)).toBe(false)
   })
 })
 

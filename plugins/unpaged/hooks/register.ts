@@ -514,7 +514,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
     void revoke($, replaced).then(isRevoked => {
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
-      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live, though shut out of polling. /unpaged:listen revoke or Unpaged revokes it.`, { timeoutMs: 10000 })
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced (${replaced}) is still live, though shut out of polling. Unpaged revokes it, or /unpaged:listen revoke ${documentId}, which stops listening to ${name} too.`, { timeoutMs: 10000 })
     })
   }
   canvases.set(documentId, {
@@ -562,7 +562,21 @@ async function stop($: Api, documentId: string) {
   canvases.delete(documentId)
   await sync($)
   const left = unrevoked.get(documentId) ?? []
-  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null }
+  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null, left }
+}
+
+/**
+ * Forgets a key the agent revoked in its own turn (as `/unpaged:listen revoke`
+ * has it do where auto mode refuses the plugin's revoke): on every canvas that
+ * kept it unrevoked, and in the store, on whichever canvas still holds it, so
+ * no later arm or status takes it for live.
+ */
+async function forgetRevoked($: Api, keyId: string) {
+  if (!keyId) return
+  for (const [documentId, ids] of [...unrevoked]) if (ids.includes(keyId)) forgetUnrevoked(documentId, keyId)
+  for (const name of await $.store.keys()) {
+    if (name.startsWith(STORED_KEY)) await retireStored($, name.slice(STORED_KEY.length), stored => stored.keyId === keyId)
+  }
 }
 
 /**
@@ -636,7 +650,7 @@ async function listenWithAgentMint($: Api, documentId: string, found: unknown) {
     agentMints.delete(documentId)
     if (keyId) rememberUnrevoked(documentId, keyId)
     return {
-      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; /unpaged:listen revoke ${documentId} revokes it.`,
+      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; /unpaged:listen revoke ${documentId} revokes it${keyId ? ` (keyId ${keyId})` : ''}.`,
     }
   }
 }
@@ -705,9 +719,12 @@ async function statusText($: Api) {
     const config = await loadConfig($, name.slice(STORED_KEY.length))
     if (config) stored.push(`${config.title || config.documentId} (${config.documentId}): key ${config.keyId ?? 'with no id'}, stored ${config.createdAt ?? 'at an unknown time'}`)
   }
+  const left = [...unrevoked].map(([documentId, ids]) => `${canvases.get(documentId)?.title || documentId} (${documentId}): keyId ${ids.join(', ')}`)
   return [
     lines.length ? `Listening in this session:\n${lines.join('\n')}` : 'Nothing is armed in this session.',
     `Keys the plugin stores on this machine:\n${stored.join('\n') || 'none'}`,
+    `Keys this session could not revoke:\n${left.join('\n') || 'none'}`,
+    `This machine's key label: ${await keyLabel($)}`,
   ].join('\n\n')
 }
 
@@ -830,7 +847,7 @@ export const register: Register = on => {
       const key = result.revoked
         ? ', key revoked'
         : result.keyId
-          ? ', key not revoked (the permission check or the server refused, or the server was unreachable)'
+          ? `, key not revoked (the permission check or the server refused, or the server was unreachable): keyId ${result.left.join(', ')}`
           : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
       return { result: `${result.title}: stopped${key}` }
     } catch (err) {
@@ -909,6 +926,19 @@ export const register: Register = on => {
     const answer = ran as { text?: unknown; result?: unknown }
     const found = extractMint(answer.text) ?? extractMint(answer.result)
     return found ? listenWithAgentMint($, documentId, found) : ran
+  })
+
+  // A key the agent revokes itself: once the server has revoked it, the mod
+  // forgets it as its own stop would. The call and its answer go on unchanged.
+  // The mod's own revokes are tool calls these hooks see too, raised under
+  // this plugin's name; the stop or arm that made them forgets the key itself.
+  on('tool.call', { tool: unpagedTool(['agent_listener_key_revoke']) }, async ($, e, next) => {
+    if (next.origin.plugin === $.plugin.name) return next(e)
+    const ran = await next(e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    // A store that fails here leaves a stale entry the next arm revokes again; the revoke itself succeeded.
+    await forgetRevoked($, text((e as unknown as Record<string, unknown>).keyId)).catch(() => undefined)
+    return ran
   })
 
   // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
