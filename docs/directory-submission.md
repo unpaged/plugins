@@ -10,7 +10,7 @@ Answers for the plugin directory form (Console: https://platform.claude.com/plug
 | Display name | Unpaged |
 | Repository | https://github.com/unpaged/plugins |
 | Plugin path in the repo | `plugins/unpaged` — this repo's own `marketplace.json` lists it as the relative path `./plugins/unpaged`; the community catalog records monorepo entries as `{ source: "git-subdir", url, path, ref, sha }`, so give the form the repo URL plus this path |
-| Release / ref | `v1.10.0` (483d59b), in review since 2026-10-26; v1.9.0 was the first version whose tree passes the directory policy (no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`). Submit the release that carries the *Directory findings* changes below once it is tagged; never submit an older ref |
+| Release / ref | `v1.11.0`, the first release that carries the *Directory findings* changes below. v1.10.0 (483d59b) was in review from 2026-10-26; v1.9.0 was the first version whose tree passes the directory policy (no hook of the plugin answers *allow*, and it carries the icon and `privacyPolicyUrl`). Never submit an older ref |
 | Homepage | https://unpaged.io |
 | Privacy policy | https://unpaged.io/privacy |
 | Terms | https://unpaged.io/terms |
