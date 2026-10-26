@@ -957,18 +957,21 @@ export const register: Register = on => {
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
     // The title is the canvas's link, which Claude Code itself opens: the
     // plugin starts no program for it. Stop keeps its `2` from when `1` opened.
+    // A terminal that draws no links writes the address after the title, so
+    // only the title gives way to the width: the rest never wraps.
     const ours =
       list.length === 1
         ? Box({
             flexDirection: 'row',
             columnGap: 2,
             children: [
-              Text({ color: dotColor(list[0]), children: ['●'] }),
-              Text({ bold: true, children: ['Listening'] }),
+              fixed(Text({ color: dotColor(list[0]), children: ['●'] })),
+              fixed(Text({ bold: true, children: ['Listening'] })),
               Text({ wrap: 'truncate-end', children: [Link({ href: list[0].boardUrl, children: [list[0].title] })] }),
-              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
+              fixed(Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] })),
               button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
@@ -994,6 +997,7 @@ export const register: Register = on => {
     const covered = await read($, replying)
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     if (list.length === 0) return Box({ children: [Text({ dimColor: true, children: ['Nothing is armed in this session.'] })] })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
     return Box({
       flexDirection: 'column',
       children: list.map(canvas =>
@@ -1001,9 +1005,9 @@ export const register: Register = on => {
           flexDirection: 'row',
           columnGap: 2,
           children: [
-            Text({ color: dotColor(canvas), children: ['●'] }),
+            fixed(Text({ color: dotColor(canvas), children: ['●'] })),
             Text({ wrap: 'truncate-end', children: [Link({ href: canvas.boardUrl, children: [canvas.title] })] }),
-            Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] }),
+            fixed(Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] })),
             Button({
               key: `stop-${canvas.documentId}`,
               label: 'stop',
