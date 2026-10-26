@@ -342,6 +342,15 @@ describe('stop', () => {
     expect(answer).toContain("This machine's key label: claude-code on testbox")
   })
 
+  test('status marks each stored key this folder or other folder, by the folder that armed it', async ($, on) => {
+    const w = world(on)
+    w.store.set(storedKeyFor(SECOND), { pollUrl: POLL_URL, key: KEY, documentId: SECOND, keyId: 'key-elsewhere', title: 'Elsewhere', cwd: '/other' })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    const answer = JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never))
+    expect(answer).toContain(`(${DOCUMENT}): this folder, key key-1`)
+    expect(answer).toContain(`Elsewhere (${SECOND}): other folder, key key-elsewhere`)
+  })
+
   test('a refused revoke names the key id, and a revoke the agent makes itself forgets the key', async ($, on) => {
     const w = world(on, { revokeRefused: true })
     unpagedServer(on)

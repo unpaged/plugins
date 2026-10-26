@@ -13,6 +13,7 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 - A key the agent mints is labelled `claude-code on <host>` by the plugin, whatever label the agent chose, so `/unpaged:listen revoke all` finds it. The host comes from `hostname`, or `uname -n` where there is none.
 - A rule that denies `agent_listener_key_create` turns listening off: no offer, and `listen_arm` says why instead of asking the agent for a mint the rule refuses.
 - Where auto mode refuses the plugin's own revoke (no rule allows it), `/unpaged:listen revoke` has the agent revoke the key in its own turn, and the plugin forgets a key the agent revoked. `listen_status` prints this machine's key label and the keys the session could not revoke, and `listen_stop` names the ones it could not, so the agent can find them without Node. The plugin's messages no longer say a stop revokes the key.
+- `/unpaged:listen` with no argument lists the canvases the plugin stores keys for, this folder's first, through `listen_status`, and arms the ones you pick; the key-file helpers it ran before need Node and never see the plugin's keys.
 - `/unpaged-listen arm`, when the mint is refused, says to ask Claude to listen to the canvas instead.
 
 ### Removed

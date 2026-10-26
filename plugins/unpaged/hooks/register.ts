@@ -714,10 +714,13 @@ function describe(canvas: ArmedCanvas | undefined, first?: string) {
 async function statusText($: Api) {
   const lines = [...canvases.values()].map(c => describe(c))
   const stored: string[] = []
+  const cwd = await $.session.cwd()
   for (const name of await $.store.keys()) {
     if (!name.startsWith(STORED_KEY)) continue
     const config = await loadConfig($, name.slice(STORED_KEY.length))
-    if (config) stored.push(`${config.title || config.documentId} (${config.documentId}): key ${config.keyId ?? 'with no id'}, stored ${config.createdAt ?? 'at an unknown time'}`)
+    // Which folder armed it, as the Monitor path's lister says: `/unpaged:listen` offers this folder's first.
+    const folder = config?.cwd === cwd ? 'this folder' : 'other folder'
+    if (config) stored.push(`${config.title || config.documentId} (${config.documentId}): ${folder}, key ${config.keyId ?? 'with no id'}, stored ${config.createdAt ?? 'at an unknown time'}`)
   }
   const left = [...unrevoked].map(([documentId, ids]) => `${canvases.get(documentId)?.title || documentId} (${documentId}): keyId ${ids.join(', ')}`)
   return [
