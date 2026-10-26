@@ -301,6 +301,8 @@ describe('stop', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
     expect(JSON.stringify(answer)).toContain('key revoked')
+    expect(JSON.stringify(answer)).not.toContain('Revoke it now')
+    expect(w.calls.checks).toContain('mcp__unpaged__agent_listener_key_revoke')
     expect(w.calls.mcp.at(-1)).toEqual({ tool: 'agent_listener_key_revoke', args: { keyId: 'key-1' } })
     expect(w.store.has(STORED)).toBe(false)
     expect(w.calls.armed).toEqual([])
@@ -518,7 +520,7 @@ describe('arming on its own', () => {
     await until(() => w.calls.armed[0]?.state === 'connected')
     await $.tool.call({ tool: `${UNPAGED}document_delete`, documentId: SECOND } as never)
     await until(() => w.calls.armed.length === 0 && w.calls.toasts.length > 0)
-    expect(w.calls.toasts).toEqual([`Stopped listening to Scratch; its key is still live: /unpaged:listen revoke ${SECOND}`])
+    expect(w.calls.toasts).toEqual(['Stopped listening to Scratch; its key is still live (keyId key-22222222): ask Claude to stop listening to Scratch, or revoke it in Unpaged.'])
   })
 
   test('a delete answers without waiting for the revoke of its key', async ($, on) => {
@@ -695,7 +697,7 @@ describe('where the permission rules keep the plugin from minting on its own', (
   })
 
   test("a re-arm with the agent's mint leaves the key it replaces to the agent, which revokes it in the same turn", async ($, on) => {
-    const w = world(on, { keyRule: 'ask' })
+    const w = world(on, { keyRule: 'ask', revokeRule: 'ask' })
     unpagedServer(on)
     w.store.set(STORED, OLD_KEY)
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
@@ -718,5 +720,101 @@ describe('where the permission rules keep the plugin from minting on its own', (
     expect(answer).not.toContain('earlier key')
     await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke'))
     expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old'])
+  })
+})
+
+describe('where the permission rules keep the plugin from revoking on its own', () => {
+  const UNPAGED = 'mcp__plugin_unpaged_unpaged__'
+  /** The revokes the plugin made itself; the agent's go to the server through its tool. */
+  const revokes = (w: World) => w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke')
+  const arm = ($: Engine) => $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+  const stop = async ($: Engine) => JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never))
+  const agentRevoke = ($: Engine, keyId: string) => $.tool.call({ tool: `${UNPAGED}agent_listener_key_revoke`, keyId } as never)
+
+  test('listen_stop stops polling, revokes nothing itself, and asks the agent to revoke the key by its id', async ($, on) => {
+    const w = world(on, { revokeRule: 'ask' })
+    await arm($)
+    const answer = await stop($)
+    expect(answer).toContain('Plan canvas: stopped. Its listener key is still live')
+    expect(answer).toContain('Revoke it now with agent_listener_key_revoke and keyId key-1;')
+    expect(answer).not.toContain('key not revoked')
+    expect(answer).not.toContain(KEY)
+    expect(revokes(w)).toEqual([])
+    expect(w.calls.armed).toEqual([])
+    expect(w.store.has(STORED)).toBe(true)
+    await w.clock.advance(60_000)
+    expect(w.calls.fetch).toHaveLength(1)
+  })
+
+  test('where the rules deny the revoke, listen_stop tries nothing and tells the agent not to call it', async ($, on) => {
+    const w = world(on, { revokeRule: 'deny' })
+    await arm($)
+    const answer = await stop($)
+    expect(answer).toContain('Its listener key is still live (keyId key-1): the person\'s permission rules deny agent_listener_key_revoke')
+    expect(answer).toContain('Do not call it')
+    expect(answer).not.toContain('Revoke it now')
+    expect(revokes(w)).toEqual([])
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test("the agent's revoke forgets the key, and the next stop has nothing left to revoke", async ($, on) => {
+    const w = world(on, { revokeRule: 'ask' })
+    const called = unpagedServer(on)
+    await arm($)
+    await stop($)
+    await agentRevoke($, 'key-1')
+    expect(called).toEqual(['agent_listener_key_revoke'])
+    expect(w.store.has(STORED)).toBe(false)
+    expect(await stop($)).toContain('no key left to revoke here')
+    expect(revokes(w)).toEqual([])
+  })
+
+  test('a revoke the server refuses leaves the key for the next stop to ask for again', async ($, on) => {
+    const w = world(on, { revokeRule: 'ask' })
+    unpagedServer(on, { refuse: ['agent_listener_key_revoke'] })
+    await arm($)
+    await stop($)
+    expect(JSON.stringify(await agentRevoke($, 'key-1'))).toContain('Error: refused')
+    expect(w.store.has(STORED)).toBe(true)
+    expect(await stop($)).toContain('Revoke it now with agent_listener_key_revoke and keyId key-1;')
+  })
+
+  test('the stop names the older key an arm could not revoke too, and each revoke forgets its own', async ($, on) => {
+    const w = world(on, { revokeRule: 'ask', revokeRefused: true })
+    unpagedServer(on)
+    w.store.set(STORED, OLD_KEY)
+    await arm($)
+    await until(() => w.calls.toasts.length > 0)
+    expect(await stop($)).toContain('Revoke it now with agent_listener_key_revoke and keyId key-1, then keyId key-old;')
+    await agentRevoke($, 'key-old')
+    expect(w.store.get(STORED)).toEqual(expect.objectContaining({ keyId: 'key-1' }))
+    expect(await stop($)).toContain('Revoke it now with agent_listener_key_revoke and keyId key-1;')
+    await agentRevoke($, 'key-1')
+    expect(w.store.has(STORED)).toBe(false)
+    expect(await stop($)).toContain('no key left to revoke here')
+  })
+
+  test('a stored key another session replaced meanwhile is kept when the agent revokes the old one', async ($, on) => {
+    const w = world(on, { revokeRule: 'ask' })
+    unpagedServer(on)
+    await arm($)
+    await stop($)
+    const newer = { pollUrl: POLL_URL, key: 'n'.repeat(43), documentId: DOCUMENT, keyId: 'key-newer', title: 'Plan canvas' }
+    w.store.set(STORED, newer)
+    await agentRevoke($, 'key-1')
+    expect(w.store.get(STORED)).toEqual(newer)
+  })
+
+  test('/unpaged-listen stop still tries the revoke itself and says to ask Claude, which then leaves the revoke to the agent', async ($, on) => {
+    const w = world(on, { revokeRule: 'ask', revokeRefused: true })
+    unpagedServer(on)
+    await arm($)
+    const stopped = await $.command.run({ command: 'unpaged-listen', args: `stop ${DOCUMENT}` } as never)
+    expect(stopped.text).toBe('Plan canvas: stopped; its key is still live (keyId key-1): ask Claude to stop listening to Plan canvas, or revoke it in Unpaged.')
+    expect(revokes(w).map(c => c.args.keyId)).toEqual(['key-1'])
+    expect(await stop($)).toContain('Revoke it now with agent_listener_key_revoke and keyId key-1;')
+    expect(revokes(w)).toHaveLength(1)
+    await agentRevoke($, 'key-1')
+    expect(w.store.has(STORED)).toBe(false)
   })
 })
