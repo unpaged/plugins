@@ -43,6 +43,8 @@ export function world(
     ack?: 'posted' | 'refused' | 'hang'
     /** The person's permission rules on comment_reply, as `$.tool.check` reads them: allowed (the default) or not. */
     replyRule?: 'allow' | 'ask' | 'deny'
+    /** The rules on agent_listener_key_create: allowed (the default) lets the plugin mint on its own. */
+    keyRule?: 'allow' | 'ask' | 'deny'
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -116,6 +118,7 @@ export function world(
   on('tool.check', (_$, e) => {
     calls.checks.push(e.tool)
     if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
+    if (e.tool === 'mcp__unpaged__agent_listener_key_create') return { decision: settings.keyRule ?? 'allow' }
     return { decision: 'ask' }
   })
   // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
@@ -178,19 +181,20 @@ export function world(
  * as core does: the tool's record (its content blocks) and, as `text`, the
  * JSON the model reads. Returns the tools it was called with, in order.
  */
-export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string } = {}) {
+export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string; mintFor?: string; inputs?: Array<Record<string, unknown>> } = {}) {
   const called: string[] = []
   on('tool.call', { tool: /^mcp__(plugin_unpaged_unpaged|unpaged)__(?!listen_)/ }, (_$, e) => {
     const tool = String(e.tool)
     const name = tool.slice(tool.lastIndexOf('__') + 2)
     const args = e as unknown as Record<string, unknown>
     called.push(name)
+    settings.inputs?.push(args)
     const answer = (value: unknown, text = JSON.stringify(value, null, 2)) =>
       ({ result: [{ type: 'text', text: JSON.stringify(value) }], text }) as never
     if (settings.refuse?.includes(name)) return { isError: true, result: 'Error: refused', text: 'Error: refused' } as never
     if (name === 'document_create') return answer({ id: SECOND, title: args.title, rootNodeId: 'root-2', url: `https://unpaged.io/document/${SECOND}/edit` })
     if (name === 'template_clone') return answer({ id: THIRD, title: args.title ?? 'From the gallery', nodes: [{ id: 'root-3', elements: [] }] }, settings.cloneText)
-    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: args.documentId, keyId: 'key-by-hand', title: 'By hand' })
+    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: settings.mintFor ?? args.documentId, keyId: 'key-by-hand', title: 'By hand' })
     return answer({ ok: true })
   })
   return called

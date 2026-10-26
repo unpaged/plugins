@@ -172,6 +172,7 @@ describe('delivery', () => {
     on('session.id', () => ({ value: 'session-1' }))
     on('process.run', () => ({ value: { exitCode: 0, stdout: 'testbox\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
     on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
+    on('tool.check', () => ({ decision: 'allow' }))
     on('mcp.call', () => ({
       value: { content: [{ type: 'text', text: JSON.stringify({ pollUrl: POLL_URL, key: KEY, documentId: DOCUMENT, keyId: 'key-1', title: 'Plan canvas' }) }], isError: false },
     }))
@@ -205,7 +206,7 @@ describe('"On it…"', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await deliver(w)
     expect(replies(w)).toEqual([{ tool: 'comment_reply', args: { documentId: DOCUMENT, threadId: THREAD, text: 'On it…' } }])
-    expect(w.calls.checks).toEqual(['mcp__unpaged__comment_reply'])
+    expect(w.calls.checks).toEqual(['mcp__unpaged__agent_listener_key_create', 'mcp__unpaged__comment_reply'])
     expect(w.calls.submitsAtReply).toEqual([0])
     const lines = w.calls.submits[0].split('\n')
     expect(JSON.parse(lines[1]).id).toBe('e1')
@@ -347,6 +348,7 @@ describe('arming on its own', () => {
     unpagedServer(on)
     const answer = await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Owl detective' } as never)
     expect(JSON.stringify(answer)).toContain(SECOND)
+    expect(JSON.stringify(answer)).not.toContain('agent_listener_key_create')
     await until(() => w.calls.fetch.length > 0)
     expect(mints(w).map(c => c.args.documentId)).toEqual([SECOND])
     expect(w.calls.fetch).toEqual([{ url: POLL_URL, authorization: `Bearer ${KEY}` }])
@@ -503,11 +505,14 @@ describe('arming on its own', () => {
     expect([...w.store.keys()]).toEqual([STORED])
   })
 
-  test('a key minted by hand for a canvas the session does not listen to goes to the server', async ($, on) => {
-    world(on)
+  test('a key minted by hand for a canvas the session does not listen to goes to the server, and the plugin listens with it', async ($, on) => {
+    const w = world(on)
     const called = unpagedServer(on)
-    await $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId: SECOND } as never)
+    const answer = await $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId: SECOND } as never)
     expect(called).toEqual(['agent_listener_key_create'])
+    expect(JSON.stringify(answer)).toContain('Listening on By hand')
+    expect(JSON.stringify(answer)).not.toContain(KEY)
+    expect(mints(w)).toEqual([])
   })
 
   // Another plugin minting by hand: its call reaches the mod's hooks under its
@@ -535,5 +540,92 @@ describe('arming on its own', () => {
     expect((await arming).text).toContain('Listening on Plan canvas')
     expect(called).toEqual([])
     expect(mints(w)).toHaveLength(1)
+  })
+})
+
+describe('where the permission rules keep the plugin from minting on its own', () => {
+  const UNPAGED = 'mcp__plugin_unpaged_unpaged__'
+  const mints = (w: World) => w.calls.mcp.filter(c => c.tool === 'agent_listener_key_create')
+  const offers = (answer: unknown) => JSON.stringify(answer).split('offer that in one short question').length - 1
+  const agentMint = ($: Engine, documentId = DOCUMENT, label?: string) =>
+    $.tool.call({ tool: `${UNPAGED}agent_listener_key_create`, documentId, ...(label ? { label } : {}) } as never)
+
+  test('a new canvas is not armed: its answer tells the agent to offer listening, and only once', async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    unpagedServer(on)
+    const created = await $.tool.call({ tool: `${UNPAGED}document_create`, title: 'Owl detective' } as never)
+    expect(offers(created)).toBe(1)
+    expect(JSON.stringify(created)).toContain(`call agent_listener_key_create with documentId ${SECOND}`)
+    expect(JSON.stringify(created)).toContain('Owl detective')
+    const changed = await $.tool.call({ tool: `${UNPAGED}batch_create_elements`, documentId: SECOND, nodeId: 'root', elements: [] } as never)
+    expect(offers(changed)).toBe(0)
+    await until(() => false, 20)
+    expect(mints(w)).toEqual([])
+    expect(w.calls.fetch).toEqual([])
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test('listen_arm mints nothing itself and asks the agent to', async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    const answer = await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    expect(JSON.stringify(answer)).toContain(`Call agent_listener_key_create with documentId ${DOCUMENT} now`)
+    expect(mints(w)).toEqual([])
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test("the agent's own mint goes out under this machine's label, the plugin listens with it, and its key never reaches the agent", async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    const inputs: Array<Record<string, unknown>> = []
+    unpagedServer(on, { inputs })
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    const answer = await agentMint($)
+    expect(inputs).toEqual([expect.objectContaining({ documentId: DOCUMENT, label: 'claude-code on testbox' })])
+    expect(JSON.stringify(answer)).toContain('Listening on Plan canvas')
+    expect(JSON.stringify(answer)).not.toContain(KEY)
+    expect(w.store.get(STORED)).toEqual(expect.objectContaining({ key: KEY, keyId: 'key-by-hand' }))
+    expect(w.calls.fetch).toEqual([{ url: POLL_URL, authorization: `Bearer ${KEY}` }])
+    expect(w.calls.armed).toEqual([expect.objectContaining({ documentId: DOCUMENT, keyId: 'key-by-hand', title: 'Plan canvas', state: 'connected' })])
+    expect(mints(w)).toEqual([])
+  })
+
+  test("a label the agent chose is replaced by this machine's, which revoke all knows its keys by", async ($, on) => {
+    world(on, { keyRule: 'ask' })
+    const inputs: Array<Record<string, unknown>> = []
+    unpagedServer(on, { inputs })
+    await agentMint($, DOCUMENT, 'my laptop')
+    expect(inputs).toEqual([expect.objectContaining({ label: 'claude-code on testbox' })])
+  })
+
+  test('a mint naming another canvas is not listened with, its key stays out of the answer, and the next stop revokes it', async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    unpagedServer(on, { mintFor: THIRD })
+    const answer = await agentMint($)
+    expect(JSON.stringify(answer)).toContain(`listening did not start: the mint is for canvas ${THIRD}, not ${DOCUMENT}`)
+    expect(JSON.stringify(answer)).not.toContain(KEY)
+    expect(w.store.size).toBe(0)
+    expect(w.calls.fetch).toEqual([])
+    await $.tool.call({ tool: 'mcp__unpaged__listen_stop', documentId: DOCUMENT } as never)
+    expect(w.calls.mcp).toEqual([{ tool: 'agent_listener_key_revoke', args: { keyId: 'key-by-hand' } }])
+  })
+
+  test('a mint the server refuses goes back as it came', async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    unpagedServer(on, { refuse: ['agent_listener_key_create'] })
+    const answer = await agentMint($)
+    expect(JSON.stringify(answer)).toContain('Error: refused')
+    expect(w.calls.armed).toEqual([])
+  })
+
+  test('/unpaged-listen arm, refused, says to ask Claude instead', async ($, on) => {
+    world(on, { keyRule: 'ask', mintError: true })
+    const answer = await $.command.run({ command: 'unpaged-listen', args: `arm ${DOCUMENT}` } as never)
+    expect(answer.text).toContain('ask Claude to listen to this canvas instead')
+  })
+
+  test('/unpaged-listen arm, refused where the rules allow the mint, adds no such line', async ($, on) => {
+    world(on, { mintError: true })
+    const answer = await $.command.run({ command: 'unpaged-listen', args: `arm ${DOCUMENT}` } as never)
+    expect(answer.text).toContain('the server refused to mint')
+    expect(answer.text).not.toContain('ask Claude')
   })
 })

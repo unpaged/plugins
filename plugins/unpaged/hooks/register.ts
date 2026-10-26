@@ -11,13 +11,19 @@
 //
 // The mod grants itself no permission: its own calls of the Unpaged tools (the
 // key mint and revoke, "On it…") and the model's calls of its three tools go
-// through the person's own permission rules, as any tool call does.
+// through the person's own permission rules, as any tool call does. A mint
+// the plugin starts has no request of the person's behind it, so auto mode
+// gives it no verdict and refuses it unless a rule allows it. Where no rule
+// does, the agent mints in its own turn, where auto mode sees what the
+// person asked, and the mod listens with that key and answers in its place.
 //
 // A canvas the session creates or changes through the Unpaged tools is armed
-// on its own, the moment the call succeeds, once per canvas per session: a
-// stop, a takeover by another session or a refused mint stays as it is
-// until someone arms that canvas by hand. A canvas deleted through those
-// tools stops being listened to.
+// on its own, the moment the call succeeds, once per canvas per session,
+// where the rules let the plugin mint; elsewhere the agent is told, once per
+// canvas, to offer listening when it hands the canvas back. A stop, a
+// takeover by another session or a refused mint stays as it is until
+// someone arms that canvas by hand. A canvas deleted through those tools
+// stops being listened to.
 //
 // The loop itself is monitors/listen-loop.mjs, shared with the Monitor
 // script that older clients keep using; this file is its host.
@@ -114,6 +120,12 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
+/** Canvases the agent was told to offer listening to, where the rules keep the plugin from minting: told once each. */
+const offered = new Set<string>()
+/** Keys the agent minted in its own turn, by canvas: the arm that follows keeps that key instead of minting another. */
+const agentMints = new Map<string, unknown>()
+/** Titles listen_arm was given for a canvas whose key it left to the agent, for the band once the agent mints. */
+const titlesAsked = new Map<string, string>()
 /**
  * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
  * next stop of that canvas in this module's life revokes them with its own.
@@ -221,8 +233,21 @@ function mcpText(result: { content?: Array<{ type?: string; text?: string }>; st
   return block?.text ?? (result.structuredContent === undefined ? '' : JSON.stringify(result.structuredContent))
 }
 
-/** Mints a fresh key for the canvas and keeps it in the plugin's store. */
+/**
+ * Whether the person's permission rules let the plugin mint a canvas's key on
+ * its own: asked without minting, so no dialog opens and no classifier runs.
+ */
+async function mayMintAlone($: Api, documentId: string) {
+  return isAllowed($, await mcpServer($), 'agent_listener_key_create', { documentId, label: await keyLabel($) })
+}
+
+/** Mints a fresh key for the canvas, or takes the one the agent just minted, and keeps it in the plugin's store. */
 async function mint($: Api, documentId: string): Promise<ListenerConfig> {
+  const given = agentMints.get(documentId)
+  if (given !== undefined) {
+    agentMints.delete(documentId)
+    return storeMint($, documentId, given)
+  }
   const server = await mcpServer($)
   const result = (await $.mcp.call(server, 'agent_listener_key_create', {
     documentId,
@@ -565,6 +590,44 @@ function createdDocument(value: unknown): { id: string; title: string } | null {
   return isDocumentId(record.id) ? { id: String(record.id), title: text(record.title) } : null
 }
 
+/** What the agent reads, once per canvas, where the rules keep the plugin from minting the canvas's key on its own. */
+function offerLine(documentId: string, title: string | null) {
+  const name = title ? `"${title}"` : 'this whiteboard'
+  return `The unpaged plugin can bring @agent comments on ${name} into this session while you work, but the person's permission rules do not let it create the listener key on its own. When you hand the whiteboard back, offer that in one short question. Only if they say yes, call agent_listener_key_create with documentId ${documentId}: the plugin keeps the key out of this conversation and starts listening.`
+}
+
+/** What listen_arm answers where the rules keep the plugin from minting: the agent mints in its turn. */
+function mintYourselfLine(documentId: string) {
+  return `Not listening yet: the person's permission rules do not let the plugin create this canvas's listener key on its own. Call agent_listener_key_create with documentId ${documentId} now; the plugin takes the key from its answer and starts listening, and the key never reaches you.`
+}
+
+/**
+ * Listens with a key the agent minted in its own turn and answers in the
+ * mint's place, so the key never reaches the conversation. A key that turns
+ * out not to be needed (the canvas was armed meanwhile) or that could not be
+ * listened with is revoked by the canvas's next stop.
+ */
+async function listenWithAgentMint($: Api, documentId: string, found: unknown) {
+  const keyId = text((found as { keyId?: unknown } | null)?.keyId) || null
+  agentMints.set(documentId, found)
+  try {
+    const result = await arm($, documentId, titlesAsked.get(documentId) ?? null)
+    titlesAsked.delete(documentId)
+    if (result.already) {
+      agentMints.delete(documentId)
+      if (keyId && keyId !== result.canvas?.keyId) rememberUnrevoked(documentId, keyId)
+      return { result: `Already listening: ${describe(result.canvas)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.` }
+    }
+    return { result: `Listening on ${describe(result.canvas, result.first)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.` }
+  } catch (err) {
+    agentMints.delete(documentId)
+    if (keyId) rememberUnrevoked(documentId, keyId)
+    return {
+      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; stopping the canvas (/unpaged:listen revoke ${documentId}) revokes it.`,
+    }
+  }
+}
+
 /** Arms a canvas the session just made or changed, unless this session has armed it before. */
 function armOnItsOwn($: Api, documentId: string, title: string | null) {
   if (!isDocumentId(documentId) || armedBefore.has(documentId) || arming.has(documentId) || loops.has(documentId)) return
@@ -656,7 +719,7 @@ export const register: Register = on => {
       await $.tool.register({
         name: 'listen_arm',
         description:
-          'Listen to an Unpaged canvas for @agent comments in this session: mints the listener key, stores it, and polls from inside Claude Code. New comments arrive as a message from the unpaged plugin. Pass the documentId (and the title for the band).',
+          'Listen to an Unpaged canvas for @agent comments in this session: mints the listener key where the permission rules let the plugin (otherwise its answer asks you to call agent_listener_key_create, and the plugin takes the key from that), keeps it, and polls from inside Claude Code. New comments arrive as a message from the unpaged plugin. Pass the documentId (and the title for the band).',
         inputSchema: {
           type: 'object',
           properties: { documentId: { type: 'string' }, title: { type: 'string' } },
@@ -702,8 +765,15 @@ export const register: Register = on => {
     try {
       if (verb === 'status') return { text: await statusText($) }
       if (verb === 'arm') {
-        const result = await arm($, target, null)
-        return { text: result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}` }
+        try {
+          const result = await arm($, target, null)
+          return { text: result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}` }
+        } catch (err) {
+          // A mint this command starts has no request of the person's behind it
+          // in auto mode; one the agent makes in its turn does.
+          const hint = isDocumentId(target) && !(await mayMintAlone($, target)) ? ' — ask Claude to listen to this canvas instead: it creates the key in its own turn, where auto mode sees that you asked' : ''
+          return { text: `unpaged-listen arm: ${String((err as Error).message ?? err)}${hint}` }
+        }
       }
       if (verb === 'stop') {
         const targets = target === 'all' ? [...canvases.keys()] : [target]
@@ -722,8 +792,13 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'mcp__unpaged__listen_arm' }, async ($, e) => {
     const input = e as unknown as { documentId?: string; title?: string }
+    const documentId = text(input.documentId)
     try {
-      const result = await arm($, text(input.documentId), text(input.title) || null)
+      if (isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) && !(await mayMintAlone($, documentId))) {
+        if (text(input.title)) titlesAsked.set(documentId, text(input.title))
+        return { result: mintYourselfLine(documentId) }
+      }
+      const result = await arm($, documentId, text(input.title) || null)
       const line = result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}`
       return {
         result: `${line}\nNew @agent comments arrive as a message from the unpaged plugin; reply on the canvas with the comment tools and leave threads open. Never repeat key material.`,
@@ -751,18 +826,30 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__unpaged__listen_status' }, async $ => ({ result: await statusText($) }))
 
   // A canvas made or changed through the Unpaged tools is armed on its own once
-  // the call succeeds. The call's answer goes back as it came, without waiting
-  // for the arm: arming waits up to FIRST_POLL_WAIT_MS for the first poll.
+  // the call succeeds, where the rules let the plugin mint its key. The call's
+  // answer goes back as it came, without waiting for the arm: arming waits up
+  // to FIRST_POLL_WAIT_MS for the first poll. Where the rules do not, the
+  // answer carries one line for the agent, once per canvas: offer listening.
   on('tool.call', { tool: unpagedTool([...CREATES, ...EDITS]) }, async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny !== undefined || ran.isError === true) return ran
     const input = e as unknown as Record<string, unknown>
+    let documentId = text(input.documentId)
+    let title: string | null = null
     if (CREATES.some(name => e.tool.endsWith(`__${name}`))) {
       const answer = ran as { text?: unknown; result?: unknown }
       const created = createdDocument(answer.text) ?? createdDocument(answer.result)
-      if (created) armOnItsOwn($, created.id, created.title || text(input.title) || null)
-    } else armOnItsOwn($, text(input.documentId), null)
-    return ran
+      if (!created) return ran
+      documentId = created.id
+      title = created.title || text(input.title) || null
+    }
+    if (!isDocumentId(documentId) || armedBefore.has(documentId) || offered.has(documentId) || arming.has(documentId) || loops.has(documentId)) return ran
+    if (await mayMintAlone($, documentId)) {
+      armOnItsOwn($, documentId, title)
+      return ran
+    }
+    offered.add(documentId)
+    return { ...ran, context: [...(ran.context ?? []), offerLine(documentId, title)] }
   })
 
   // A deleted canvas is not listened to any longer: the server would go on
@@ -781,18 +868,30 @@ export const register: Register = on => {
     return ran
   })
 
-  // A key minted by hand for a canvas this session listens to would take the
-  // canvas over and stop that listener (the newest key wins): the mod answers.
-  // The mod's own mint is a tool call these hooks see too, raised under this
+  // A key the agent or another plugin mints by hand. For a canvas this session
+  // listens to it would take the canvas over and stop that listener (the
+  // newest key wins): the mod answers. For any other canvas it goes to the
+  // server under this machine's label, and the mod listens with it and
+  // answers in its place, so the key never reaches the conversation. The
+  // mod's own mint is a tool call these hooks see too, raised under this
   // plugin's name; it goes on to the server.
-  on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, ($, e, next) => {
+  on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, async ($, e, next) => {
     if (next.origin.plugin === $.plugin.name) return next(e)
-    const documentId = text((e as unknown as Record<string, unknown>).documentId)
-    if (!loops.has(documentId) && !arming.has(documentId)) return next(e)
-    const title = canvases.get(documentId)?.title || documentId
-    return {
-      deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
+    const input = e as unknown as Record<string, unknown>
+    const documentId = text(input.documentId)
+    if (loops.has(documentId) || arming.has(documentId)) {
+      const title = canvases.get(documentId)?.title || documentId
+      return {
+        deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
+      }
     }
+    if (!isDocumentId(documentId)) return next(e)
+    // The label is always this machine's, whatever the agent chose: `/unpaged:listen revoke all` knows this machine's keys by it.
+    const ran = await next({ ...e, label: await keyLabel($) } as typeof e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    const answer = ran as { text?: unknown; result?: unknown }
+    const found = extractMint(answer.text) ?? extractMint(answer.result)
+    return found ? listenWithAgentMint($, documentId, found) : ran
   })
 
   // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
