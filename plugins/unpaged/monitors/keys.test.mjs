@@ -34,27 +34,12 @@ const MINT = {
 const SCRIPT = fileURLToPath(new URL("./keys.mjs", import.meta.url));
 const HOOKS = fileURLToPath(new URL("../hooks/hooks.json", import.meta.url));
 
-test("the key-store hook fires for the Unpaged MCP server names only", () => {
+test("no settings hook runs Node: the listener inside Claude Code keeps the key itself", () => {
   const hooks = JSON.parse(readFileSync(HOOKS, "utf8"));
-  const entry = hooks.hooks.PostToolUse.find((e) => /agent_listener_key_create/.test(e.matcher));
-  assert.ok(entry, "hook entry present");
-  assert.match(entry.hooks[0].command, /keys\.mjs" hook$/);
-  const matcher = new RegExp(entry.matcher);
-  for (const name of [
-    "mcp__plugin_unpaged_unpaged__agent_listener_key_create",
-    "mcp__unpaged__agent_listener_key_create",
-    "mcp__unpaged-staging__agent_listener_key_create"
-  ]) {
-    assert.equal(matcher.test(name), true, name);
-  }
-  for (const name of [
-    "mcp__evil__agent_listener_key_create",
-    "mcp__evil_mcp__unpaged__agent_listener_key_create",
-    "mcp__unpaged__agent_listener_key_create_and_more",
-    "xmcp__unpaged__agent_listener_key_create",
-    "mcp__plugin_evil_unpaged__agent_listener_key_create"
-  ]) {
-    assert.equal(matcher.test(name), false, name);
+  const entries = Object.values(hooks.hooks).flat();
+  assert.equal(entries.some((e) => /agent_listener_key_create/.test(e.matcher)), false);
+  for (const entry of entries) {
+    for (const hook of entry.hooks) assert.doesNotMatch(hook.command, /\bnode\b/, hook.command);
   }
 });
 

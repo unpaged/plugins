@@ -4,6 +4,22 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-26
+
+### Changed
+
+- **Listening needs no permission rule** ([#38](https://github.com/unpaged/plugins/pull/38)). Auto mode refuses a key mint the plugin starts on its own unless a rule allows it, since no request of yours stands behind it, so on a fresh install nothing listened, not even when you asked. Where your rules do not allow the plugin's mint, it no longer tries: the agent offers to listen when it hands a canvas back, and on a yes, or when you ask it to listen, creates the key in its own turn, where auto mode sees your request. The plugin takes the key from that answer and listens, and the key never shows in the conversation. With the rules in the README's *Permissions* section, every canvas the session creates or changes is still listened to on its own.
+- **Listening needs no Node.** The listener inside Claude Code keeps its keys in the plugin's own store, a file Claude Code keeps for the plugin (mode 600), and runs no Node, so it works on a machine without it (a fresh Windows machine has none). Keys stored in `~/.claude/unpaged/listeners/` stay there for the Monitor that older Claude Code runs; the mod mints a fresh key in every session, as before. Its status file is gone.
+- A key the agent mints is labelled `claude-code on <host>` by the plugin, whatever label the agent chose, so `/unpaged:listen revoke all` finds it. The host comes from `hostname`, or `uname -n` where there is none.
+- A rule that denies `agent_listener_key_create` turns listening off: no offer, and `listen_arm` says why instead of asking the agent for a mint the rule refuses.
+- Where auto mode refuses the plugin's own revoke (no rule allows it), `/unpaged:listen revoke` has the agent revoke the key in its own turn, and the plugin forgets a key the agent revoked. Where the agent made the mint, it also revokes, in the same turn, the older key a re-arm replaces, so keys do not pile up toward the 20-key cap. `listen_status` prints this machine's key label and the keys the session could not revoke, and `listen_stop` names the ones it could not, so the agent can find them without Node. The plugin's messages no longer say a stop revokes the key.
+- `/unpaged:listen` with no argument lists the canvases the plugin stores keys for, this folder's first, through `listen_status`, and arms the ones you pick; the key-file helpers it ran before need Node and never see the plugin's keys.
+- `/unpaged-listen arm`, when the mint is refused, says to ask Claude to listen to the canvas instead.
+
+### Removed
+
+- The `PostToolUse` hook that ran `monitors/keys.mjs hook` after every `agent_listener_key_create`: it ran Node on every mint. On older Claude Code (the Monitor path) the agent stores the mint with `keys.mjs store`, the step the commands already named as the fallback.
+
 ## [1.9.0] - 2026-10-13
 
 ### Changed
@@ -218,7 +234,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0
 [1.9.0]: https://github.com/unpaged/plugins/releases/tag/v1.9.0
 [1.8.0]: https://github.com/unpaged/plugins/releases/tag/v1.8.0
 [unpaged-codex 0.8.0]: https://github.com/unpaged/plugins/releases/tag/codex-v0.8.0
