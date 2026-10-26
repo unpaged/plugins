@@ -484,7 +484,8 @@ async function startLoop($: Api, config: ListenerConfig) {
     .then(async (result: { reason?: string }) => {
       if (loops.get(documentId) === loop) loops.delete(documentId)
       record(documentId, { state: 'stopped', reason: result?.reason ?? 'stopped' })
-      await sync($)
+      // The band's view is advisory, and the module may be gone by now (a reload, a test's end).
+      await sync($).catch(() => undefined)
       settle('stopped')
       return result
     })
@@ -523,7 +524,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
       $.ui.toast(`Listening on ${name} with a new key; the key it replaced (${replaced}) is still live, though shut out of polling: ask Claude to revoke listener key ${replaced}, or revoke it in Unpaged. Listening goes on.`, { timeoutMs: 10000 })
-    })
+    }).catch(() => undefined)
   }
   canvases.set(documentId, {
     documentId,
@@ -794,7 +795,7 @@ export const register: Register = on => {
       $.ui.log(`command registration failed: ${String(err)}`, { to: 'debug' })
     }
     const started = await next(e)
-    void restoreAfterReload($)
+    void restoreAfterReload($).catch(() => undefined)
     return started
   })
 
