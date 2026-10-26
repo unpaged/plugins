@@ -110,7 +110,7 @@ describe('listen_arm', () => {
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT } as never)
     await until(() => w.calls.toasts.length > 0)
     expect(w.calls.toasts).toEqual([
-      `Listening on Plan canvas with a new key; the key it replaced (key-old) is still live, though shut out of polling. Unpaged revokes it, or /unpaged:listen revoke ${DOCUMENT}, which stops listening to Plan canvas too.`,
+      'Listening on Plan canvas with a new key; the key it replaced (key-old) is still live, though shut out of polling: ask Claude to revoke listener key key-old, or revoke it in Unpaged. Listening goes on.',
     ])
     expect(w.calls.armed[0]).toEqual(expect.objectContaining({ keyId: 'key-1' }))
     settings.revokeRefused = false
@@ -692,5 +692,31 @@ describe('where the permission rules keep the plugin from minting on its own', (
     const command = await $.command.run({ command: 'unpaged-listen', args: `arm ${SECOND}` } as never)
     expect(command.text).not.toContain('ask Claude')
     expect(w.calls.armed).toEqual([])
+  })
+
+  test("a re-arm with the agent's mint leaves the key it replaces to the agent, which revokes it in the same turn", async ($, on) => {
+    const w = world(on, { keyRule: 'ask' })
+    unpagedServer(on)
+    w.store.set(STORED, OLD_KEY)
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
+    const answer = JSON.stringify(await agentMint($))
+    expect(answer).toContain('Listening on Plan canvas')
+    expect(answer).toContain('revoke it now with agent_listener_key_revoke and keyId key-old')
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke')).toEqual([])
+    expect(w.calls.toasts).toEqual([])
+    expect(JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never))).toContain('keyId key-old')
+    await $.tool.call({ tool: `${UNPAGED}agent_listener_key_revoke`, keyId: 'key-old' } as never)
+    expect(JSON.stringify(await $.tool.call({ tool: 'mcp__unpaged__listen_status' } as never))).toContain('Keys this session could not revoke:\\nnone')
+    expect(w.store.get(STORED)).toEqual(expect.objectContaining({ keyId: 'key-by-hand' }))
+  })
+
+  test('where the rules let the plugin revoke, a re-arm with the agent\'s mint revokes the replaced key itself', async ($, on) => {
+    const w = world(on, { keyRule: 'ask', revokeRule: 'allow' })
+    unpagedServer(on)
+    w.store.set(STORED, OLD_KEY)
+    const answer = JSON.stringify(await agentMint($))
+    expect(answer).not.toContain('earlier key')
+    await until(() => w.calls.mcp.some(c => c.tool === 'agent_listener_key_revoke'))
+    expect(w.calls.mcp.filter(c => c.tool === 'agent_listener_key_revoke').map(c => c.args.keyId)).toEqual(['key-old'])
   })
 })

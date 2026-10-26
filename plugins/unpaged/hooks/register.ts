@@ -146,7 +146,8 @@ function forgetUnrevoked(documentId: string, keyId: string) {
   else unrevoked.delete(documentId)
 }
 
-type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
+/** `leftToAgent`: the key this arm replaced, left for the agent to revoke in the turn it minted in. */
+type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string; leftToAgent?: string }
 
 const boardUrlFor = (documentId: string) => `https://unpaged.io/document/${documentId}/edit`
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
@@ -504,17 +505,24 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   armedBefore.add(documentId)
   await update($, armedOnce, () => [...armedBefore])
   const previous = await loadConfig($, documentId)
+  const byAgent = agentMints.has(documentId)
   const config = await mint($, documentId)
   const name = title || config.title || previous?.title || documentId
   // The key this one replaces: the new key already shuts it out of polling, so
   // the arm does not wait on it; a revoke refused or failed is said, and kept
-  // for the canvas's next stop.
+  // for the canvas's next stop. Where the agent made the mint and the rules do
+  // not let the plugin revoke on its own (auto mode would refuse it), the
+  // agent revokes it in the same turn, and the revoke hook forgets it.
   const replaced = previous?.keyId && previous.keyId !== config.keyId ? previous.keyId : null
-  if (replaced) {
+  let leftToAgent: string | undefined
+  if (replaced && byAgent && (await ruleOn($, await mcpServer($), 'agent_listener_key_revoke', { keyId: replaced })) !== 'allow') {
+    rememberUnrevoked(documentId, replaced)
+    leftToAgent = replaced
+  } else if (replaced) {
     void revoke($, replaced).then(isRevoked => {
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
-      $.ui.toast(`Listening on ${name} with a new key; the key it replaced (${replaced}) is still live, though shut out of polling. Unpaged revokes it, or /unpaged:listen revoke ${documentId}, which stops listening to ${name} too.`, { timeoutMs: 10000 })
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced (${replaced}) is still live, though shut out of polling: ask Claude to revoke listener key ${replaced}, or revoke it in Unpaged. Listening goes on.`, { timeoutMs: 10000 })
     })
   }
   canvases.set(documentId, {
@@ -532,7 +540,7 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   const loop = await startLoop($, { ...config, title: name })
   // Say what is true: wait a bounded moment for the first poll before answering.
   const first = await Promise.race([loop.settled, new Promise<string>(resolve => $.clock.after(FIRST_POLL_WAIT_MS, () => resolve('pending')))])
-  return { already: false, canvas: canvases.get(documentId), first }
+  return { already: false, canvas: canvases.get(documentId), first, leftToAgent }
 }
 
 async function stop($: Api, documentId: string) {
@@ -645,7 +653,10 @@ async function listenWithAgentMint($: Api, documentId: string, found: unknown) {
       if (keyId && keyId !== result.canvas?.keyId) rememberUnrevoked(documentId, keyId)
       return { result: `Already listening: ${describe(result.canvas)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.` }
     }
-    return { result: `Listening on ${describe(result.canvas, result.first)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.` }
+    const earlier = result.leftToAgent
+      ? ` This canvas's earlier key (keyId ${result.leftToAgent}) is still live, though shut out of polling: revoke it now with agent_listener_key_revoke and keyId ${result.leftToAgent}; the plugin forgets it once it is revoked.`
+      : ''
+    return { result: `Listening on ${describe(result.canvas, result.first)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.${earlier}` }
   } catch (err) {
     agentMints.delete(documentId)
     if (keyId) rememberUnrevoked(documentId, keyId)
