@@ -112,8 +112,13 @@ export function world(
     return ok('', 127)
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
-  // The person's permission rules, as a query reads them: nothing runs.
+  // The person's permission rules, as a query reads them: nothing runs. A
+  // check that carries a tool_use_id is no query but the engine's gate on a
+  // call the test makes as the model (Claude Code 2.1.310's test kit asks it
+  // before the call runs; older ones do not): the person allows that call, as
+  // their answer to a dialog or auto mode would in a session.
   on('tool.check', (_$, e) => {
+    if ((e as { tool_use_id?: unknown }).tool_use_id !== undefined) return { decision: 'allow' }
     calls.checks.push(e.tool)
     if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
     if (e.tool === 'mcp__unpaged__agent_listener_key_create') return { decision: settings.keyRule ?? 'allow' }
