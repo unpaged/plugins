@@ -33,7 +33,6 @@ export function world(
   settings: {
     pages?: Page[]
     mintError?: boolean
-    openExit?: number
     hangPolls?: boolean
     holdMint?: boolean
     hangRevoke?: boolean
@@ -77,7 +76,6 @@ export function world(
     /** How many prompts had been submitted when each comment_reply reached the server. */
     submitsAtReply: [] as number[],
     toasts: [] as string[],
-    opened: [] as string[],
     /** The tools the plugin asked the permission rules about, by the name the rules use. */
     checks: [] as string[],
   }
@@ -109,11 +107,6 @@ export function world(
     const argv = [...e.argv]
     calls.process.push({ argv, stdin: e.init?.stdin })
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv[0] === 'open' || argv[0] === 'xdg-open') {
-      const exit = settings.openExit ?? 0
-      if (exit === 0) calls.opened.push(argv[1] ?? '')
-      return ok('', exit)
-    }
     if (argv[0] === 'hostname') return settings.noHostname ? ok('', 127) : ok('testbox.local\n')
     if (argv[0] === 'uname' && argv[1] === '-n') return ok('linuxbox\n')
     return ok('', 127)
