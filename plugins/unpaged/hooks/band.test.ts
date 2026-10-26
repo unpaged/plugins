@@ -51,26 +51,27 @@ describe('band', () => {
     await ui.unmount()
   })
 
-  test('a stop whose revoke is refused says the key is still live, from the band, the pane and stop all', async ($, on) => {
-    const w = world(on, { revokeRefused: true })
-    const live = (documentId: string, title: string) => `Stopped listening to ${title}; its key is still live: /unpaged:listen revoke ${documentId}`
+  test('a stop whose revoke is refused says the key is still live and to ask Claude, from the band, the pane and stop all', async ($, on) => {
+    // No rule allows the revoke, and auto mode refuses the plugin's own: the band still tries it, since the default mode asks.
+    const w = world(on, { revokeRule: 'ask', revokeRefused: true })
+    const live = (keyId: string, title: string) => `Stopped listening to ${title}; its key is still live (keyId ${keyId}): ask Claude to stop listening to ${title}, or revoke it in Unpaged.`
     await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Plan canvas' } as never)
     const one = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
     await one.press({ key: 'stop' })
     expect(w.calls.armed).toEqual([])
-    expect(w.calls.toasts).toEqual([live(DOCUMENT, 'Plan canvas')])
+    expect(w.calls.toasts).toEqual([live('key-1', 'Plan canvas')])
     await one.unmount()
     for (const documentId of [DOCUMENT, SECOND, THIRD]) {
       await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId } as never)
     }
     const pane = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'Pane', props: paneProps(), requestId: PANE })
     await pane.press({ key: `stop-${SECOND}` })
-    expect(w.calls.toasts.at(-1)).toBe(live(SECOND, 'Canvas 2222'))
+    expect(w.calls.toasts.at(-1)).toBe(live('key-22222222', 'Canvas 2222'))
     await pane.unmount()
     const band = await $.ui.mount({ plugin: 'unpaged', surface: 'terminal', component: 'AbovePrompt', props: bandProps() })
     await band.press({ key: 'stop-all' })
     expect(w.calls.armed).toEqual([])
-    expect(w.calls.toasts.slice(-2)).toEqual([live(DOCUMENT, 'Plan canvas'), live(THIRD, 'Canvas 3333')])
+    expect(w.calls.toasts.slice(-2)).toEqual([live('key-1', 'Plan canvas'), live('key-33333333', 'Canvas 3333')])
     await band.unmount()
   })
 
