@@ -4,6 +4,8 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-26
+
 ### Changed
 
 - **Stopping a listener revokes its key with no permission rule** ([#39](https://github.com/unpaged/plugins/pull/39)). When you ask Claude to stop listening and your rules do not allow the plugin's own revoke, which auto mode refuses, the plugin no longer tries and then reports the key still live: it stops listening and has the agent revoke the key by its id in the same turn, where auto mode sees your request, and forgets the key once it is revoked. A key id names a key; it is not the key. Where a rule denies `agent_listener_key_revoke`, `listen_stop` says the key stays live instead of asking for a revoke the rule refuses. With the rules in the README's *Permissions* section the plugin revokes on its own, as before.
@@ -239,7 +241,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
 [1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0
 [1.9.0]: https://github.com/unpaged/plugins/releases/tag/v1.9.0
 [1.8.0]: https://github.com/unpaged/plugins/releases/tag/v1.8.0
