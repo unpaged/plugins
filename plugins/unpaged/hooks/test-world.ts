@@ -10,8 +10,8 @@ export const SECOND = '22222222-2222-4222-8222-222222222222'
 export const THIRD = '33333333-3333-4333-8333-333333333333'
 export const KEY = 'k'.repeat(43)
 export const POLL_URL = 'https://mcp.unpaged.io/events/poll'
-export const keyFileFor = (documentId: string) => `/home/t/.claude/unpaged/listeners/${documentId}.json`
-export const statusFileFor = (documentId: string) => `/home/t/.claude/unpaged/monitors/${documentId}.json`
+/** Where the plugin keeps a canvas's key in its store. */
+export const storedKeyFor = (documentId: string) => `listener:${documentId}`
 export const keyIdFor = (documentId: string) => (documentId === DOCUMENT ? 'key-1' : `key-${documentId.slice(0, 8)}`)
 export const titleFor = (documentId: string) => (documentId === DOCUMENT ? 'Plan canvas' : `Canvas ${documentId.slice(0, 4)}`)
 
@@ -33,7 +33,6 @@ export function world(
   settings: {
     pages?: Page[]
     mintError?: boolean
-    openExit?: number
     hangPolls?: boolean
     holdMint?: boolean
     hangRevoke?: boolean
@@ -43,12 +42,29 @@ export function world(
     ack?: 'posted' | 'refused' | 'hang'
     /** The person's permission rules on comment_reply, as `$.tool.check` reads them: allowed (the default) or not. */
     replyRule?: 'allow' | 'ask' | 'deny'
+    /** The rules on agent_listener_key_create: allowed (the default) lets the plugin mint on its own. */
+    keyRule?: 'allow' | 'ask' | 'deny'
+    /** The rules on agent_listener_key_revoke: allowed (the default) lets the plugin revoke on its own; otherwise a stop the agent makes, or a replaced key where it minted, is left to the agent. */
+    revokeRule?: 'allow' | 'ask' | 'deny'
+    /** No `hostname` program, as on some Linux images: `uname -n` answers instead. */
+    noHostname?: boolean
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on)
-  mock.env(on, { HOME: '/home/t' })
+  mock.env(on, {})
   const files = new Map<string, string>()
+  // The plugin's own store, as the engine keeps it between sessions.
+  const store = new Map<string, unknown>()
+  on('store.get', (_$, e) => ({ value: store.has(e.key) ? JSON.parse(JSON.stringify(store.get(e.key))) : undefined }))
+  on('store.set', (_$, e) => {
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('store.delete', (_$, e) => {
+    store.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
   const calls = {
     armed: [] as Array<Record<string, unknown>>,
     replying: [] as string[],
@@ -60,7 +76,6 @@ export function world(
     /** How many prompts had been submitted when each comment_reply reached the server. */
     submitsAtReply: [] as number[],
     toasts: [] as string[],
-    opened: [] as string[],
     /** The tools the plugin asked the permission rules about, by the name the rules use. */
     checks: [] as string[],
   }
@@ -92,53 +107,22 @@ export function world(
     const argv = [...e.argv]
     calls.process.push({ argv, stdin: e.init?.stdin })
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv[0] === 'open' || argv[0] === 'xdg-open') {
-      const exit = settings.openExit ?? 0
-      if (exit === 0) calls.opened.push(argv[1] ?? '')
-      return ok('', exit)
-    }
-    const verb = argv[2]
-    const id = argv[3] ?? ''
-    if (verb === 'check') return ok(`${files.has(keyFileFor(id)) ? `armed ${keyIdFor(id)}` : 'missing'}\nhost testbox\n`)
-    if (verb === 'store') {
-      files.set(keyFileFor(id), e.init?.stdin ?? '')
-      return ok(`stored ${keyIdFor(id)}\n`)
-    }
-    if (verb === 'retire') {
-      // The script's rule: the file goes only if it still holds the key being retired.
-      const stored = files.get(keyFileFor(id))
-      if (!stored) return ok('absent\n')
-      const current = JSON.parse(stored) as { key?: string; keyId?: string }
-      const given = e.init?.stdin ? (JSON.parse(e.init.stdin) as { key?: string }) : null
-      const keyId = argv[4]
-      if (!given && !keyId) return ok('unmatched\n')
-      const same = given ? given.key === current.key : current.keyId === keyId
-      if (!same) return ok('kept-newer\n')
-      files.delete(keyFileFor(id))
-      return ok('removed\n')
-    }
-    if (verb === 'status') {
-      files.set(statusFileFor(id), JSON.stringify({ ...(JSON.parse(e.init?.stdin ?? '{}') as object), pid: 0, transport: 'mod-v1' }))
-      return ok('written\n')
-    }
-    if (verb === 'forget') {
-      files.delete(keyFileFor(id))
-      return ok('forgotten 1\n')
-    }
-    if (verb === 'list') {
-      const rows = [...files.keys()]
-        .filter(p => p.includes('/listeners/'))
-        .map(p => p.slice(p.lastIndexOf('/') + 1, -5))
-        .map(doc => `${doc}\tthis-folder\t2026-10-02\t${titleFor(doc)}\t${keyIdFor(doc)}`)
-      return ok(rows.length ? `${rows.join('\n')}\n` : 'none\n')
-    }
-    return ok('')
+    if (argv[0] === 'hostname') return settings.noHostname ? ok('', 127) : ok('testbox.local\n')
+    if (argv[0] === 'uname' && argv[1] === '-n') return ok('linuxbox\n')
+    return ok('', 127)
   })
   on('mcp.connect', () => ({ value: { isConnected: true, server: 'unpaged' } }))
-  // The person's permission rules, as a query reads them: nothing runs.
+  // The person's permission rules, as a query reads them: nothing runs. A
+  // check that carries a tool_use_id is no query but the engine's gate on a
+  // call the test makes as the model (Claude Code 2.1.310's test kit asks it
+  // before the call runs; older ones do not): the person allows that call, as
+  // their answer to a dialog or auto mode would in a session.
   on('tool.check', (_$, e) => {
+    if ((e as { tool_use_id?: unknown }).tool_use_id !== undefined) return { decision: 'allow' }
     calls.checks.push(e.tool)
     if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
+    if (e.tool === 'mcp__unpaged__agent_listener_key_create') return { decision: settings.keyRule ?? 'allow' }
+    if (e.tool === 'mcp__unpaged__agent_listener_key_revoke') return { decision: settings.revokeRule ?? 'allow' }
     return { decision: 'ask' }
   })
   // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
@@ -193,7 +177,7 @@ export function world(
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, calls, files, startTurn, releaseMint: () => releaseMint() }
+  return { clock, calls, files, store, startTurn, releaseMint: () => releaseMint() }
 }
 
 /**
@@ -201,19 +185,20 @@ export function world(
  * as core does: the tool's record (its content blocks) and, as `text`, the
  * JSON the model reads. Returns the tools it was called with, in order.
  */
-export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string } = {}) {
+export function unpagedServer(on: On, settings: { refuse?: string[]; cloneText?: string; mintFor?: string; inputs?: Array<Record<string, unknown>> } = {}) {
   const called: string[] = []
   on('tool.call', { tool: /^mcp__(plugin_unpaged_unpaged|unpaged)__(?!listen_)/ }, (_$, e) => {
     const tool = String(e.tool)
     const name = tool.slice(tool.lastIndexOf('__') + 2)
     const args = e as unknown as Record<string, unknown>
     called.push(name)
+    settings.inputs?.push(args)
     const answer = (value: unknown, text = JSON.stringify(value, null, 2)) =>
       ({ result: [{ type: 'text', text: JSON.stringify(value) }], text }) as never
     if (settings.refuse?.includes(name)) return { isError: true, result: 'Error: refused', text: 'Error: refused' } as never
     if (name === 'document_create') return answer({ id: SECOND, title: args.title, rootNodeId: 'root-2', url: `https://unpaged.io/document/${SECOND}/edit` })
     if (name === 'template_clone') return answer({ id: THIRD, title: args.title ?? 'From the gallery', nodes: [{ id: 'root-3', elements: [] }] }, settings.cloneText)
-    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: args.documentId, keyId: 'key-by-hand', title: 'By hand' })
+    if (name === 'agent_listener_key_create') return answer({ pollUrl: POLL_URL, key: KEY, documentId: settings.mintFor ?? args.documentId, keyId: 'key-by-hand', title: 'By hand' })
     return answer({ ok: true })
   })
   return called

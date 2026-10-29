@@ -4,18 +4,28 @@
 // starts one reply turn through a submitted prompt. An @agent comment gets an
 // "On it…" reply on its thread before that turn starts, where the person's
 // permission rules let the plugin post it. No model step is needed to listen,
-// and the key never enters the model's context: it is read from the key file,
-// sent in a request header, and never logged or shown.
+// and the key never enters the model's context: it is kept in the plugin's
+// own store (Claude Code's file for this plugin), sent in a request header,
+// and never logged or shown. Nothing here runs Node: the key files and the
+// key script under monitors/ belong to the Monitor that older clients run.
 //
 // The mod grants itself no permission: its own calls of the Unpaged tools (the
 // key mint and revoke, "On it…") and the model's calls of its three tools go
-// through the person's own permission rules, as any tool call does.
+// through the person's own permission rules, as any tool call does. A mint
+// or revoke the plugin starts has no request of the person's behind it, so
+// auto mode gives it no verdict and refuses it unless a rule allows it. Where
+// no rule does, the agent mints in its own turn, where auto mode sees what
+// the person asked, and the mod listens with that key and answers in its
+// place; a stop the agent makes leaves the revoke to the agent the same way,
+// and the mod forgets the key once the agent has revoked it.
 //
 // A canvas the session creates or changes through the Unpaged tools is armed
-// on its own, the moment the call succeeds, once per canvas per session: a
-// stop, a takeover by another session or a refused mint stays as it is
-// until someone arms that canvas by hand. A canvas deleted through those
-// tools stops being listened to.
+// on its own, the moment the call succeeds, once per canvas per session,
+// where the rules let the plugin mint; elsewhere the agent is told, once per
+// canvas, to offer listening when it hands the canvas back. A stop, a
+// takeover by another session or a refused mint stays as it is until
+// someone arms that canvas by hand. A canvas deleted through those tools
+// stops being listened to.
 //
 // The loop itself is monitors/listen-loop.mjs, shared with the Monitor
 // script that older clients keep using; this file is its host.
@@ -24,14 +34,12 @@ import type { Register } from 'claude-code'
 import type { ArmedCanvas } from '../types'
 import {
   ACK_TEXT,
-  KEY_DIR_RELATIVE,
   PROTOCOL_PREAMBLE,
-  STATUS_DIR_RELATIVE,
   extractMint,
   isDocumentId,
-  keyFileFor,
   listenerConfigFromMint,
   parseListenerConfig,
+  sameListenerConfig,
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
@@ -114,13 +122,19 @@ const arming = new Map<string, Promise<ArmResult>>()
 const armedBefore = new Set<string>()
 /** Event ids answered with "On it…", oldest first. */
 const ackedEvents = new Set<string>()
+/** Canvases whose mint the rules do not leave to the plugin: the agent was told once to offer listening (nothing, where the rules deny the mint). */
+const offered = new Set<string>()
+/** Keys the agent minted in its own turn, by canvas: the arm that follows keeps that key instead of minting another. */
+const agentMints = new Map<string, unknown>()
+/** Titles listen_arm was given for a canvas whose key it left to the agent, for the band once the agent mints. */
+const titlesAsked = new Map<string, string>()
 /**
- * Keys a stop or an arm could not revoke (refused or failed), by canvas: the
- * next stop of that canvas in this module's life revokes them with its own.
- * Past a reload or the session, the key file a refused stop left is what
- * `/unpaged:listen revoke` finds its key by; a key an arm replaced has no file
- * any longer, and only `/unpaged:listen revoke all` (by this machine's label)
- * or Unpaged reaches it then. The newer key already shuts it out of polling.
+ * Keys a stop or an arm could not revoke (refused or failed) or left to the
+ * agent, by canvas: the next stop of that canvas in this module's life
+ * revokes them with its own, and the agent's own revoke of one forgets it.
+ * Past a reload or the session, `/unpaged:listen revoke` finds them on the
+ * server by this machine's label, and Unpaged lists them too. The newer key
+ * already shuts a replaced one out of polling.
  */
 const unrevoked = new Map<string, string[]>()
 
@@ -135,32 +149,61 @@ function forgetUnrevoked(documentId: string, keyId: string) {
   else unrevoked.delete(documentId)
 }
 
-type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string }
+/** `leftToAgent`: the key this arm replaced, left for the agent to revoke in the turn it minted in. */
+type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string; leftToAgent?: string }
 
 const boardUrlFor = (documentId: string) => `https://unpaged.io/document/${documentId}/edit`
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
-async function paths($: Api) {
-  const home = (await $.env.get('HOME')) ?? ''
-  return {
-    keyDir: `${home}/${KEY_DIR_RELATIVE}`,
-    statusDir: `${home}/${STATUS_DIR_RELATIVE}`,
-    keys: `${$.plugin.root}/monitors/keys.mjs`,
-  }
-}
-
-async function keysVerb($: Api, verb: string, args: string[], stdin?: string) {
-  const { keys } = await paths($)
-  const ran = await $.process.run(['node', keys, verb, ...args], stdin === undefined ? undefined : { stdin })
-  return { exitCode: ran.exitCode, lines: ran.stdout.split('\n').map(l => l.trim()).filter(Boolean) }
-}
+/**
+ * A canvas's key in the plugin's store, one entry per canvas. Claude Code
+ * keeps that store in a file of the plugin's own under its configuration
+ * directory (mode 600), shared by this machine's sessions and kept between
+ * them, so an arm can revoke the key an earlier session stored.
+ */
+const STORED_KEY = 'listener:'
+const storedKeyFor = (documentId: string) => `${STORED_KEY}${documentId}`
 
 async function loadConfig($: Api, documentId: string): Promise<ListenerConfig | null> {
-  const { keyDir } = await paths($)
-  const file = keyFileFor(keyDir, documentId)
-  if (!file || !(await $.fs.exists(file))) return null
-  const config = parseListenerConfig(await $.fs.read(file)) as ListenerConfig | null
+  if (!isDocumentId(documentId)) return null
+  const stored = await $.store.get(storedKeyFor(documentId))
+  if (stored === undefined) return null
+  const config = parseListenerConfig(JSON.stringify(stored)) as ListenerConfig | null
   return config && config.documentId === documentId ? config : null
+}
+
+/**
+ * Forgets a canvas's stored key only if it is still the one `matches`
+ * names: another session may have stored a newer key for the canvas. The
+ * store has no compare-and-delete, so a newer key stored between the read
+ * and the delete is lost to that session's reload and next arm; its
+ * listener goes on polling from memory.
+ */
+async function retireStored($: Api, documentId: string, matches: (stored: ListenerConfig) => boolean) {
+  const stored = await loadConfig($, documentId)
+  if (!stored) return 'absent'
+  if (!matches(stored)) return 'kept-newer'
+  await $.store.delete(storedKeyFor(documentId))
+  return 'removed'
+}
+
+let hostName: string | null = null
+
+/** The host up to its first dot, from a run that exited 0, else null. */
+const shortHost = (ran: { exitCode: number; stdout: string } | null) => (ran?.exitCode === 0 ? ran.stdout.trim().split('.')[0] : '') || null
+
+/**
+ * The label a key is minted with, `claude-code on <host>`: `/unpaged:listen
+ * revoke all` knows this machine's keys by it. The host is what `hostname`
+ * prints (macOS, Windows and most Linux), else `uname -n` (some Linux images
+ * ship no `hostname`), up to its first dot: the name Node's `os.hostname()`
+ * gives the Monitor path's key script. Each command is written whole at its
+ * call, so the plugin directory reads what runs off the source.
+ */
+async function keyLabel($: Api) {
+  if (!hostName) hostName = shortHost(await $.process.run(['hostname'], { timeoutMs: 5000 }).catch(() => null))
+  if (!hostName) hostName = shortHost(await $.process.run(['uname', '-n'], { timeoutMs: 5000 }).catch(() => null))
+  return `claude-code on ${hostName ?? 'this machine'}`
 }
 
 async function mcpServer($: Api) {
@@ -182,10 +225,16 @@ const ruleName = (server: string, tool: string) => `mcp__${server.replace(/[^A-Z
  * mod's own calls of MCP tools go through those rules either way.
  */
 async function isAllowed($: Api, server: string, tool: string, input: Record<string, unknown>) {
+  return (await ruleOn($, server, tool, input)) === 'allow'
+}
+
+/** The rules' answer for `tool`, asked the same way: `allow`, `deny`, or `ask` for anything else (no rule, or no answer). */
+async function ruleOn($: Api, server: string, tool: string, input: Record<string, unknown>): Promise<'allow' | 'deny' | 'ask'> {
   try {
-    return (await $.tool.check({ tool: ruleName(server, tool), input })).decision === 'allow'
+    const decision = (await $.tool.check({ tool: ruleName(server, tool), input })).decision
+    return decision === 'allow' || decision === 'deny' ? decision : 'ask'
   } catch {
-    return false
+    return 'ask'
   }
 }
 
@@ -194,22 +243,45 @@ function mcpText(result: { content?: Array<{ type?: string; text?: string }>; st
   return block?.text ?? (result.structuredContent === undefined ? '' : JSON.stringify(result.structuredContent))
 }
 
-/** Mints a fresh key for the canvas and stores it through the key helper (tmp + rename, mode 600). */
+/**
+ * The person's permission rules on a canvas's key mint, asked without minting,
+ * so no dialog opens and no classifier runs: `allow` lets the plugin mint on
+ * its own, `deny` lets nobody mint, and `ask` leaves the mint to the agent.
+ */
+async function mintRule($: Api, documentId: string) {
+  return ruleOn($, await mcpServer($), 'agent_listener_key_create', { documentId, label: await keyLabel($) })
+}
+
+/** The rules on a key's revoke, asked as the mint's are: `allow` lets the plugin revoke on its own, `deny` lets nobody, `ask` leaves it to the agent. */
+async function revokeRule($: Api, keyId: string) {
+  return ruleOn($, await mcpServer($), 'agent_listener_key_revoke', { keyId })
+}
+
+/** Mints a fresh key for the canvas, or takes the one the agent just minted, and keeps it in the plugin's store. */
 async function mint($: Api, documentId: string): Promise<ListenerConfig> {
+  const given = agentMints.get(documentId)
+  if (given !== undefined) {
+    agentMints.delete(documentId)
+    return storeMint($, documentId, given)
+  }
   const server = await mcpServer($)
-  const host = (await keysVerb($, 'check', [documentId])).lines.find(l => l.startsWith('host '))?.slice(5) ?? 'this machine'
   const result = (await $.mcp.call(server, 'agent_listener_key_create', {
     documentId,
-    label: `claude-code on ${host}`,
+    label: await keyLabel($),
   })) as { content?: Array<{ type?: string; text?: string }>; isError?: boolean; structuredContent?: unknown }
   const body = mcpText(result)
   if (result.isError) throw new Error(`the server refused to mint a listener key: ${body.slice(0, 200)}`)
   const found = extractMint(result.structuredContent ?? body)
   if (!found) throw new Error('the mint result carried no listener key')
-  const stored = await keysVerb($, 'store', [documentId], JSON.stringify(found))
-  if (!stored.lines.some(l => l.startsWith('stored '))) throw new Error('the key helper could not store the key')
+  return storeMint($, documentId, found)
+}
+
+/** Keeps a mint in the plugin's store, under the canvas it was asked for and only that one. */
+async function storeMint($: Api, documentId: string, found: unknown): Promise<ListenerConfig> {
   const config = listenerConfigFromMint(found, { cwd: await $.session.cwd(), createdAt: new Date().toISOString() }) as ListenerConfig | null
-  if (!config) throw new Error('the stored key does not parse as a listener config')
+  if (!config) throw new Error('the mint result is not a valid listener config (it must name an Unpaged HTTPS polling endpoint)')
+  if (config.documentId !== documentId) throw new Error(`the mint is for canvas ${config.documentId}, not ${documentId}`)
+  await $.store.set(storedKeyFor(documentId), config)
   return config
 }
 
@@ -388,25 +460,6 @@ function sayWith($: Api, documentId: string) {
   }
 }
 
-/** The status file, written by the key script the way the Monitor writes its own (tmp + rename, mode 600). */
-async function writeStatus($: Api, documentId: string, state: string, reason: string | null, lastSuccessfulPollAt: string | null) {
-  try {
-    await keysVerb(
-      $,
-      'status',
-      [documentId],
-      JSON.stringify({ state, reason, script: null, documentId, sessionId: await $.session.id(), lastSuccessfulPollAt }),
-    )
-  } catch {
-    // Advisory state: a missed write costs one "unverified" status line, nothing more.
-  }
-}
-
-/** Retires the key file only if it still holds `config`'s key: the Monitor's own rule, through the key script. */
-async function retireKeyFile($: Api, config: ListenerConfig) {
-  return (await keysVerb($, 'retire', [config.documentId], JSON.stringify(config))).lines[0] ?? 'absent'
-}
-
 /** Starts the loop for a stored key. The caller has already recorded the canvas. */
 async function startLoop($: Api, config: ListenerConfig) {
   const { documentId } = config
@@ -417,11 +470,10 @@ async function startLoop($: Api, config: ListenerConfig) {
   })
   const loop: Loop = { config, controller, done: Promise.resolve(), pending: [], pendingEvents: 0, acks: [], ackThreads: new Set(), flush: null, settled }
   loops.set(documentId, loop)
-  const reportStatus = async (state: string, reason: string | null | undefined, metadata: { lastSuccessfulPollAt?: string | null }) => {
+  const reportStatus = async (state: string, reason: string | null | undefined) => {
     const known = state === 'connecting' || state === 'connected' || state === 'reconnecting' || state === 'stopped' ? state : 'reconnecting'
     record(documentId, { state: known, reason: reason ?? null })
     await sync($)
-    await writeStatus($, documentId, state, reason ?? null, metadata?.lastSuccessfulPollAt ?? null)
     if (state !== 'connecting') settle(state)
   }
   loop.done = runListener(config, {
@@ -430,14 +482,15 @@ async function startLoop($: Api, config: ListenerConfig) {
     say: sayWith($, documentId),
     now: () => Date.now(),
     reportStatus,
-    retireKey: () => retireKeyFile($, config),
+    retireKey: () => retireStored($, documentId, stored => sameListenerConfig(stored, config)),
     signal: controller.signal,
   })
     .catch(() => ({ reason: 'failed' }))
     .then(async (result: { reason?: string }) => {
       if (loops.get(documentId) === loop) loops.delete(documentId)
       record(documentId, { state: 'stopped', reason: result?.reason ?? 'stopped' })
-      await sync($)
+      // The band's view is advisory, and the module may be gone by now (a reload, a test's end).
+      await sync($).catch(() => undefined)
       settle('stopped')
       return result
     })
@@ -458,18 +511,25 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   armedBefore.add(documentId)
   await update($, armedOnce, () => [...armedBefore])
   const previous = await loadConfig($, documentId)
+  const byAgent = agentMints.has(documentId)
   const config = await mint($, documentId)
   const name = title || config.title || previous?.title || documentId
   // The key this one replaces: the new key already shuts it out of polling, so
   // the arm does not wait on it; a revoke refused or failed is said, and kept
-  // for the canvas's next stop.
+  // for the canvas's next stop. Where the agent made the mint and the rules do
+  // not let the plugin revoke on its own (auto mode would refuse it), the
+  // agent revokes it in the same turn, and the revoke hook forgets it.
   const replaced = previous?.keyId && previous.keyId !== config.keyId ? previous.keyId : null
-  if (replaced) {
+  let leftToAgent: string | undefined
+  if (replaced && byAgent && (await revokeRule($, replaced)) !== 'allow') {
+    rememberUnrevoked(documentId, replaced)
+    leftToAgent = replaced
+  } else if (replaced) {
     void revoke($, replaced).then(isRevoked => {
       if (isRevoked) return forgetUnrevoked(documentId, replaced)
       rememberUnrevoked(documentId, replaced)
-      $.ui.toast(`Listening on ${name} with a new key; the key it replaced is still live. Stopping the canvas in this session revokes it too; later, /unpaged:listen revoke all or Unpaged does.`, { timeoutMs: 10000 })
-    })
+      $.ui.toast(`Listening on ${name} with a new key; the key it replaced (${replaced}) is still live, though shut out of polling: ask Claude to revoke listener key ${replaced}, or revoke it in Unpaged. Listening goes on.`, { timeoutMs: 10000 })
+    }).catch(() => undefined)
   }
   canvases.set(documentId, {
     documentId,
@@ -486,10 +546,17 @@ async function armNow($: Api, documentId: string, title: string | null): Promise
   const loop = await startLoop($, { ...config, title: name })
   // Say what is true: wait a bounded moment for the first poll before answering.
   const first = await Promise.race([loop.settled, new Promise<string>(resolve => $.clock.after(FIRST_POLL_WAIT_MS, () => resolve('pending')))])
-  return { already: false, canvas: canvases.get(documentId), first }
+  return { already: false, canvas: canvases.get(documentId), first, leftToAgent }
 }
 
-async function stop($: Api, documentId: string) {
+/**
+ * Stops listening to a canvas and revokes its key, with the older keys this
+ * session could not revoke. With `leaveToAgent`, for a stop the agent makes in
+ * its turn, a key whose revoke the rules do not leave to the plugin is not
+ * tried: it is kept as unrevoked, in `toAgent` where the agent may revoke it
+ * (auto mode would refuse the plugin's own) and in `denied` where nobody may.
+ */
+async function stop($: Api, documentId: string, { leaveToAgent = false } = {}) {
   const loop = loops.get(documentId)
   const canvas = canvases.get(documentId)
   if (loop) {
@@ -503,20 +570,48 @@ async function stop($: Api, documentId: string) {
   const current = rejected ? null : (loop?.config.keyId ?? canvas?.keyId ?? null)
   const keyIds = [...new Set([current, ...(unrevoked.get(documentId) ?? [])])].filter((id): id is string => Boolean(id))
   unrevoked.delete(documentId)
+  const toAgent: string[] = []
+  const denied: string[] = []
   for (const keyId of keyIds) {
+    const rule = leaveToAgent ? await revokeRule($, keyId) : 'allow'
+    if (rule !== 'allow') {
+      rememberUnrevoked(documentId, keyId)
+      if (rule === 'deny') denied.push(keyId)
+      else toAgent.push(keyId)
+      continue
+    }
     if (!(await revoke($, keyId))) {
       rememberUnrevoked(documentId, keyId)
       continue
     }
-    // The file goes only if it still holds the key just revoked: another session
-    // may have re-armed the canvas and stored a newer key under the same name.
-    if (loop && keyId === loop.config.keyId) await retireKeyFile($, loop.config)
-    else await keysVerb($, 'retire', [documentId, keyId], '')
+    // The stored key goes only if it is still the one just revoked: another
+    // session may have re-armed the canvas and stored a newer key for it.
+    const config = loop && keyId === loop.config.keyId ? loop.config : null
+    await retireStored($, documentId, stored => (config ? sameListenerConfig(stored, config) : stored.keyId === keyId))
   }
   canvases.delete(documentId)
   await sync($)
   const left = unrevoked.get(documentId) ?? []
-  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null }
+  return { title: canvas?.title ?? documentId, revoked: keyIds.length > 0 && left.length === 0, keyId: left[0] ?? keyIds[0] ?? null, left, toAgent, denied }
+}
+
+/**
+ * Forgets a key the agent revoked in its own turn (as `/unpaged:listen revoke`
+ * has it do where auto mode refuses the plugin's revoke): on every canvas that
+ * kept it unrevoked, and in the store, on whichever canvas still holds it, so
+ * no later arm or status takes it for live.
+ */
+async function forgetRevoked($: Api, keyId: string) {
+  if (!keyId) return
+  for (const [documentId, ids] of [...unrevoked]) if (ids.includes(keyId)) forgetUnrevoked(documentId, keyId)
+  for (const name of await $.store.keys()) {
+    if (name.startsWith(STORED_KEY)) await retireStored($, name.slice(STORED_KEY.length), stored => stored.keyId === keyId)
+  }
+}
+
+/** What a stop with no turn of the agent's says of a key it could not revoke: asking Claude to stop listening has the agent revoke it. */
+function stillLive(result: { title: string; left: string[] }) {
+  return `its key is still live (keyId ${result.left.join(', ')}): ask Claude to stop listening to ${result.title}, or revoke it in Unpaged.`
 }
 
 /**
@@ -527,7 +622,7 @@ async function stop($: Api, documentId: string) {
 async function stopAndSay($: Api, documentId: string) {
   const result = await stop($, documentId)
   if (!result.revoked && result.keyId) {
-    $.ui.toast(`Stopped listening to ${result.title}; its key is still live: /unpaged:listen revoke ${documentId}`, { timeoutMs: 10000 })
+    $.ui.toast(`Stopped listening to ${result.title}; ${stillLive(result)}`, { timeoutMs: 10000 })
   }
   return result
 }
@@ -554,6 +649,60 @@ function createdDocument(value: unknown): { id: string; title: string } | null {
   return isDocumentId(record.id) ? { id: String(record.id), title: text(record.title) } : null
 }
 
+/** What the agent reads, once per canvas, where the rules keep the plugin from minting the canvas's key on its own. */
+function offerLine(documentId: string, title: string | null) {
+  const name = title ? `"${title}"` : 'this whiteboard'
+  return `The unpaged plugin can bring @agent comments on ${name} into this session while you work, but the person's permission rules do not let it create the listener key on its own. When you hand the whiteboard back, offer that in one short question. Only if they say yes, call agent_listener_key_create with documentId ${documentId}: the plugin keeps the key out of this conversation and starts listening.`
+}
+
+/** What listen_arm answers where the rules deny the mint to everyone. */
+const MINT_DENIED = "Push is not armed: the person's permission rules deny agent_listener_key_create, so no listener key can be created for this canvas, by the plugin or by you. Do not call it; say that listening needs that rule lifted."
+
+/** What listen_arm answers where the rules keep the plugin from minting: the agent mints in its turn. */
+function mintYourselfLine(documentId: string) {
+  return `Not listening yet: the person's permission rules do not let the plugin create this canvas's listener key on its own. Call agent_listener_key_create with documentId ${documentId} now; the plugin takes the key from its answer and starts listening, and the key never reaches you.`
+}
+
+/** What listen_stop adds where the rules keep the plugin from revoking: the agent revokes in its turn. */
+function revokeYourselfLine(keyIds: string[]) {
+  return ` Its listener key is still live: the person's permission rules do not let the plugin revoke it on its own. Revoke it now with agent_listener_key_revoke and keyId ${keyIds.join(', then keyId ')}; the plugin forgets it once it is revoked.`
+}
+
+/** What listen_stop adds where the rules deny the revoke to everyone. */
+function revokeDeniedLine(keyIds: string[]) {
+  return ` Its listener key is still live (keyId ${keyIds.join(', ')}): the person's permission rules deny agent_listener_key_revoke, so neither the plugin nor you can revoke it. Do not call it; say that it can be revoked in Unpaged, or once that rule is lifted.`
+}
+
+/**
+ * Listens with a key the agent minted in its own turn and answers in the
+ * mint's place, so the key never reaches the conversation. A key that turns
+ * out not to be needed (the canvas was armed meanwhile) or that could not be
+ * listened with is revoked by the canvas's next stop.
+ */
+async function listenWithAgentMint($: Api, documentId: string, found: unknown) {
+  const keyId = text((found as { keyId?: unknown } | null)?.keyId) || null
+  agentMints.set(documentId, found)
+  try {
+    const result = await arm($, documentId, titlesAsked.get(documentId) ?? null)
+    titlesAsked.delete(documentId)
+    if (result.already) {
+      agentMints.delete(documentId)
+      if (keyId && keyId !== result.canvas?.keyId) rememberUnrevoked(documentId, keyId)
+      return { result: `Already listening: ${describe(result.canvas)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.` }
+    }
+    const earlier = result.leftToAgent
+      ? ` This canvas's earlier key (keyId ${result.leftToAgent}) is still live, though shut out of polling: revoke it now with agent_listener_key_revoke and keyId ${result.leftToAgent}; the plugin forgets it once it is revoked.`
+      : ''
+    return { result: `Listening on ${describe(result.canvas, result.first)}. The unpaged plugin keeps the key out of this conversation; new @agent comments arrive as a message from it. Never repeat key material.${earlier}` }
+  } catch (err) {
+    agentMints.delete(documentId)
+    if (keyId) rememberUnrevoked(documentId, keyId)
+    return {
+      result: `The listener key was created but listening did not start: ${String((err as Error)?.message ?? err)}. The key stays out of this conversation; /unpaged:listen revoke ${documentId} revokes it${keyId ? ` (keyId ${keyId})` : ''}.`,
+    }
+  }
+}
+
 /** Arms a canvas the session just made or changed, unless this session has armed it before. */
 function armOnItsOwn($: Api, documentId: string, title: string | null) {
   if (!isDocumentId(documentId) || armedBefore.has(documentId) || arming.has(documentId) || loops.has(documentId)) return
@@ -567,20 +716,8 @@ const timeLabel = (at: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Opens the canvas in the browser: macOS `open`, then `xdg-open`, else the link as a toast. */
-async function openCanvas($: Api, documentId: string) {
-  const canvas = canvases.get(documentId)
-  if (!canvas) return
-  record(documentId, { unread: 0 })
-  await sync($)
-  for (const argv of [['open', canvas.boardUrl], ['xdg-open', canvas.boardUrl]]) {
-    try {
-      const ran = await $.process.run(argv, { timeoutMs: 10000 })
-      if (ran.exitCode === 0) return
-    } catch {
-      // try the next opener
-    }
-  }
+/** The canvas's address whole, as a toast: a terminal that draws no links cuts it on the band. */
+function showLink($: Api, canvas: ArmedCanvas) {
   $.ui.toast(canvas.boardUrl, { timeoutMs: 10000 })
 }
 
@@ -612,10 +749,21 @@ function describe(canvas: ArmedCanvas | undefined, first?: string) {
 
 async function statusText($: Api) {
   const lines = [...canvases.values()].map(c => describe(c))
-  const files = await keysVerb($, 'list', [])
+  const stored: string[] = []
+  const cwd = await $.session.cwd()
+  for (const name of await $.store.keys()) {
+    if (!name.startsWith(STORED_KEY)) continue
+    const config = await loadConfig($, name.slice(STORED_KEY.length))
+    // Which folder armed it, as the Monitor path's lister says: `/unpaged:listen` offers this folder's first.
+    const folder = config?.cwd === cwd ? 'this folder' : 'other folder'
+    if (config) stored.push(`${config.title || config.documentId} (${config.documentId}): ${folder}, key ${config.keyId ?? 'with no id'}, stored ${config.createdAt ?? 'at an unknown time'}`)
+  }
+  const left = [...unrevoked].map(([documentId, ids]) => `${canvases.get(documentId)?.title || documentId} (${documentId}): keyId ${ids.join(', ')}`)
   return [
     lines.length ? `Listening in this session:\n${lines.join('\n')}` : 'Nothing is armed in this session.',
-    `Stored keys on this machine:\n${files.lines.join('\n') || 'none'}`,
+    `Keys the plugin stores on this machine:\n${stored.join('\n') || 'none'}`,
+    `Keys this session could not revoke:\n${left.join('\n') || 'none'}`,
+    `This machine's key label: ${await keyLabel($)}`,
   ].join('\n\n')
 }
 
@@ -640,7 +788,7 @@ export const register: Register = on => {
       await $.tool.register({
         name: 'listen_arm',
         description:
-          'Listen to an Unpaged canvas for @agent comments in this session: mints the listener key, stores it, and polls from inside Claude Code. New comments arrive as a message from the unpaged plugin. Pass the documentId (and the title for the band).',
+          'Listen to an Unpaged canvas for @agent comments in this session: mints the listener key where the permission rules let the plugin (otherwise its answer asks you to call agent_listener_key_create, and the plugin takes the key from that), keeps it, and polls from inside Claude Code. New comments arrive as a message from the unpaged plugin. Pass the documentId (and the title for the band).',
         inputSchema: {
           type: 'object',
           properties: { documentId: { type: 'string' }, title: { type: 'string' } },
@@ -649,7 +797,8 @@ export const register: Register = on => {
       })
       await $.tool.register({
         name: 'listen_stop',
-        description: 'Stop listening to an Unpaged canvas in this session and revoke its listener key.',
+        description:
+          'Stop listening to an Unpaged canvas in this session and revoke its listener key: revoked by the plugin where the permission rules let it (otherwise its answer asks you to call agent_listener_key_revoke with the keyId, and the plugin forgets the key once you have).',
         inputSchema: { type: 'object', properties: { documentId: { type: 'string' } }, required: ['documentId'] },
       })
       await $.tool.register({
@@ -671,7 +820,7 @@ export const register: Register = on => {
       $.ui.log(`command registration failed: ${String(err)}`, { to: 'debug' })
     }
     const started = await next(e)
-    void restoreAfterReload($)
+    void restoreAfterReload($).catch(() => undefined)
     return started
   })
 
@@ -686,15 +835,22 @@ export const register: Register = on => {
     try {
       if (verb === 'status') return { text: await statusText($) }
       if (verb === 'arm') {
-        const result = await arm($, target, null)
-        return { text: result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}` }
+        try {
+          const result = await arm($, target, null)
+          return { text: result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}` }
+        } catch (err) {
+          // A mint this command starts has no request of the person's behind it
+          // in auto mode; one the agent makes in its turn does.
+          const hint = isDocumentId(target) && (await mintRule($, target)) === 'ask' ? ' — ask Claude to listen to this canvas instead: it creates the key in its own turn, where auto mode sees that you asked' : ''
+          return { text: `unpaged-listen arm: ${String((err as Error).message ?? err)}${hint}` }
+        }
       }
       if (verb === 'stop') {
         const targets = target === 'all' ? [...canvases.keys()] : [target]
         const lines: string[] = []
         for (const id of targets) {
           const result = await stop($, id)
-          lines.push(`${result.title}: stopped${result.revoked ? ', key revoked' : result.keyId ? ', key NOT revoked (revoke it with /unpaged:listen revoke)' : ''}`)
+          lines.push(`${result.title}: stopped${result.revoked ? ', key revoked' : result.keyId ? `; ${stillLive(result)}` : ''}`)
         }
         return { text: lines.join('\n') || 'nothing to stop' }
       }
@@ -706,8 +862,15 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'mcp__unpaged__listen_arm' }, async ($, e) => {
     const input = e as unknown as { documentId?: string; title?: string }
+    const documentId = text(input.documentId)
     try {
-      const result = await arm($, text(input.documentId), text(input.title) || null)
+      const rule = isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) ? await mintRule($, documentId) : 'allow'
+      if (rule === 'deny') return { result: MINT_DENIED }
+      if (rule === 'ask') {
+        if (text(input.title)) titlesAsked.set(documentId, text(input.title))
+        return { result: mintYourselfLine(documentId) }
+      }
+      const result = await arm($, documentId, text(input.title) || null)
       const line = result.already ? `Already listening: ${describe(result.canvas)}` : `Listening on ${describe(result.canvas, result.first)}`
       return {
         result: `${line}\nNew @agent comments arrive as a message from the unpaged plugin; reply on the canvas with the comment tools and leave threads open. Never repeat key material.`,
@@ -720,13 +883,18 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__unpaged__listen_stop' }, async ($, e) => {
     const input = e as unknown as { documentId?: string }
     try {
-      const result = await stop($, text(input.documentId))
+      const result = await stop($, text(input.documentId), { leaveToAgent: true })
+      // The keys the plugin tried and could not revoke; the others it did not try.
+      const failed = result.left.filter(id => !result.toAgent.includes(id) && !result.denied.includes(id))
       const key = result.revoked
         ? ', key revoked'
-        : result.keyId
-          ? ', key not revoked (the permission check or the server refused, or the server was unreachable)'
-          : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
-      return { result: `${result.title}: stopped${key}` }
+        : failed.length > 0
+          ? `, key not revoked (the permission check or the server refused, or the server was unreachable): keyId ${failed.join(', ')}`
+          : result.keyId
+            ? ''
+            : ', no key left to revoke here (none was minted for it since the plugin last loaded, or the server already rejected it)'
+      const asks = `${result.toAgent.length > 0 ? revokeYourselfLine(result.toAgent) : ''}${result.denied.length > 0 ? revokeDeniedLine(result.denied) : ''}`
+      return { result: `${result.title}: stopped${key}${asks ? `.${asks}` : ''}` }
     } catch (err) {
       return { result: `listen_stop failed: ${String((err as Error).message ?? err)}` }
     }
@@ -735,18 +903,32 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__unpaged__listen_status' }, async $ => ({ result: await statusText($) }))
 
   // A canvas made or changed through the Unpaged tools is armed on its own once
-  // the call succeeds. The call's answer goes back as it came, without waiting
-  // for the arm: arming waits up to FIRST_POLL_WAIT_MS for the first poll.
+  // the call succeeds, where the rules let the plugin mint its key. The call's
+  // answer goes back as it came, without waiting for the arm: arming waits up
+  // to FIRST_POLL_WAIT_MS for the first poll. Where the rules do not, the
+  // answer carries one line for the agent, once per canvas: offer listening.
   on('tool.call', { tool: unpagedTool([...CREATES, ...EDITS]) }, async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny !== undefined || ran.isError === true) return ran
     const input = e as unknown as Record<string, unknown>
+    let documentId = text(input.documentId)
+    let title: string | null = null
     if (CREATES.some(name => e.tool.endsWith(`__${name}`))) {
       const answer = ran as { text?: unknown; result?: unknown }
       const created = createdDocument(answer.text) ?? createdDocument(answer.result)
-      if (created) armOnItsOwn($, created.id, created.title || text(input.title) || null)
-    } else armOnItsOwn($, text(input.documentId), null)
-    return ran
+      if (!created) return ran
+      documentId = created.id
+      title = created.title || text(input.title) || null
+    }
+    if (!isDocumentId(documentId) || armedBefore.has(documentId) || offered.has(documentId) || arming.has(documentId) || loops.has(documentId)) return ran
+    const rule = await mintRule($, documentId)
+    if (rule === 'allow') {
+      armOnItsOwn($, documentId, title)
+      return ran
+    }
+    // Asked once per canvas either way; a rule that denies the mint gets no offer.
+    offered.add(documentId)
+    return rule === 'deny' ? ran : { ...ran, context: [...(ran.context ?? []), offerLine(documentId, title)] }
   })
 
   // A deleted canvas is not listened to any longer: the server would go on
@@ -765,18 +947,43 @@ export const register: Register = on => {
     return ran
   })
 
-  // A key minted by hand for a canvas this session listens to would take the
-  // canvas over and stop that listener (the newest key wins): the mod answers.
-  // The mod's own mint is a tool call these hooks see too, raised under this
+  // A key the agent or another plugin mints by hand. For a canvas this session
+  // listens to it would take the canvas over and stop that listener (the
+  // newest key wins): the mod answers. For any other canvas it goes to the
+  // server under this machine's label, and the mod listens with it and
+  // answers in its place, so the key never reaches the conversation. The
+  // mod's own mint is a tool call these hooks see too, raised under this
   // plugin's name; it goes on to the server.
-  on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, ($, e, next) => {
+  on('tool.call', { tool: unpagedTool(['agent_listener_key_create']) }, async ($, e, next) => {
     if (next.origin.plugin === $.plugin.name) return next(e)
-    const documentId = text((e as unknown as Record<string, unknown>).documentId)
-    if (!loops.has(documentId) && !arming.has(documentId)) return next(e)
-    const title = canvases.get(documentId)?.title || documentId
-    return {
-      deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
+    const input = e as unknown as Record<string, unknown>
+    const documentId = text(input.documentId)
+    if (loops.has(documentId) || arming.has(documentId)) {
+      const title = canvases.get(documentId)?.title || documentId
+      return {
+        deny: `Not minted: this session already listens to ${title} through the unpaged plugin, and a newer key would stop that listener. New @agent comments on it arrive as a message from the unpaged plugin; nothing to do.`,
+      }
     }
+    if (!isDocumentId(documentId)) return next(e)
+    // The label is always this machine's, whatever the agent chose: `/unpaged:listen revoke all` knows this machine's keys by it.
+    const ran = await next({ ...e, label: await keyLabel($) } as typeof e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    const answer = ran as { text?: unknown; result?: unknown }
+    const found = extractMint(answer.text) ?? extractMint(answer.result)
+    return found ? listenWithAgentMint($, documentId, found) : ran
+  })
+
+  // A key the agent revokes itself: once the server has revoked it, the mod
+  // forgets it as its own stop would. The call and its answer go on unchanged.
+  // The mod's own revokes are tool calls these hooks see too, raised under
+  // this plugin's name; the stop or arm that made them forgets the key itself.
+  on('tool.call', { tool: unpagedTool(['agent_listener_key_revoke']) }, async ($, e, next) => {
+    if (next.origin.plugin === $.plugin.name) return next(e)
+    const ran = await next(e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    // A store that fails here leaves a stale entry the next arm revokes again; the revoke itself succeeded.
+    await forgetRevoked($, text((e as unknown as Record<string, unknown>).keyId)).catch(() => undefined)
+    return ran
   })
 
   // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
@@ -796,21 +1003,26 @@ export const register: Register = on => {
     if (list.length === 0 || e.props.hasSurvey) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
+    // The title is the canvas's link, which Claude Code itself opens: the
+    // plugin starts no program for it. A terminal that draws no links writes
+    // the address after the title, so only the title gives way to the width
+    // (the rest never wraps), and `1: link` shows the address whole.
     const ours =
       list.length === 1
         ? Box({
             flexDirection: 'row',
             columnGap: 2,
             children: [
-              Text({ color: dotColor(list[0]), children: ['●'] }),
-              Text({ bold: true, children: ['Listening'] }),
-              Text({ wrap: 'truncate-end', children: [list[0].title] }),
-              Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] }),
-              button('open', 'open', '1', () => void openCanvas($, list[0].documentId)),
+              fixed(Text({ color: dotColor(list[0]), children: ['●'] })),
+              fixed(Text({ bold: true, children: ['Listening'] })),
+              Text({ wrap: 'truncate-end', children: [Link({ href: list[0].boardUrl, children: [list[0].title] })] }),
+              fixed(Text({ dimColor: true, children: [`·  ${statusLabel(list[0], e.props.isWorking, covered.includes(list[0].documentId))}`] })),
+              button('link', 'link', '1', () => showLink($, list[0])),
               button('stop', 'stop', '2', () => void stopAndSay($, list[0].documentId)),
             ],
           })
@@ -830,12 +1042,13 @@ export const register: Register = on => {
     return Box({ flexDirection: 'column', children })
   })
 
-  // The pane past one canvas: each with its own open and stop.
+  // The pane past one canvas: each title its canvas's link, each with its own link and stop.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const list = await read($, armed)
     const covered = await read($, replying)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     if (list.length === 0) return Box({ children: [Text({ dimColor: true, children: ['Nothing is armed in this session.'] })] })
+    const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
     return Box({
       flexDirection: 'column',
       children: list.map(canvas =>
@@ -843,10 +1056,10 @@ export const register: Register = on => {
           flexDirection: 'row',
           columnGap: 2,
           children: [
-            Text({ color: dotColor(canvas), children: ['●'] }),
-            Text({ wrap: 'truncate-end', children: [canvas.title] }),
-            Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] }),
-            Button({ key: `open-${canvas.documentId}`, label: 'open', onPress: () => void openCanvas($, canvas.documentId) }),
+            fixed(Text({ color: dotColor(canvas), children: ['●'] })),
+            Text({ wrap: 'truncate-end', children: [Link({ href: canvas.boardUrl, children: [canvas.title] })] }),
+            fixed(Text({ dimColor: true, children: [statusLabel(canvas, false, covered.includes(canvas.documentId))] })),
+            Button({ key: `link-${canvas.documentId}`, label: 'link', onPress: () => showLink($, canvas) }),
             Button({
               key: `stop-${canvas.documentId}`,
               label: 'stop',
