@@ -67,11 +67,10 @@ Right after rendering, make sure the user's `@agent` comments **on this board** 
 3. **Arm this session on that board** by starting the listener in `--once` background mode via `run_command`:
    `node "<plugin-root>/monitors/listen.mjs" --once <documentId>`
    with `WaitMsBeforeAsync: 500` and `IsDaemon: false`. (Because the listener polls `https://mcp.unpaged.io/events/poll` and binds a loopback ownership quorum on `127.0.0.1`, if Standard Sandbox Mode blocks network or `~/.gemini/unpaged`, re-run with `BypassSandbox: true` and the same `toolSummary`.)
-   In `--once` mode, the process stays alive quietly in the background while polls return no unseen events (checking every 30 seconds, or 60 seconds after an idle hour), and exits `0` after printing the protocol preamble and event JSON line(s) as soon as a new comment arrives — which automatically wakes this Antigravity session.
-4. **Verify connection before claiming to listen:** run `node "<plugin-root>/monitors/keys.mjs" alive <documentId>` (up to three times, roughly two seconds apart, stopping at `monitor:connected` or a terminal state; use `BypassSandbox: true` if needed for the local ownership probe).
-   - Once it reports `monitor:connected`, tell the user: *"I'm listening on this canvas — comment @agent there and I reply on it."*
-   - If the background task already exited with an `agent-inbox-event` line on its first poll, handle that event immediately and re-arm `listen.mjs --once <documentId>`.
-   - If the listener is still starting or reconnecting, say so truthfully. Never claim to be listening from process creation alone.
+   In `--once` mode, a startup failure exits within the 500 ms wait window; once `run_command` backgrounds the task, it stays alive quietly while polls return no unseen events (checking every 30 seconds, or 60 seconds after an idle hour), and exits `0` after printing the protocol preamble and event JSON line(s) as soon as a new comment arrives — which automatically wakes this Antigravity session.
+   - Once `run_command` returns a running background task for `listen.mjs --once <documentId>`, tell the user: *"I'm listening on this canvas — comment @agent there and I reply on it."* and end your turn (do not run follow-up commands in the same turn after backgrounding the task).
+   - If the command already exited within the 500 ms window with an `agent-inbox-event` line on its first poll, handle that event immediately and re-arm `listen.mjs --once <documentId>`.
+   - If it exited with a startup error, say so truthfully; never claim to be listening if the task exited without arming.
 
 If a step is declined by the user or blocked by permissions, stop the arming sequence and tell the user that push isn't armed yet and can be armed anytime by asking to run `listen arm <documentId>`. If the key was minted in step 2 but step 3 was declined before storing, revoke the key with `agent_listener_key_revoke` (`keyId` from the mint result).
 
