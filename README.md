@@ -1,6 +1,6 @@
-# Unpaged plugins for Claude Code and Codex
+# Unpaged plugins for Claude Code, Codex, and Antigravity
 
-Claude Code and Codex plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
+Claude Code, Codex, and Google Antigravity plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
 
 ![A Claude Code plan rendered as a canvas on Unpaged](docs/images/visual-plan-overview.png)
 
@@ -10,6 +10,16 @@ Claude Code and Codex plugins by [Unpaged](https://unpaged.io) — the whiteboar
 /plugin marketplace add unpaged/plugins
 /plugin install unpaged@unpaged
 ```
+
+## Install for Google Antigravity
+
+Install [Unpaged for Google Antigravity](plugins/unpaged-antigravity/README.md) with the `agy` CLI (requires Node.js 22+ on `PATH`):
+
+```sh
+agy plugin install https://github.com/unpaged/plugins/tree/main/plugins/unpaged-antigravity
+```
+
+On first use, authenticate the bundled **unpaged** MCP server in Antigravity with your Unpaged account. Then ask Antigravity to create a visual plan on Unpaged (`visual-plan`), check or arm `@agent` comment listeners (`listen`), or compile an as-built record (`as-built`).
 
 ## Install for Codex — preview
 
@@ -79,6 +89,7 @@ keeps those results and the remaining release gates separate.
 | Plugin | What it does |
 | --- | --- |
 | [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. |
+| [unpaged-antigravity](plugins/unpaged-antigravity) | Visual plans (`visual-plan`), reactive `@agent` comment push (`listen`), implementation Decision logs (`rules/AGENTS.md`), and as-built canvases (`as-built`) for Google Antigravity (`agy`). |
 | [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup is user-confirmed. On installed 0.5.0 pre-release build `fddbe96`, polling and a real human-comment wakeup passed; remote readback verified one requested edit and one agent reply, with the canvas still PROPOSED. Event completion is user-confirmed, but the write call remained unanswered for at least 3 h 17 min for an unexplained reason. Completion timeliness, plan lifecycle, an update to the released 0.5.0 with native instructions and restart recovery remain unverified. |
 
 ## Support

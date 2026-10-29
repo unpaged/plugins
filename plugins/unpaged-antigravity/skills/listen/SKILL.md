@@ -1,0 +1,44 @@
+---
+name: listen
+description: Manage @agent comment push for Unpaged canvases in this session — list armed canvases, check listener status, arm a canvas, or revoke listener keys. Use when the user asks to listen to an Unpaged canvas, check listener status, revoke listener keys, or runs `/unpaged:listen`.
+---
+
+Listening is per board and per session: `visual-plan` arms the board it just created for the current session, and **nothing listens between sessions** (a later session would otherwise pay for sweeps nobody asked for). This skill lets a session listen to a board it did not create, checks what is armed, or revokes keys. Key files live one per board in `~/.gemini/unpaged/listeners/<documentId>.json` (mode 600) — never `cat` them, they are credentials.
+
+**Helpers used below** — resolve `<plugin-root>` as two levels up from this `SKILL.md` file. Every helper is the plugin's own script, `node "<plugin-root>/monitors/keys.mjs" <verb> …`: a plain named command with a verb and an id, no inline code, and none prints key material.
+
+- *List this folder's boards:* `node "<plugin-root>/monitors/keys.mjs" list` — one tab-separated row per key file: documentId, `this-folder` / `other-folder`, armed-at, title, keyId (the `keyId` is an identifier, never the key), or `none`.
+- *Validate one board's key:* `node "<plugin-root>/monitors/keys.mjs" check <documentId>` — prints `armed <keyId>` or `missing`, then `host <name>` (the label for a mint). It also moves a v1 single-key file aside, never deletes it.
+- *Has that board's monitor completed a successful poll:* `node "<plugin-root>/monitors/keys.mjs" alive <documentId>` — `monitor:connected`, `monitor:<state>`, `monitor:unverified`, `monitor:dead` or `monitor:absent`. Connected requires a matching authenticated local owner and a completed successful poll.
+- *Forget a board's key file* (only once the server confirmed its key is gone): `node "<plugin-root>/monitors/keys.mjs" forget <documentId>` or `forget all` — prints `forgotten <n>`; it also sweeps that board's `.json.tmp` and `.retiring-*` leftovers, and `all` removes the retired v1 file as well.
+- *Arm a board in this session:* run `node "<plugin-root>/monitors/listen.mjs" --once <documentId>` via `run_command` with `WaitMsBeforeAsync: 500` and `IsDaemon: false` (and `BypassSandbox: true` if Standard Sandbox Mode blocks network or `~/.gemini/unpaged`). The script checks every 30 seconds (60 after an idle hour), reads the key file itself, never prints the key, handles HTTP 401/409 on its own, and exits `0` after printing the protocol preamble and event JSON line(s) as soon as a new comment arrives — waking this Antigravity session automatically.
+
+## No argument
+
+List this folder's boards (the helper marks `this-folder` / `other-folder`; show title, id, when it was armed, and whether a monitor is `connected` for it). If there are none, say so and point at `visual-plan` (creates and arms a canvas) or `listen arm <documentId>` (a canvas created elsewhere). Otherwise ask the user which canvas to listen to in this session (one or more) and arm each pick as under `arm`. Never arm every board unasked.
+
+## `status`
+
+Same listing, no arming. For each board: key file valid or not, and `monitor:connected` / `monitor:unverified` / `monitor:absent` / `monitor:dead` / `monitor:stopped`. A live PID alone does not establish a working listener. Confirm the listed keys are still live on the server with `agent_listener_keys_list` (match on `keyId`; a row with `documentId: null` is a v1 key the server refuses — offer to revoke it). Only when that list call succeeded: a board whose stored `keyId` is absent from the list is dead — `forget <documentId>` and report it as not armed; a file that stores no `keyId` (an older layout) cannot be matched, so keep it and report it as unverified. If the list call errors or is refused (an unauthenticated server), keep every file and report liveness as unknown; a missing list proves nothing, and deleting on it would orphan live keys.
+
+## `arm <documentId>`
+
+1. Validate the stored key for that board (`keys.mjs check <documentId>`). If `armed <keyId>`, confirm the `keyId` is live via `agent_listener_keys_list`; if the call succeeded and the `keyId` is not on the list, `forget <documentId>` and treat as `missing`; if the call errored or was refused, keep the file, do not mint, say the server could not be checked, and still go on to step 3 with the stored key — polling authenticates with the key itself, not with the MCP session, so a stored key may well connect. A file that stores no `keyId` is armed as-is the same way.
+2. If `missing`, mint one: call `agent_listener_key_create` with that `documentId` and label `antigravity on <host>` (the `host` line `check` printed). If it refuses (a board you cannot open, or the 20-key cap), say so and stop. Store the mint result at `~/.gemini/unpaged/listeners/<documentId>.json` (mode 600, tmp + rename) by running `node "<plugin-root>/monitors/keys.mjs" store <documentId>` with the mint result as JSON on stdin (a heredoc — never on the command line, never `echo`); it prints `stored <keyId>`. Never repeat the key in your reply.
+3. Arm the board **in this session** by starting `node "<plugin-root>/monitors/listen.mjs" --once <documentId>` with `WaitMsBeforeAsync: 500, IsDaemon: false`, even if another session already owns a polling Monitor. On this machine, the replacement waits for the old polling Monitor to stop and drain its output before receiving comments. Do not share one key between machines. Allow a bounded startup window: check `keys.mjs alive <documentId>` up to three times, roughly two seconds apart, stopping once it reports connected or a terminal state. Then claim *"I'm listening on <title> — comment @agent there and I reply on the canvas."* only after this Monitor reports `monitor:connected` (or handle the event and re-arm if `--once` already delivered a waiting event on its first poll). While starting, reconnecting or unverified, report that state. Process creation alone is not listening proof.
+
+## `revoke <documentId>` / `revoke all`
+
+Call `agent_listener_keys_list`. If that opening call errors or is refused, stop: no key can be identified, so revoke nothing, delete nothing, and say the server could not be checked. A key is this machine's if its label matches this host (`antigravity on <host>`) **or** its `keyId` is named by a key file under `~/.gemini/unpaged/listeners/` (the `list` helper's last column gives those ids).
+
+- **For `revoke <documentId>`:**
+  1. If a background `listen.mjs` task for `<documentId>` is running in this conversation, stop it via `manage_task` (`kill`) or let the server-side revoke stop it on its next poll.
+  2. Revoke every live key for that board that is this machine's with `agent_listener_key_revoke`, then re-run `agent_listener_keys_list`: if it came back and the file stores a `keyId` that is no longer on it, `forget <documentId>` (a file that stores no `keyId` cannot be matched: keep it and report it as unverified, as `status` does); if it errored or was refused, delete the file only if this board's own revoke call returned success, otherwise keep it and say the server list could not be re-checked.
+- **For `revoke all`:**
+  1. Revoke every key that is this machine's — including rows with `documentId: null` (v1 keys) — then re-run `agent_listener_keys_list` and delete local files by what the server now says, not by what this command attempted.
+  2. If that confirming list errors or is refused, delete only the files of keys whose own `agent_listener_key_revoke` call returned success, keep every other file, and say the server list could not be re-checked.
+  3. When the list did come back: for each key file that stores a `keyId` no longer on the live list, `forget <documentId>`; a file that stores no `keyId` cannot be matched — keep it and report it as unverified; keep every file whose `keyId` is still live and name those canvases as still live. Only when no file was kept, finish with `forget all`.
+
+Only the server-side revoke stops a live listener — a running listener reads its key file once at startup and polls from memory, so `forget` alone changes nothing for it. For the canvases whose keys the server did revoke, say push is off until `listen arm <documentId>` turns it back on.
+
+If the `agent_listener_key_create` tool is missing, the connected server predates push — say so and stop.

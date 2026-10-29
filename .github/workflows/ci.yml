@@ -24,7 +24,9 @@ jobs:
             plugins/unpaged/.claude-plugin/plugin.json \
             plugins/unpaged/.mcp.json \
             plugins/unpaged/hooks/hooks.json \
-            plugins/unpaged/hooks/plan-approved-context.json; do
+            plugins/unpaged/hooks/plan-approved-context.json \
+            plugins/unpaged-antigravity/plugin.json \
+            plugins/unpaged-antigravity/mcp_config.json; do
             node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
             echo "ok $f"
           done
@@ -47,7 +49,7 @@ jobs:
       - name: Codex marketplace and package references
         run: node scripts/validate-codex-marketplace.mjs
 
-      - name: Commands have frontmatter
+      - name: Commands and Antigravity skills have frontmatter
         run: |
           node -e '
             const fs = require("fs");
@@ -60,13 +62,27 @@ jobs:
               if (!m || !/^description: \S/m.test(m[1])) { console.error("missing frontmatter description:", f); process.exit(1); }
               console.log("ok", f);
             }
+            const skillsDir = "plugins/unpaged-antigravity/skills";
+            const skills = fs.readdirSync(skillsDir);
+            if (!skills.length) { console.error("no skills in", skillsDir); process.exit(1); }
+            for (const skill of skills) {
+              const s = fs.readFileSync(skillsDir + "/" + skill + "/SKILL.md", "utf8");
+              const m = s.match(/^---\n([\s\S]*?)\n---\n/);
+              if (!m || !/^name: \S/m.test(m[1]) || !/^description: \S/m.test(m[1])) {
+                console.error("missing skill frontmatter:", skill); process.exit(1);
+              }
+              console.log("ok skill", skill);
+            }
           '
 
       - name: Listener syntax
-        run: for f in plugins/unpaged/monitors/*.mjs; do node --check "$f" || exit 1; done
+        run: |
+          for f in plugins/unpaged/monitors/*.mjs plugins/unpaged-antigravity/monitors/*.mjs; do
+            node --check "$f" || exit 1
+          done
 
       - name: Tests
-        run: node --test 'plugins/unpaged/monitors/*.test.mjs'
+        run: node --test 'plugins/unpaged/monitors/*.test.mjs' 'plugins/unpaged-antigravity/monitors/*.test.mjs'
 
   mod:
     runs-on: ubuntu-latest
