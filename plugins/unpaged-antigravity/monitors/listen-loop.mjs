@@ -88,6 +88,13 @@ export async function runListener(config, options = {}) {
       result = await poll(config, { signal, cursor, timeoutMs });
     } catch {
       if (signal?.aborted) break;
+      if (once && lastSuccessfulPollAt === null) {
+        await reportStatus("stopped", "poll-failed");
+        if (!signal?.aborted) {
+          await say(`Unpaged listener for canvas ${config.documentId} could not reach Unpaged on its first poll, so nothing is listening to it. If the sandbox blocks network, start listen.mjs --once ${config.documentId} again with BypassSandbox: true; otherwise tell the user push is off for this canvas.`);
+        }
+        return { reason: "poll-failed" };
+      }
       await reportStatus("reconnecting", "poll-failed");
       await sleep(Math.min(maxRetryMs, Math.max(interval(), retryBaseMs * 2 ** Math.min(attempt++, 16))), signal);
       continue;
@@ -115,13 +122,15 @@ export async function runListener(config, options = {}) {
     for (const event of result.events) {
       if (signal?.aborted) break;
       if (seen.has(event.id)) continue;
+      if (!preambleSent) { preambleSent = true; await say(PROTOCOL_PREAMBLE); }
+      if (signal?.aborted) break;
+      await say(JSON.stringify(event));
       seen.add(event.id);
       if (seen.size > dedupeLimit) seen.delete(seen.values().next().value);
       lastEventAt = now();
       emitted++;
-      if (!preambleSent) { preambleSent = true; await say(PROTOCOL_PREAMBLE); }
-      if (!signal?.aborted) await say(JSON.stringify(event));
     }
+    if (signal?.aborted) break;
     cursor = result.nextCursor;
     attempt = 0;
     if (once && emitted > 0 && !signal?.aborted) {

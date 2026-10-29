@@ -70,15 +70,15 @@ Right after rendering, make sure the user's `@agent` comments **on this board** 
    In `--once` mode, a startup failure exits within the 500 ms wait window; once `run_command` backgrounds the task, it stays alive quietly while polls return no unseen events (checking every 30 seconds, or 60 seconds after an idle hour), and exits `0` after printing the protocol preamble and event JSON line(s) as soon as a new comment arrives — which automatically wakes this Antigravity session.
    - Once `run_command` returns a running background task for `listen.mjs --once <documentId>`, tell the user: *"I'm listening on this canvas — comment @agent there and I reply on it."* and end your turn (do not run follow-up commands in the same turn after backgrounding the task).
    - If the command already exited within the 500 ms window with an `agent-inbox-event` line on its first poll, handle that event immediately and re-arm `listen.mjs --once <documentId>`.
-   - If it exited with a startup error, say so truthfully; never claim to be listening if the task exited without arming.
+   - If it exited with a startup error or a first-poll failure (`could not reach Unpaged on its first poll`) while running in Standard Sandbox Mode, re-run `listen.mjs --once <documentId>` once with `BypassSandbox: true` and the same `toolSummary`; if it still fails, say so truthfully and never claim to be listening.
 
-If a step is declined by the user or blocked by permissions, stop the arming sequence and tell the user that push isn't armed yet and can be armed anytime by asking to run `listen arm <documentId>`. If the key was minted in step 2 but step 3 was declined before storing, revoke the key with `agent_listener_key_revoke` (`keyId` from the mint result).
+If a step is declined by the user or blocked by permissions, stop the arming sequence and tell the user that push isn't armed yet and can be armed anytime by asking to run `listen arm <documentId>`. If the key was minted in step 2 but its `keys.mjs store` call was declined or failed, revoke that key right away with `agent_listener_key_revoke` (`keyId` from the mint result) so no key without a file stays live on the account; if that revoke is refused too, say one listener key could not be stored or revoked and that `listen revoke all` clears it.
 
 If the `agent_listener_key_create` tool is missing, the connected server predates push: say the canvas is ready and that comments can be swept with `comments_list_unresolved`, and skip arming.
 
 ## When an event arrives
 
-When the background `listen.mjs --once <documentId>` task finishes and wakes the session, its stdout contains the protocol preamble and one or more JSON lines (`type: "agent-inbox-event"`, `id`, `reason` (`mention` | `reply`), `documentId`, `nodeId`, `threadId`, `resolved`, `authorName`, `authorRole` (`owner` | `editor` | `viewer`), `textPreview`, `boardUrl`).
+When the background `listen.mjs --once <documentId>` task finishes and wakes the session, its stdout contains the protocol preamble and one or more JSON lines (`type: "agent-inbox-event"`, `id`, `reason` (`mention` | `reply`), `documentId`, `nodeId`, `threadId`, `resolved`, `authorName`, `authorRole` (`owner` | `editor` | `viewer`), `textPreview`, `boardUrl`). (If the background task instead wakes the session with the `could not reach Unpaged on its first poll` line because the first poll failed after the 500 ms startup window in Standard Sandbox Mode, re-run `listen.mjs --once <documentId>` once with `BypassSandbox: true` and the same `toolSummary`; if it was already unsandboxed or fails again, tell the user push could not reach Unpaged and is off for this canvas.)
 
 1. Dedupe on `id`.
 2. When `resolved` is `true`, `comment_reopen` the thread first.

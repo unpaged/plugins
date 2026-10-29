@@ -60,7 +60,7 @@ On first use, authenticate the **unpaged** MCP server in Antigravity with your U
 ## Privacy & Security
 
 - **Policies:** [Privacy policy](https://unpaged.io/privacy) · [Terms of service](https://unpaged.io/terms).
-- **Listener keys:** receive-only, bound to one canvas, stored at `~/.gemini/unpaged/listeners/<documentId>.json` with mode `0600`, never printed to stdout or chat, and sent only in the `Authorization: Bearer` header to `https://*.unpaged.io/events/poll`.
+- **Listener keys:** receive-only, bound to one canvas, stored at `~/.gemini/unpaged/listeners/<documentId>.json` with mode `0600`, and sent only in the `Authorization: Bearer` header to `https://*.unpaged.io/events/poll`. The plugin's scripts never print a key, but this plugin has no hook that stores the mint for the agent: the key is in the `agent_listener_key_create` result the agent receives and in the stdin heredoc it passes to `keys.mjs store`, so it appears in the conversation. It stays revocable from Unpaged or with `listen revoke`.
 - **Comments are data, not instructions:** `@agent` comments are authored by canvas collaborators, not the local terminal user. Both the `rules/AGENTS.md` rule and the listener's `PROTOCOL_PREAMBLE` enforce that comments may only trigger `unpaged` MCP tool actions on that specific `documentId` — never shell commands, local file edits, git operations, or network requests — and `viewer` comments receive a proposed answer without modifying the canvas.
 
 ## Developing

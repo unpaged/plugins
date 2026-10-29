@@ -173,3 +173,43 @@ test("once mode keeps polling across empty and replay-only pages, then exits aft
   assert.equal(f.statuses.at(-1).cursor, "page_4");
   assert.deepEqual(f.statuses.at(-1).seen, ["already-delivered", "fresh-event"]);
 });
+
+test("once mode exits with poll-failed when its first poll fails, and retries transient failures after a connected poll", async (t) => {
+  const f1 = fixture(t, { once: true });
+  await f1.fail();
+  assert.deepEqual(await f1.run, { reason: "poll-failed" });
+  assert.equal(f1.sleeps.length, 0);
+  assert.deepEqual([f1.statuses.at(-1).state, f1.statuses.at(-1).reason], ["stopped", "poll-failed"]);
+  assert.equal(f1.lines.length, 1);
+  assert.match(f1.lines[0], /could not reach Unpaged on its first poll/);
+  assert.match(f1.lines[0], /BypassSandbox: true/);
+  assert.equal(f1.lines[0].includes(SECRET), false);
+
+  const f2 = fixture(t, { once: true });
+  await f2.answer(page([], "page_2"));
+  await f2.fail();
+  assert.equal(f2.statuses.at(-1).state, "reconnecting");
+  assert.deepEqual(f2.sleeps, [30000, 30000]);
+  await f2.answer(page([frame("event-after-retry")], "page_3"));
+  assert.deepEqual(await f2.run, { reason: "events", nextCursor: "page_3" });
+});
+
+test("abort during preamble output does not mark the undelivered event as seen or advance cursor", async (t) => {
+  const controller = new AbortController();
+  const lines = [];
+  const f = fixture(t, {
+    once: true,
+    signal: controller.signal,
+    initialCursor: "page_1",
+    say: async (line) => {
+      lines.push(line);
+      if (line === PROTOCOL_PREAMBLE) controller.abort();
+    }
+  });
+  await f.answer(page([frame("undelivered-event")], "page_2"));
+  assert.deepEqual(await f.run, { reason: "shutdown" });
+  assert.deepEqual(lines, [PROTOCOL_PREAMBLE]);
+  assert.equal(f.statuses.at(-1).state, "stopped");
+  assert.equal(f.statuses.at(-1).cursor, "page_1");
+  assert.deepEqual(f.statuses.at(-1).seen, []);
+});

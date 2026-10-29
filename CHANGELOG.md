@@ -1,8 +1,14 @@
 # Changelog
 
-All notable changes to the Unpaged plugins. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Unprefixed versions refer to `plugins/unpaged/.claude-plugin/plugin.json`; Codex entries name their package and use `plugins/unpaged-codex/.codex-plugin/plugin.json`.
+All notable changes to the Unpaged plugins. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Unprefixed versions refer to `plugins/unpaged/.claude-plugin/plugin.json`; Codex entries name their package and use `plugins/unpaged-codex/.codex-plugin/plugin.json`; Antigravity entries name their package and use `plugins/unpaged-antigravity/plugin.json`.
 
 ## [Unreleased]
+
+## [unpaged-antigravity 0.1.0] - 2026-10-29
+
+### Added
+
+- Unpaged for Google Antigravity (`plugins/unpaged-antigravity`) ([#42](https://github.com/unpaged/plugins/pull/42)): `plugin.json` manifest, bundled Unpaged MCP server (`mcp_config.json`), session rules (`rules/AGENTS.md`), the `visual-plan`, `as-built` and `listen` skills, and the `~/.gemini/unpaged` polling listener (`monitors/listen.mjs --once <documentId>` and `monitors/keys.mjs`) that exits on the first new `@agent` comment batch to trigger Antigravity's reactive background-task wakeup while persisting poll cursor and seen event IDs across wakeups.
 
 ## [1.12.0] - 2026-10-26
 
@@ -249,6 +255,7 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
 [Unreleased]: https://github.com/unpaged/plugins/compare/v1.12.0...HEAD
+[unpaged-antigravity 0.1.0]: https://github.com/unpaged/plugins/pull/42
 [1.12.0]: https://github.com/unpaged/plugins/releases/tag/v1.12.0
 [1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
 [1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0
