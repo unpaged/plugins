@@ -25,7 +25,7 @@ export function ownershipPorts(scope) {
 async function location(home, documentId) {
   if (!isDocumentId(documentId)) throw new Error("invalid_monitor_document");
   const canonicalHome = await realpath(home);
-  const scope = createHash("sha256").update(JSON.stringify([canonicalHome, documentId])).digest("hex");
+  const scope = createHash("sha256").update(JSON.stringify([canonicalHome, STATUS_DIR_RELATIVE, documentId])).digest("hex");
   return { scope, path: join(canonicalHome, STATUS_DIR_RELATIVE, "ownership", `${documentId}.json`) };
 }
 
