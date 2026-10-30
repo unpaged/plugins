@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -312,6 +312,20 @@ test("keys.mjs end to end: check → hook stores → check → list → alive �
   assert.match(r.out.split("\n")[1], /^host \S+/);
   r = run(home, ["nonsense"]);
   assert.equal(r.code, 1);
+
+  if (process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() !== 0) {
+    r = run(home, ["store", DOC], JSON.stringify(MINT));
+    assert.equal(r.code, 0);
+    chmodSync(listeners, 0o000);
+    try {
+      const blocked = run(home, ["check", DOC]);
+      assert.equal(blocked.code, 1);
+      assert.match(blocked.out.split("\n")[0], /^error EACCES/);
+      assert.equal(blocked.out.includes(KEY), false);
+    } finally {
+      chmodSync(listeners, 0o700);
+    }
+  }
 });
 
 test("old key files remain usable without remint or rewrite and poll-only mints store privately", (t) => {

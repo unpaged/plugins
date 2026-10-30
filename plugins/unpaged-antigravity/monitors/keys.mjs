@@ -116,12 +116,28 @@ async function check(documentId) {
     say("missing");
     say(host);
     say("error not a document id");
-    return;
+    return 0;
   }
   await retireLegacyFile();
-  const config = await loadConfig(documentId);
-  say(config ? `armed ${printableKeyId(config.keyId)}`.trimEnd() : "missing");
-  say(host);
+  const keyFile = keyFileFor(keyDir, documentId);
+  try {
+    const raw = await readFile(keyFile, "utf8");
+    const config = parseListenerConfig(raw);
+    const valid = config && config.documentId === documentId && isUnpagedListenerUrl(config.pollUrl) ? config : null;
+    say(valid ? `armed ${printableKeyId(valid.keyId)}`.trimEnd() : "missing");
+    say(host);
+    return 0;
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      say("missing");
+      say(host);
+      return 0;
+    }
+    const reason = error && typeof error.code === "string" ? error.code : "read-failed";
+    say(`error ${reason}`);
+    say(host);
+    return 1;
+  }
 }
 
 async function storeFromStdin(documentId, asHook) {
@@ -354,8 +370,7 @@ async function main() {
   const [verb, first, second] = process.argv.slice(2);
   switch (verb) {
     case "check":
-      await check(first);
-      return 0;
+      return check(first);
     case "hook":
       return storeFromStdin(null, true);
     case "store":

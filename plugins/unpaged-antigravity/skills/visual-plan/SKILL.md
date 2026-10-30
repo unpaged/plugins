@@ -60,10 +60,10 @@ Right after rendering, make sure the user's `@agent` comments **on this board** 
 
 1. **Check for a stored key for this board without printing it** — `<documentId>` is the board you just created:
    `node "<plugin-root>/monitors/keys.mjs" check <documentId>`
-   It prints `armed <keyId>` or `missing`, then `host <name>`. Never `cat` a key file — its contents are a credential and would land in the transcript. A board you just created has no key yet, so this is normally `missing`.
+   It prints `armed <keyId>` or `missing` (or `error <code`> and exits 1 if the sandbox blocked reading `~/.gemini/unpaged` — in which case re-run it with `BypassSandbox: true`), then `host <name>`. Never `cat` a key file — its contents are a credential and would land in the transcript. A board you just created has no key yet, so this is normally `missing`.
 2. **If `missing`**, call the `agent_listener_key_create` MCP tool with `documentId` = this board and `label` = `antigravity on <host>` (the `host` line from step 1). Store the mint result at `~/.gemini/unpaged/listeners/<documentId>.json` (mode 600, tmp + rename) by running:
    `node "<plugin-root>/monitors/keys.mjs" store <documentId>`
-   passing the mint JSON on stdin via a heredoc (`<<'EOF' ... EOF` — never on the command line, never `echo`); it prints `stored <keyId>`. Never repeat the key in your reply. If the tool refuses (a board you cannot open, or the 20-key cap), say so and stop arming.
+   passing the mint JSON on stdin via a heredoc (`<<'EOF' ... EOF` — never on the command line, never `echo`); it prints `stored <keyId>`. It writes under `~/.gemini/unpaged`, as the listener in step 3 does: if it fails with a permission error (`EACCES` or `EPERM`) in Standard Sandbox Mode, run the same command and heredoc once more with `BypassSandbox: true`, and count the store as failed only if that fails too. Never repeat the key in your reply. If the tool refuses (a board you cannot open, or the 20-key cap), say so and stop arming.
 3. **Arm this session on that board** by starting the listener in `--once` background mode via `run_command`:
    `node "<plugin-root>/monitors/listen.mjs" --once <documentId>`
    with `WaitMsBeforeAsync: 500` and `IsDaemon: false`. (Because the listener polls `https://mcp.unpaged.io/events/poll` and binds a loopback ownership quorum on `127.0.0.1`, if Standard Sandbox Mode blocks network or `~/.gemini/unpaged`, re-run with `BypassSandbox: true` and the same `toolSummary`.)
