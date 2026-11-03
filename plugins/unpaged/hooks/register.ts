@@ -43,10 +43,17 @@ import {
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
-
-type On = Parameters<Register>[0]
-type Hook = Extract<Parameters<On>[number], (...args: never[]) => unknown>
-type Api = Parameters<Hook>[0]
+import {
+  architectureRow,
+  architectureTurnComplete,
+  redrawArchitecture,
+  registerArchitecture,
+  registerArchitectureTool,
+  startArchitecture,
+  stopArchitecture,
+} from './architecture'
+import { boardUrlFor, isAllowed, mcpServer, mcpText, ruleOn, text } from './unpaged-api'
+import type { Api } from './unpaged-api'
 
 type ListenerConfig = {
   pollUrl: string
@@ -72,7 +79,6 @@ type Loop = {
   settled: Promise<string>
 }
 
-const MCP_SERVER = 'unpaged'
 const PANE = 'unpaged-listening'
 const FIRST_POLL_WAIT_MS = 8000
 const FLUSH_DELAY_MS = 50
@@ -152,9 +158,6 @@ function forgetUnrevoked(documentId: string, keyId: string) {
 /** `leftToAgent`: the key this arm replaced, left for the agent to revoke in the turn it minted in. */
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string; leftToAgent?: string }
 
-const boardUrlFor = (documentId: string) => `https://unpaged.io/document/${documentId}/edit`
-const text = (value: unknown) => (typeof value === 'string' ? value : '')
-
 /**
  * A canvas's key in the plugin's store, one entry per canvas. Claude Code
  * keeps that store in a file of the plugin's own under its configuration
@@ -204,43 +207,6 @@ async function keyLabel($: Api) {
   if (!hostName) hostName = shortHost(await $.process.run(['hostname'], { timeoutMs: 5000 }).catch(() => null))
   if (!hostName) hostName = shortHost(await $.process.run(['uname', '-n'], { timeoutMs: 5000 }).catch(() => null))
   return `claude-code on ${hostName ?? 'this machine'}`
-}
-
-async function mcpServer($: Api) {
-  try {
-    const connected = (await $.mcp.connect(MCP_SERVER)) as { isConnected?: boolean; server?: string }
-    if (connected.isConnected && connected.server) return connected.server
-  } catch {
-    // fall through to the manifest name
-  }
-  return MCP_SERVER
-}
-
-/** An MCP tool as the person's permission rules name it: `mcp__plugin_unpaged_unpaged__comment_reply` installed with this plugin. */
-const ruleName = (server: string, tool: string) => `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__${tool}`
-
-/**
- * Whether the person's own permission rules already let `tool` run: asked
- * without running it, so no dialog opens and no classifier is asked. The
- * mod's own calls of MCP tools go through those rules either way.
- */
-async function isAllowed($: Api, server: string, tool: string, input: Record<string, unknown>) {
-  return (await ruleOn($, server, tool, input)) === 'allow'
-}
-
-/** The rules' answer for `tool`, asked the same way: `allow`, `deny`, or `ask` for anything else (no rule, or no answer). */
-async function ruleOn($: Api, server: string, tool: string, input: Record<string, unknown>): Promise<'allow' | 'deny' | 'ask'> {
-  try {
-    const decision = (await $.tool.check({ tool: ruleName(server, tool), input })).decision
-    return decision === 'allow' || decision === 'deny' ? decision : 'ask'
-  } catch {
-    return 'ask'
-  }
-}
-
-function mcpText(result: { content?: Array<{ type?: string; text?: string }>; structuredContent?: unknown }) {
-  const block = result.content?.find(b => b.type === 'text' && typeof b.text === 'string')
-  return block?.text ?? (result.structuredContent === undefined ? '' : JSON.stringify(result.structuredContent))
 }
 
 /**
@@ -783,7 +749,12 @@ async function restoreAfterReload($: Api) {
 }
 
 export const register: Register = on => {
+  // The architecture line's own hooks: its report tool and the pull-request
+  // tools (architecture.ts); the hooks a plugin registers once are below.
+  registerArchitecture(on)
+
   on('session.start', async ($, e, next) => {
+    await registerArchitectureTool($)
     try {
       await $.tool.register({
         name: 'listen_arm',
@@ -821,12 +792,16 @@ export const register: Register = on => {
     }
     const started = await next(e)
     void restoreAfterReload($).catch(() => undefined)
+    // The line from the pointer file and this machine's record; the canvas is
+    // read after the session is up, where the rules allow it.
+    void startArchitecture($)
     return started
   })
 
   // /clear and /resume reset the atoms but not this module: rebuild the view.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await sync($)
+    await redrawArchitecture($)
     return next(e)
   })
 
@@ -986,7 +961,8 @@ export const register: Register = on => {
     return ran
   })
 
-  // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
+  // The reply turn is over: the comments it answered are no longer new, on the
+  // canvases it covered. A comparison turn over without a report is put back.
   on('turn.complete', async ($, e, next) => {
     const covered = await read($, replying)
     if (covered.length > 0) {
@@ -994,16 +970,21 @@ export const register: Register = on => {
       await update($, replying, () => [])
       await sync($)
     }
+    await architectureTurnComplete($, e)
     return next(e)
   })
 
-  // The band above the prompt: one line while this session listens.
+  // The band above the prompt: one line while this session listens, and one
+  // for the repository's architecture document while there is something to say.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const list = await read($, armed)
-    if (list.length === 0 || e.props.hasSurvey) return next(e)
+    const ui = $.ui.resolve(e)
+    const architecture = await architectureRow($, ui)
+    if (list.length === 0 && !architecture) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = ui
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
@@ -1013,7 +994,9 @@ export const register: Register = on => {
     // the address after the title, so only the title gives way to the width
     // (the rest never wraps), and `1: link` shows the address whole.
     const ours =
-      list.length === 1
+      list.length === 0
+        ? null
+        : list.length === 1
         ? Box({
             flexDirection: 'row',
             columnGap: 2,
@@ -1038,7 +1021,7 @@ export const register: Register = on => {
               button('stop-all', 'stop all', '2', () => void stopAll($)),
             ],
           })
-    const children = typeof theirs === 'object' && theirs !== null ? [theirs, ours] : [ours]
+    const children = [typeof theirs === 'object' && theirs !== null ? theirs : null, ours, architecture].filter(row => row !== null)
     return Box({ flexDirection: 'column', children })
   })
 
@@ -1077,6 +1060,7 @@ export const register: Register = on => {
     if (ENDING_REASONS.has(e.reason)) {
       for (const loop of loops.values()) loop.controller.abort()
     }
+    stopArchitecture()
     return next(e)
   })
 }
