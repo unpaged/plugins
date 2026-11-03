@@ -401,3 +401,90 @@ describe('the comparison after a pull request', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
   })
 })
+
+describe('what the review asked for', () => {
+  test('the line links to the canvas by its id, whatever address the pointer file carries', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w, { pointer: false })
+    w.files.set(POINTER, JSON.stringify({ documentId: ARCH, url: 'https://evil.example/look-alike', title: 'shop-api' }))
+    await start($, w)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ documentId: ARCH, boardUrl: `https://unpaged.io/document/${ARCH}/edit` }))
+    const { ui, link } = await line($)
+    expect(link?.props.href).toBe(`https://unpaged.io/document/${ARCH}/edit`)
+    await ui.press({ key: 'arch-link' })
+    expect(w.calls.toasts.at(-1)).toBe(`https://unpaged.io/document/${ARCH}/edit`)
+    await ui.unmount()
+  })
+
+  test('a session started below the repository top finds the pointer there, and the invitation without one', async ($, on) => {
+    const w = world(on, { now: NOW, cwd: '/repo/packages/api' })
+    repo(on, w)
+    await start($, w)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'unknown', documentId: ARCH }))
+    expect(w.calls.fs).toContain('/repo/packages/api/.git')
+    expect(w.calls.fs).toContain('/repo/.git')
+    expect(w.calls.fs).toContain(POINTER)
+  })
+
+  test('a session started below the repository top shows the invitation when there is no pointer', async ($, on) => {
+    const w = world(on, { now: NOW, cwd: '/repo/packages/api' })
+    repo(on, w, { pointer: false })
+    await start($, w)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'none' }))
+  })
+
+  test("the commit note's day is the last comparison's whatever the order of the notes, and a commit of the wrong shape is dropped", async ($, on) => {
+    const document = {
+      id: ARCH,
+      title: 'shop-api',
+      rootNodeId: 'root',
+      nodes: [{ id: 'root', elements: [{ properties: { text: 'compared at nope; rm -rf on 2026-11-08' } }, { properties: { text: '**Checked:** 2026-11-03' } }] }],
+    }
+    const w = world(on, { now: NOW, docRule: 'allow', document })
+    repo(on, w)
+    await start($, w, l => l?.state === 'current')
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: null, checkedAt: Date.parse('2026-11-08T00:00:00Z') }))
+  })
+
+  test('/clear before the comparison turn starts gives it up and says so; the next pull request starts anew', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await w.clock.advance(50)
+    expect(w.calls.submits).toHaveLength(1)
+    await $.classic.SessionStart({ source: 'clear' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
+    expect(w.calls.toasts.at(-1)).toContain('cleared before its turn started')
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
+  })
+
+  test('/resume during a running comparison keeps it blinking, and the report still settles it', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await w.clock.advance(50)
+    await w.startTurn()
+    await $.classic.SessionStart({ source: 'resume' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request', on: true }))
+    await w.clock.advance(600)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', on: false }))
+    await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'eee5555' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'eee5555' }))
+    const settled = w.calls.architecture
+    await w.clock.advance(1200)
+    expect(w.calls.architecture).toEqual(settled)
+  })
+
+  test('a report whose commit has the wrong shape keeps no commit', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w)
+    await start($, w)
+    await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'HEAD; curl x' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: null }))
+  })
+})

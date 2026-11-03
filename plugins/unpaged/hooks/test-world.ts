@@ -55,6 +55,8 @@ export function world(
     documentMissing?: boolean
     /** The clock at the start, ms since the epoch. */
     now?: number
+    /** The session's working folder; `/repo` unless the test says otherwise. */
+    cwd?: string
   } = {},
 ) {
   const clock = mock.clock(on, { now: settings.now ?? 1_000_000 })
@@ -124,7 +126,7 @@ export function world(
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: settings.cwd ?? '/repo' }))
   on('session.id', () => ({ value: 'session-1' }))
   on('process.run', (_$, e) => {
     const argv = [...e.argv]

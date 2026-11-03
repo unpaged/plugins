@@ -62,7 +62,11 @@ export const STATES = ['current', 'behind', 'lost'] as const
 export type VerdictState = (typeof STATES)[number]
 export const isVerdictState = (value: unknown): value is VerdictState => (STATES as readonly unknown[]).includes(value)
 
-export type Pointer = { documentId: string; title: string | null; url: string | null }
+/** What the pointer file says: the canvas id, checked, and a title for the line. Its address is never taken from the file: the line links by the id. */
+export type Pointer = { documentId: string; title: string | null }
+
+/** A git commit as the notes and the report name it: 7 to 40 lowercase hex characters, nothing else reaches a command. */
+export const isCommit = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{7,40}$/.test(value)
 
 /** What the last comparison found, as the command reported it and the mod keeps it on this machine. */
 export type Verdict = {
@@ -108,7 +112,7 @@ export function parsePointer(raw: string): Pointer | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown> | null
     if (!parsed || typeof parsed !== 'object' || !isDocumentId(parsed.documentId)) return null
-    return { documentId: String(parsed.documentId), title: text(parsed.title) || null, url: text(parsed.url) || null }
+    return { documentId: String(parsed.documentId), title: text(parsed.title) || null }
   } catch {
     return null
   }
@@ -132,32 +136,36 @@ export function verdictFromDocument(documentId: string, value: unknown, reported
   const root = nodes.find(n => n.id === doc.rootNodeId) ?? nodes.find(n => !n.parentId) ?? nodes[0]
   if (!root) return null
   let state: VerdictState | null = null
-  let checkedAt: string | null = null
+  let noteDay: string | null = null
+  let commitDay: string | null = null
   let behindSince: string | null = null
   let commit: string | null = null
   for (const element of Array.isArray(root.elements) ? root.elements : []) {
     const content = text(element?.properties?.text).trim()
     if (content.startsWith(CHECKED_PREFIX)) {
       state = 'current'
-      checkedAt = day(content.slice(CHECKED_PREFIX.length))
+      noteDay = day(content.slice(CHECKED_PREFIX.length))
     } else if (content.startsWith(BEHIND_PREFIX)) {
       state = 'behind'
       behindSince = day(content.slice(BEHIND_PREFIX.length))
     } else if (content.startsWith(COMMIT_PREFIX)) {
-      const [sha, , on] = content.slice(COMMIT_PREFIX.length).trim().split(/\s+/)
-      commit = sha || null
-      if (day(on)) checkedAt = day(on)
+      // `compared at <commit> on <day>`: the commit only in its shape, the day only at the end.
+      const rest = content.slice(COMMIT_PREFIX.length).trim()
+      const sha = rest.split(/\s+/)[0]
+      commit = isCommit(sha) ? sha : null
+      commitDay = day(rest.match(/\bon\s+(\d{4}-\d{2}-\d{2})\s*$/)?.[1])
     }
   }
   if (!state) return null
-  return { documentId, state, title: text(doc.title) || null, checkedAt, commit, behindSince, reportedAt }
+  // The commit note's day is the last comparison's, whatever the order of the notes; a canvas behind has no other.
+  return { documentId, state, title: text(doc.title) || null, checkedAt: commitDay ?? noteDay, commit, behindSince, reportedAt }
 }
 
 export function lightFrom(found: Pointer, known: Verdict | null): ArchitectureLight {
   return {
     documentId: found.documentId,
     title: known?.title || found.title || found.documentId,
-    boardUrl: found.url || boardUrlFor(found.documentId),
+    boardUrl: boardUrlFor(found.documentId),
     state: known ? known.state : 'unknown',
     checkedAt: dayMs(known?.checkedAt ?? null),
     commit: known?.commit ?? null,

@@ -57,6 +57,7 @@ import {
   boardUrlFor,
   comparePrompt,
   day,
+  isCommit,
   describeLight,
   lightColor,
   isVerdictState,
@@ -818,15 +819,32 @@ let blink: { cancel: () => void } | null = null
 /** The comparison under way: what the line showed before, and whether the turn that runs it has started. */
 let comparing: { previous: ArchitectureLight; source: 'pull-request' | 'update'; started: boolean } | null = null
 
-/** A path under the session's working folder, spelled out whole. */
-async function inWorkingFolder($: Api, path: string) {
-  const cwd = await $.session.cwd()
-  return `${cwd.replace(/[\\/]+$/, '')}/${path}`
+/**
+ * The repository's top level: the nearest folder at or above the session's
+ * working folder that holds `.git` (a folder, or a worktree's file), spelled
+ * out whole; null outside a repository. A session started in a subfolder of
+ * a monorepo finds the pointer file at the top, where the command writes it.
+ */
+async function repositoryRoot($: Api): Promise<string | null> {
+  let folder = (await $.session.cwd()).replace(/[\\/]+$/, '')
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      if (await $.fs.exists(`${folder}/.git`)) return folder
+    } catch {
+      return null
+    }
+    const up = folder.replace(/[\\/][^\\/]*$/, '')
+    if (up === folder || up === '') return null
+    folder = up
+  }
+  return null
 }
 
 async function readPointer($: Api): Promise<Pointer | null> {
   try {
-    const path = await inWorkingFolder($, POINTER_PATH)
+    const root = await repositoryRoot($)
+    if (!root) return null
+    const path = `${root}/${POINTER_PATH}`
     if (!(await $.fs.exists(path))) return null
     return parsePointer(await $.fs.read(path))
   } catch {
@@ -834,13 +852,9 @@ async function readPointer($: Api): Promise<Pointer | null> {
   }
 }
 
-/** Whether the working folder is a git repository (a `.git` folder, or a worktree's `.git` file). */
+/** Whether the working folder is in a git repository. */
 async function isRepository($: Api) {
-  try {
-    return await $.fs.exists(await inWorkingFolder($, '.git'))
-  } catch {
-    return false
-  }
+  return (await repositoryRoot($)) !== null
 }
 
 async function loadVerdict($: Api, documentId: string): Promise<Verdict | null> {
@@ -851,7 +865,7 @@ async function loadVerdict($: Api, documentId: string): Promise<Verdict | null> 
     state: stored.state,
     title: text(stored.title) || null,
     checkedAt: day(stored.checkedAt),
-    commit: text(stored.commit) || null,
+    commit: isCommit(stored.commit) ? stored.commit : null,
     behindSince: day(stored.behindSince),
     reportedAt: text(stored.reportedAt),
   }
@@ -915,6 +929,12 @@ function stopBlinking() {
   blink = null
 }
 
+/** The dot blinks while a comparison runs: the line reads the phase. */
+function startBlinking($: Api) {
+  stopBlinking()
+  blink = $.clock.every(BLINK_MS, () => update($, light, l => (l && l.state === 'comparing' ? { ...l, on: !l.on } : l)))
+}
+
 /**
  * Starts a comparison: the line blinks yellow and, once the hook that saw the
  * pull request has answered, one prompt starts the turn that runs it. One at
@@ -928,8 +948,7 @@ async function startComparison($: Api, source: 'pull-request' | 'update', pullRe
   if (current.state === 'none') return false
   comparing = { previous: current, source, started: false }
   await update($, light, () => ({ ...current, state: 'comparing' as const, source, on: true }))
-  stopBlinking()
-  blink = $.clock.every(BLINK_MS, () => update($, light, l => (l && l.state === 'comparing' ? { ...l, on: !l.on } : l)))
+  startBlinking($)
   const prompt = source === 'pull-request' ? comparePrompt(pullRequest) : UPDATE_PROMPT
   $.clock.after(SUBMIT_DELAY_MS, () => {
     const submitted = $.prompt.submit({ text: prompt })
@@ -1042,10 +1061,18 @@ async function startArchitecture($: Api) {
   await refresh($).catch(() => undefined)
 }
 
-/** /clear and /resume reset the atoms but not this module: draw the line again. */
-async function redrawArchitecture($: Api) {
-  if (comparing) await update($, light, () => comparing!.previous).catch(() => undefined)
-  else await refresh($).catch(() => undefined)
+/**
+ * /clear and /resume reset the atoms but not this module: draw the line again.
+ * A comparison under way is drawn as such, blinking, and goes on; one whose
+ * turn had not started when the session was cleared is given up, since its
+ * queued prompt may be gone with the conversation, and the line says so.
+ */
+async function redrawArchitecture($: Api, source: string) {
+  const under = comparing
+  if (!under) return refresh($).catch(() => undefined)
+  if (source === 'clear' && !under.started) return giveUp($, 'the conversation was cleared before its turn started').catch(() => undefined)
+  await update($, light, () => ({ ...under.previous, state: 'comparing' as const, source: under.source, on: true })).catch(() => undefined)
+  startBlinking($)
 }
 
 /** The turn that ran the comparison is over without a report: say so, and show what the line showed before. A subagent's turn is not that turn. */
@@ -1075,7 +1102,7 @@ export const register: Register = on => {
       state: input.state,
       title: text(input.title) || pointer.title,
       checkedAt,
-      commit: text(input.commit).trim() || null,
+      commit: isCommit(text(input.commit).trim()) ? text(input.commit).trim() : null,
       behindSince: input.state === 'behind' ? (day(input.behindSince) ?? checkedAt) : null,
       reportedAt: new Date(await $.clock.now()).toISOString(),
     }
@@ -1150,7 +1177,7 @@ export const register: Register = on => {
   // /clear and /resume reset the atoms but not this module: rebuild the view.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await sync($)
-    await redrawArchitecture($)
+    await redrawArchitecture($, String(e.source))
     return next(e)
   })
 
@@ -1408,8 +1435,9 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     if (ENDING_REASONS.has(e.reason)) {
       for (const loop of loops.values()) loop.controller.abort()
+      // /clear and /resume end no comparison: its turn goes on, and the redraw keeps it blinking.
+      stopArchitecture()
     }
-    stopArchitecture()
     return next(e)
   })
 }
