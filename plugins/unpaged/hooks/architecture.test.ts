@@ -95,7 +95,7 @@ describe('architecture line', () => {
       const { ui, texts, buttons, link } = await line($, surface)
       expect(texts).toContain('Architecture')
       expect(texts.some(t => t.includes('no architecture document yet'))).toBe(true)
-      expect(buttons).toEqual([['arch-create', '3']])
+      expect(buttons).toEqual([['arch-create', 'c']])
       expect(link).toBeUndefined()
       await ui.unmount()
     }
@@ -118,8 +118,8 @@ describe('architecture line', () => {
     const { ui, texts, buttons, link } = await line($)
     expect(texts.some(t => t.includes('not compared from this machine yet'))).toBe(true)
     expect(buttons).toEqual([
-      ['arch-update', '3'],
-      ['arch-link', '4'],
+      ['arch-update', 'u'],
+      ['arch-link', '3'],
     ])
     expect(link?.props.href).toBe(`https://unpaged.io/document/${ARCH}/edit`)
     expect(link?.text).toContain('shop-api')
@@ -151,8 +151,8 @@ describe('architecture line', () => {
     const { ui, texts, buttons } = await line($)
     expect(texts.some(t => t.includes('behind since 5 Nov'))).toBe(true)
     expect(buttons).toEqual([
-      ['arch-update', '3'],
-      ['arch-link', '4'],
+      ['arch-update', 'u'],
+      ['arch-link', '3'],
     ])
     await ui.unmount()
   })
@@ -165,8 +165,8 @@ describe('architecture line', () => {
     const { ui, texts, buttons } = await line($)
     expect(texts.some(t => t.includes('canvas deleted or unreachable'))).toBe(true)
     expect(buttons).toEqual([
-      ['arch-create', '3'],
-      ['arch-link', '4'],
+      ['arch-create', 'c'],
+      ['arch-link', '3'],
     ])
     await ui.unmount()
   })
@@ -190,8 +190,8 @@ describe('architecture line', () => {
     const { ui, texts, buttons } = await line($)
     expect(texts.some(t => t.includes('not compared since 1 Aug'))).toBe(true)
     expect(buttons).toEqual([
-      ['arch-update', '3'],
-      ['arch-link', '4'],
+      ['arch-update', 'u'],
+      ['arch-link', '3'],
     ])
     await ui.unmount()
   })
@@ -385,8 +385,8 @@ describe('the comparison after a pull request', () => {
       expect(buttons).toEqual([
         ['link', '1'],
         ['stop', '2'],
-        ['arch-update', '3'],
-        ['arch-link', '4'],
+        ['arch-update', 'u'],
+        ['arch-link', '3'],
       ])
       await ui.unmount()
     }

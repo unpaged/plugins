@@ -1005,14 +1005,18 @@ async function architectureRow($: Api, ui: Ui) {
   }
   const create = () => void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
   const updateNow = () => void startComparison($, 'update', null).catch(() => undefined)
+  // A bare digit typed into an empty prompt presses the band button with that
+  // hotkey: fine for link, which shows an address, never for create or update,
+  // which start a turn that writes. Those take a letter, which fires only once
+  // the line has the focus.
   const buttons =
     shown === 'none'
-      ? [button('arch-create', 'create', '3', create)]
+      ? [button('arch-create', 'create', 'c', create)]
       : shown === 'lost'
-        ? [button('arch-create', 'create', '3', create), button('arch-link', 'link', '4', link)]
+        ? [button('arch-create', 'create', 'c', create), button('arch-link', 'link', '3', link)]
         : shown === 'current' || shown === 'comparing'
           ? [button('arch-link', 'link', '3', link)]
-          : [button('arch-update', 'update', '3', updateNow), button('arch-link', 'link', '4', link)]
+          : [button('arch-update', 'update', 'u', updateNow), button('arch-link', 'link', '3', link)]
   const title = l.title && l.boardUrl ? [Text({ wrap: 'truncate-end', children: [Link({ href: l.boardUrl, children: [l.title] })] })] : []
   return Box({
     flexDirection: 'row',
