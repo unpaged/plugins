@@ -50,7 +50,6 @@ import {
   NONE,
   POINTER_PATH,
   PR_COMMAND,
-  PR_COMMAND_NOT,
   STATES,
   SUBMIT_DELAY_MS,
   UPDATE_PROMPT,
@@ -1006,17 +1005,17 @@ async function architectureRow($: Api, ui: Ui) {
   const create = () => void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
   const updateNow = () => void startComparison($, 'update', null).catch(() => undefined)
   // A bare digit typed into an empty prompt presses the band button with that
-  // hotkey: fine for link, which shows an address, never for create or update,
-  // which start a turn that writes. Those take a letter, which fires only once
-  // the line has the focus.
+  // hotkey, and this line stays for the whole session: a digit would take the
+  // leading 3 of any prompt. Every key is a letter, which fires only once the
+  // line has the focus (ctrl+x tab, or a click).
   const buttons =
     shown === 'none'
       ? [button('arch-create', 'create', 'c', create)]
       : shown === 'lost'
-        ? [button('arch-create', 'create', 'c', create), button('arch-link', 'link', '3', link)]
+        ? [button('arch-create', 'create', 'c', create), button('arch-link', 'link', 'l', link)]
         : shown === 'current' || shown === 'comparing'
-          ? [button('arch-link', 'link', '3', link)]
-          : [button('arch-update', 'update', 'u', updateNow), button('arch-link', 'link', '3', link)]
+          ? [button('arch-link', 'link', 'l', link)]
+          : [button('arch-update', 'update', 'u', updateNow), button('arch-link', 'link', 'l', link)]
   const title = l.title && l.boardUrl ? [Text({ wrap: 'truncate-end', children: [Link({ href: l.boardUrl, children: [l.title] })] })] : []
   return Box({
     flexDirection: 'row',
@@ -1156,7 +1155,8 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     const command = text((e as unknown as { command?: unknown }).command)
-    if (!PR_COMMAND.test(command) || PR_COMMAND_NOT.test(command)) return ran
+    // `--web` and `--dry-run` runs need no filter of their own: their answer carries no pull request address.
+    if (!PR_COMMAND.test(command)) return ran
     await afterPullRequest($, ran).catch(() => undefined)
     return ran
   })

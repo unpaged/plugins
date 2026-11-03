@@ -51,8 +51,6 @@ export const storedVerdictFor = (documentId: string) => `${STORED}${documentId}`
 
 /** `gh pr create` anywhere in a command, in a pipeline or after `&&` too. */
 export const PR_COMMAND = /(^|[\s;&|(`])gh\s+pr\s+create\b/
-/** A run that creates no pull request here: the browser does (`--web`), or nothing does (`--dry-run`). */
-export const PR_COMMAND_NOT = /\s--(web|dry-run)\b/
 /** A GitHub connector's pull-request tool, by name: a server named after GitHub and a tool that creates a pull request. */
 export const GITHUB_PR_TOOL = /^mcp__[A-Za-z0-9_-]*github[A-Za-z0-9_-]*__(create_pull_request|open_pull_request|pull_request_create|create_pr)$/i
 /** A pull request's address, on GitHub or a GitHub Enterprise host. */

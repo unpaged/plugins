@@ -119,7 +119,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('not compared from this machine yet'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
-      ['arch-link', '3'],
+      ['arch-link', 'l'],
     ])
     expect(link?.props.href).toBe(`https://unpaged.io/document/${ARCH}/edit`)
     expect(link?.text).toContain('shop-api')
@@ -137,7 +137,7 @@ describe('architecture line', () => {
     expect(w.store.get(`architecture:${ARCH}`)).toEqual(expect.objectContaining({ state: 'current', checkedAt: '2026-11-03', commit: 'abc1234' }))
     const { ui, texts, buttons } = await line($)
     expect(texts.some(t => t.includes('up to date') && t.includes('checked 3 Nov'))).toBe(true)
-    expect(buttons).toEqual([['arch-link', '3']])
+    expect(buttons).toEqual([['arch-link', 'l']])
     await ui.unmount()
   })
 
@@ -152,7 +152,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('behind since 5 Nov'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
-      ['arch-link', '3'],
+      ['arch-link', 'l'],
     ])
     await ui.unmount()
   })
@@ -166,7 +166,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('canvas deleted or unreachable'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-create', 'c'],
-      ['arch-link', '3'],
+      ['arch-link', 'l'],
     ])
     await ui.unmount()
   })
@@ -191,7 +191,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('not compared since 1 Aug'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
-      ['arch-link', '3'],
+      ['arch-link', 'l'],
     ])
     await ui.unmount()
   })
@@ -224,7 +224,7 @@ describe('the comparison after a pull request', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', on: true }))
     const { ui, texts, buttons } = await line($)
     expect(texts.some(t => t.includes('comparing with the pull request'))).toBe(true)
-    expect(buttons).toEqual([['arch-link', '3']])
+    expect(buttons).toEqual([['arch-link', 'l']])
     await ui.unmount()
     await w.startTurn()
     const answer = await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'behind', checkedAt: '2026-11-10', commit: 'bbb2222', title: 'shop-api' } as never)
@@ -287,6 +287,15 @@ describe('the comparison after a pull request', () => {
     await w.clock.advance(100)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'none' }))
     expect(w.calls.submits).toEqual([])
+  })
+
+  test('a pull request command followed by a browser view, or one whose title names a flag, still starts the comparison', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add a --dry-run flag to deploy" --fill && gh pr view --web' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request' }))
   })
 
   test('a pointer written after the session started is found when the pull request opens', async ($, on) => {
@@ -386,7 +395,7 @@ describe('the comparison after a pull request', () => {
         ['link', '1'],
         ['stop', '2'],
         ['arch-update', 'u'],
-        ['arch-link', '3'],
+        ['arch-link', 'l'],
       ])
       await ui.unmount()
     }
