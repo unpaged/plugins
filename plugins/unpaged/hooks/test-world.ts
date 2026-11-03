@@ -57,6 +57,8 @@ export function world(
     now?: number
     /** The session's working folder; `/repo` unless the test says otherwise. */
     cwd?: string
+    /** The session's agents, as `$.agent.list()` answers: none unless the test says otherwise. */
+    agents?: Array<{ id: string; status: string; type?: string; description?: string; teammateId?: string }>
   } = {},
 ) {
   const clock = mock.clock(on, { now: settings.now ?? 1_000_000 })
@@ -127,6 +129,7 @@ export function world(
     return { value: undefined }
   })
   on('session.cwd', () => ({ value: settings.cwd ?? '/repo' }))
+  on('agent.list', () => ({ value: (settings.agents ?? []).map(a => ({ type: 'general-purpose', description: 'helper', ...a })) }) as never)
   on('session.id', () => ({ value: 'session-1' }))
   on('process.run', (_$, e) => {
     const argv = [...e.argv]

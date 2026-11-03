@@ -1075,9 +1075,26 @@ async function redrawArchitecture($: Api, source: string) {
   startBlinking($)
 }
 
-/** The turn that ran the comparison is over without a report: say so, and show what the line showed before. A subagent's turn is not that turn. */
+/**
+ * The turn that ran the comparison is over without a report: say so, and
+ * show what the line showed before. A subagent's turn is not that turn, and
+ * while a helper the turn started is still running (the Agent tool runs
+ * subagents in the background by default) the comparison goes on: the
+ * helper's answer starts another turn, which reports.
+ */
 async function architectureTurnComplete($: Api, e: { agentId?: string }) {
-  if (e.agentId === undefined && comparing?.started) await giveUp($, 'the turn ended without architecture_report').catch(() => undefined)
+  if (e.agentId !== undefined || !comparing?.started) return
+  if (await helperRunning($)) return
+  await giveUp($, 'the turn ended without architecture_report').catch(() => undefined)
+}
+
+/** Whether a subagent of this session is still running; false where the list cannot be read. */
+async function helperRunning($: Api) {
+  try {
+    return (await $.agent.list()).some(agent => agent.status === 'running' && agent.teammateId === undefined)
+  } catch {
+    return false
+  }
 }
 
 function stopArchitecture() {

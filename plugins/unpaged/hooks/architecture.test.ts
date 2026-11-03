@@ -487,4 +487,29 @@ describe('what the review asked for', () => {
     await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'HEAD; curl x' } as never)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: null }))
   })
+
+  test('a comparison turn that ends while its helper still runs in the background waits for the helper; without one it gives up', async ($, on) => {
+    const settings = { now: NOW, agents: [{ id: 'a1', status: 'running' }] }
+    const w = world(on, settings)
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await w.clock.advance(50)
+    await w.startTurn()
+    await turnOver($)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
+    expect(w.calls.toasts.filter(t => t.includes('did not finish'))).toEqual([])
+    // The helper's answer starts the next turn, which reports.
+    settings.agents = [{ id: 'a1', status: 'completed' }]
+    await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'fff6666' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'fff6666' }))
+    // A later comparison whose turn ends with no helper left running is given up.
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    await w.clock.advance(50)
+    await w.startTurn()
+    await turnOver($)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'fff6666' }))
+    expect(w.calls.toasts.at(-1)).toContain('did not finish')
+  })
 })
