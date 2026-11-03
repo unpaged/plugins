@@ -298,6 +298,17 @@ describe('the comparison after a pull request', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request' }))
   })
 
+  test('a dry run whose printed body names another pull request starts nothing', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w, { answer: 'Would have created a Pull Request with:\ntitle:\tRetry the upload\nbody:\tFollow-up to https://github.com/acme/shop-api/pull/41\n' })
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --dry-run --title "Retry the upload" --body "Follow-up to https://github.com/acme/shop-api/pull/41"' } as never)
+    await w.clock.advance(100)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current' }))
+    expect(w.calls.submits).toEqual([])
+  })
+
   test('a pointer written after the session started is found when the pull request opens', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w, { pointer: false })

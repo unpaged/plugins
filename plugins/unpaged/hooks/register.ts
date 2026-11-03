@@ -46,6 +46,7 @@ import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, p
 import {
   BLINK_MS,
   CREATE_PROMPT,
+  DRY_RUN_HEADER,
   GITHUB_PR_TOOL,
   NONE,
   POINTER_PATH,
@@ -1155,8 +1156,8 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     const command = text((e as unknown as { command?: unknown }).command)
-    // `--web` and `--dry-run` runs need no filter of their own: their answer carries no pull request address.
-    if (!PR_COMMAND.test(command)) return ran
+    // `--web` prints no pull request address; a `--dry-run` prints the title and body it would have used, which may name another pull request.
+    if (!PR_COMMAND.test(command) || DRY_RUN_HEADER.test(text((ran as { text?: unknown }).text))) return ran
     await afterPullRequest($, ran).catch(() => undefined)
     return ran
   })

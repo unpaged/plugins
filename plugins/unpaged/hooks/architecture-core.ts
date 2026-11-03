@@ -53,6 +53,8 @@ export const storedVerdictFor = (documentId: string) => `${STORED}${documentId}`
 export const PR_COMMAND = /(^|[\s;&|(`])gh\s+pr\s+create\b/
 /** A GitHub connector's pull-request tool, by name: a server named after GitHub and a tool that creates a pull request. */
 export const GITHUB_PR_TOOL = /^mcp__[A-Za-z0-9_-]*github[A-Za-z0-9_-]*__(create_pull_request|open_pull_request|pull_request_create|create_pr)$/i
+/** What `gh pr create --dry-run` prints first: the title and body it would have used follow, and may name another pull request. */
+export const DRY_RUN_HEADER = /Would have created a Pull Request with:/
 /** A pull request's address, on GitHub or a GitHub Enterprise host. */
 export const PR_URL = /https?:\/\/[^\s"'<>)\]]+\/pull\/\d+/
 
@@ -85,7 +87,7 @@ export const comparePrompt = (pullRequest: string | null) =>
 export const UPDATE_PROMPT =
   'The person pressed "update" on the architecture line above the prompt (the unpaged plugin). Update the repository\'s architecture document now: invoke the skill unpaged:architecture with the arguments "update" and follow its Update section to the end; it ends by reporting with architecture_report, which settles the line.'
 export const CREATE_PROMPT =
-  'The person pressed "create" on the architecture line above the prompt (the unpaged plugin). Create the repository\'s architecture document now: invoke the skill unpaged:architecture with no arguments and follow its Create section to the end.'
+  'The person pressed "create" on the architecture line above the prompt (the unpaged plugin). Create the repository\'s architecture document now: invoke the skill unpaged:architecture with no arguments and follow its Create section to the end. Where the pointer file already names a canvas, this press is not the yes that Create step 1 asks for before it draws a new canvas or overwrites the pointer: say what you found, and ask first.'
 
 /** A `YYYY-MM-DD` value as given, else null. */
 export const day = (value: unknown) => (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? value.trim() : null)
