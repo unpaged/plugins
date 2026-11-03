@@ -489,7 +489,7 @@ describe('what the review asked for', () => {
   })
 
   test('a comparison turn that ends while its helper still runs in the background waits for the helper; without one it gives up', async ($, on) => {
-    const settings = { now: NOW, agents: [{ id: 'a1', status: 'running' }] }
+    const settings: { now: number; agents: Array<{ id: string; status: string }> } = { now: NOW, agents: [] }
     const w = world(on, settings)
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
@@ -497,6 +497,8 @@ describe('what the review asked for', () => {
     await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
     await w.clock.advance(50)
     await w.startTurn()
+    // The turn started its helper, which is still running when the turn ends.
+    settings.agents = [{ id: 'a1', status: 'running' }]
     await turnOver($)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
     expect(w.calls.toasts.filter(t => t.includes('did not finish'))).toEqual([])
@@ -510,6 +512,19 @@ describe('what the review asked for', () => {
     await w.startTurn()
     await turnOver($)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'fff6666' }))
+    expect(w.calls.toasts.at(-1)).toContain('did not finish')
+  })
+
+  test('a background agent started before the comparison does not keep a failed comparison blinking', async ($, on) => {
+    const w = world(on, { now: NOW, agents: [{ id: 'old', status: 'running' }] })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await w.clock.advance(50)
+    await w.startTurn()
+    await turnOver($)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
     expect(w.calls.toasts.at(-1)).toContain('did not finish')
   })
 })

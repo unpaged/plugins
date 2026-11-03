@@ -816,8 +816,12 @@ const light = atom({ plugin: 'unpaged', key: 'architecture' } as const, null as 
 let pointer: Pointer | null = null
 let verdict: Verdict | null = null
 let blink: { cancel: () => void } | null = null
-/** The comparison under way: what the line showed before, and whether the turn that runs it has started. */
-let comparing: { previous: ArchitectureLight; source: 'pull-request' | 'update'; started: boolean } | null = null
+/**
+ * The comparison under way: what the line showed before, whether the turn
+ * that runs it has started, and the agents the session already had when it
+ * did, so a helper that turn starts is told from an earlier background agent.
+ */
+let comparing: { previous: ArchitectureLight; source: 'pull-request' | 'update'; started: boolean; earlier: Set<string> } | null = null
 
 /**
  * The repository's top level: the nearest folder at or above the session's
@@ -946,14 +950,18 @@ async function startComparison($: Api, source: 'pull-request' | 'update', pullRe
   if (!pointer) return false
   const current = (await read($, light)) ?? lightFrom(pointer, verdict)
   if (current.state === 'none') return false
-  comparing = { previous: current, source, started: false }
+  comparing = { previous: current, source, started: false, earlier: new Set() }
   await update($, light, () => ({ ...current, state: 'comparing' as const, source, on: true }))
   startBlinking($)
   const prompt = source === 'pull-request' ? comparePrompt(pullRequest) : UPDATE_PROMPT
   $.clock.after(SUBMIT_DELAY_MS, () => {
     const submitted = $.prompt.submit({ text: prompt })
-    void submitted.then(() => {
-      if (comparing) comparing.started = true
+    void submitted.then(async () => {
+      const under = comparing
+      if (!under) return
+      // The agents the session had as the turn starts: any running later, outside this set, is the turn's helper.
+      under.earlier = new Set((await agentIds($)).map(agent => agent.id))
+      under.started = true
     }).catch(() => giveUp($, 'its prompt could not be submitted'))
   })
   return true
@@ -1088,13 +1096,20 @@ async function architectureTurnComplete($: Api, e: { agentId?: string }) {
   await giveUp($, 'the turn ended without architecture_report').catch(() => undefined)
 }
 
-/** Whether a subagent of this session is still running; false where the list cannot be read. */
-async function helperRunning($: Api) {
+/** The session's agents, or none where the list cannot be read. */
+async function agentIds($: Api) {
   try {
-    return (await $.agent.list()).some(agent => agent.status === 'running' && agent.teammateId === undefined)
+    return await $.agent.list()
   } catch {
-    return false
+    return []
   }
+}
+
+/** Whether a subagent the comparison's own turn started is still running: one outside the set the session had when that turn began. */
+async function helperRunning($: Api) {
+  const under = comparing
+  if (!under) return false
+  return (await agentIds($)).some(agent => agent.status === 'running' && agent.teammateId === undefined && !under.earlier.has(agent.id))
 }
 
 function stopArchitecture() {
