@@ -956,9 +956,12 @@ async function startComparison($: Api, source: 'pull-request' | 'update', pullRe
   const prompt = source === 'pull-request' ? comparePrompt(pullRequest) : UPDATE_PROMPT
   $.clock.after(SUBMIT_DELAY_MS, () => {
     const submitted = $.prompt.submit({ text: prompt })
-    void submitted.then(async () => {
+    void submitted.then(async result => {
       const under = comparing
       if (!under) return
+      // A refused prompt resolves with a reason, and no turn follows: give up at once.
+      const dropped = (result as { drop?: unknown } | undefined)?.drop
+      if (dropped !== undefined) return giveUp($, `its prompt was refused: ${text(dropped) || 'no reason given'}`)
       // The agents the session had as the turn starts: any running later, outside this set, is the turn's helper.
       under.earlier = new Set((await agentIds($)).map(agent => agent.id))
       under.started = true

@@ -38,7 +38,7 @@ export const POINTER_PATH = '.unpaged/architecture.json'
 export const CHECKED_PREFIX = '**Checked:**'
 /** The date note while the canvas is behind: `**Behind since:** YYYY-MM-DD`. */
 export const BEHIND_PREFIX = '**Behind since:**'
-/** The small text beneath the date note: `compared at <commit> on YYYY-MM-DD`. */
+/** The small text beneath the date note: `compared at <commit> (base <merge base>) on YYYY-MM-DD`; the first word is the commit, the day comes last. */
 export const COMMIT_PREFIX = 'compared at '
 /** A canvas not compared for this long is red. */
 export const STALE_AFTER_MS = 90 * 24 * 60 * 60 * 1000

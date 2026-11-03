@@ -57,6 +57,8 @@ export function world(
     now?: number
     /** The session's working folder; `/repo` unless the test says otherwise. */
     cwd?: string
+    /** The engine refuses every submitted prompt with this reason, as a Stop or a blocking hook would; otherwise prompts queue. */
+    dropPrompt?: string
     /** The session's agents, as `$.agent.list()` answers: none unless the test says otherwise. */
     agents?: Array<{ id: string; status: string; type?: string; description?: string; teammateId?: string }>
   } = {},
@@ -198,6 +200,7 @@ export function world(
   const pendingSubmits: Array<() => void> = []
   on('prompt.submit', (_$, e) => {
     calls.submits.push(e.text)
+    if (settings.dropPrompt) return { drop: settings.dropPrompt } as never
     return new Promise<{ text: string }>(resolve => {
       pendingSubmits.push(() => resolve({ text: e.text }))
     }) as never

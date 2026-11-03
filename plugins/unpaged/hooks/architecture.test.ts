@@ -527,4 +527,26 @@ describe('what the review asked for', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
     expect(w.calls.toasts.at(-1)).toContain('did not finish')
   })
+
+  test('a refused comparison prompt gives the comparison up at once, and the next pull request starts anew', async ($, on) => {
+    const w = world(on, { now: NOW, dropPrompt: 'a Stop stands' })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict())
+    await start($, w)
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
+    await w.clock.advance(50)
+    expect(w.calls.submits).toHaveLength(1)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
+    expect(w.calls.toasts.at(-1)).toContain('refused: a Stop stands')
+    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
+  })
+
+  test('a commit note that also names the merge base still gives the commit and the day', async ($, on) => {
+    const w = world(on, { now: NOW, docRule: 'allow', document: canvas('**Checked:** 2026-11-03', 'compared at def5678 (base 0123abc) on 2026-11-08') })
+    repo(on, w)
+    await start($, w, l => l?.state === 'current')
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'def5678', checkedAt: Date.parse('2026-11-08T00:00:00Z') }))
+  })
 })
