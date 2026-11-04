@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Unpaged plugins. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Unprefixed versions refer to `plugins/unpaged/.claude-plugin/plugin.json`; Codex entries name their package and use `plugins/unpaged-codex/.codex-plugin/plugin.json`.
+All notable changes to the Unpaged plugins. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Unprefixed versions refer to `plugins/unpaged/.claude-plugin/plugin.json`; Codex entries name their package and use `plugins/unpaged-codex/.codex-plugin/plugin.json`; Antigravity entries name their package and use `plugins/unpaged-antigravity/plugin.json`.
 
 ## [Unreleased]
 
@@ -10,6 +10,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 - **The repository's architecture document, kept in step with the code** ([#43](https://github.com/unpaged/plugins/pull/43)). `/unpaged:architecture` reads the code and draws its architecture as a canvas in an *Architecture* folder of your library, the structure the agent decides from what the code is; every card is a claim about the code. It writes a small pointer file at the repository's top level, `.unpaged/architecture.json` (the canvas id and a skip list for tests and generated files), to commit with the code, and a date note on the canvas (`**Checked:** <day>`, with the commit beneath). From then on, right after the session opens a pull request (`gh pr create`, or a GitHub connector's pull-request tool, once the answer carries the pull request's address), the plugin starts a comparison in a turn of its own: a separate helper with a clean slate judges, claim by claim, whether the change alters what the canvas says, over everything since the last compared commit. Every claim holds → the date note moves to today. Some do not → the note reads `**Behind since:** <day>` and one comment thread on the canvas names the flagged cards; no card is rewritten. `/unpaged:architecture update` re-checks the whole canvas against today's code, rewrites what no longer holds, leaves one open comment per changed card quoting what it said before, and resets the date note.
 - **A line above the prompt for the architecture document**, beside the listening line: `● Architecture  <canvas>  ·  up to date  ·  checked 3 Nov  l: link` in green; yellow with `u: update` once it is behind, blinking while a comparison runs; red when the canvas is deleted or unreachable, or was not compared for three months; and in a git repository without a pointer file, a grey `no architecture document yet  c: create`. The canvas's name is its link. At session start the line is drawn from the pointer file and the verdict the plugin kept on this machine, then from the canvas's date note where your permission rules allow the plugin's own `document_get` ([Permissions](plugins/unpaged/README.md#permissions)); with neither, it says *not compared from this machine yet* until the next comparison. The plugin's new `architecture_report` tool is what the command settles the line with.
+
+## [unpaged-antigravity 0.1.0] - 2026-10-29
+
+### Added
+
+- Unpaged for Google Antigravity (`plugins/unpaged-antigravity`) ([#42](https://github.com/unpaged/plugins/pull/42)): `plugin.json` manifest, bundled Unpaged MCP server (`mcp_config.json`), session rules (`rules/AGENTS.md`), the `visual-plan`, `as-built` and `listen` skills, and the `~/.gemini/unpaged` polling listener (`monitors/listen.mjs --once <documentId>` and `monitors/keys.mjs`) that exits on the first new `@agent` comment batch to trigger Antigravity's reactive background-task wakeup while persisting poll cursor and seen event IDs across wakeups.
 
 ## [1.12.0] - 2026-10-26
 
@@ -257,6 +263,7 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 [Unreleased]: https://github.com/unpaged/plugins/compare/v1.13.0...HEAD
 [1.13.0]: https://github.com/unpaged/plugins/compare/v1.12.0...v1.13.0
+[unpaged-antigravity 0.1.0]: https://github.com/unpaged/plugins/pull/42
 [1.12.0]: https://github.com/unpaged/plugins/releases/tag/v1.12.0
 [1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
 [1.10.0]: https://github.com/unpaged/plugins/releases/tag/v1.10.0

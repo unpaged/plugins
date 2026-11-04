@@ -1,0 +1,11 @@
+{
+  "name": "unpaged",
+  "displayName": "Unpaged",
+  "description": "Visual plans and whiteboards on Unpaged — render plans as interactive canvases, receive @agent comments in your session, keep an implementation Decision log, and compile as-built records for code review.",
+  "version": "0.1.0",
+  "suggestedPrompts": [
+    "Create a visual plan on Unpaged for this feature",
+    "Compile the as-built record on Unpaged for this branch",
+    "Check Unpaged listener status for this project"
+  ]
+}
