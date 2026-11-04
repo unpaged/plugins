@@ -41,11 +41,12 @@ agy plugin install ./plugins/unpaged-antigravity
 If you use the Antigravity Desktop App without the `agy` CLI on your `PATH`, copy `plugins/unpaged-antigravity` into Antigravity's global plugins directory (`~/.gemini/config/plugins/unpaged`) and restart the app:
 
 ```sh
-git clone --depth 1 https://github.com/unpaged/plugins.git /tmp/unpaged-plugins && \
+tmp="$(mktemp -d)" && \
+  git clone --depth 1 https://github.com/unpaged/plugins.git "$tmp" && \
   mkdir -p ~/.gemini/config/plugins && \
   rm -rf ~/.gemini/config/plugins/unpaged && \
-  cp -R /tmp/unpaged-plugins/plugins/unpaged-antigravity ~/.gemini/config/plugins/unpaged && \
-  rm -rf /tmp/unpaged-plugins
+  cp -R "$tmp/plugins/unpaged-antigravity" ~/.gemini/config/plugins/unpaged && \
+  rm -rf "$tmp"
 ```
 
 Once installed, the plugin appears under **Customizations → Installed** in the Antigravity app. On first use, authenticate the **unpaged** MCP server in Antigravity with your Unpaged account.
