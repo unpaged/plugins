@@ -22,6 +22,8 @@ See the plan before the code. The `visual-plan` skill renders the plan Antigravi
 
 ## Install
 
+### With the `agy` CLI
+
 Install directly from GitHub or a local checkout with the `agy` CLI:
 
 ```sh
@@ -34,7 +36,19 @@ Or from a local clone of this repository:
 agy plugin install ./plugins/unpaged-antigravity
 ```
 
-On first use, authenticate the **unpaged** MCP server in Antigravity with your Unpaged account.
+### Antigravity Desktop App (without the `agy` CLI)
+
+If you use the Antigravity Desktop App without the `agy` CLI on your `PATH`, copy `plugins/unpaged-antigravity` into Antigravity's global plugins directory (`~/.gemini/config/plugins/unpaged`) and restart the app:
+
+```sh
+git clone --depth 1 https://github.com/unpaged/plugins.git /tmp/unpaged-plugins && \
+  mkdir -p ~/.gemini/config/plugins && \
+  rm -rf ~/.gemini/config/plugins/unpaged && \
+  cp -R /tmp/unpaged-plugins/plugins/unpaged-antigravity ~/.gemini/config/plugins/unpaged && \
+  rm -rf /tmp/unpaged-plugins
+```
+
+Once installed, the plugin appears under **Customizations → Installed** in the Antigravity app. On first use, authenticate the **unpaged** MCP server in Antigravity with your Unpaged account.
 
 ## Use
 

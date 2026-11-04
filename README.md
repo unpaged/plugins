@@ -19,6 +19,16 @@ Install [Unpaged for Google Antigravity](plugins/unpaged-antigravity/README.md) 
 agy plugin install https://github.com/unpaged/plugins/tree/main/plugins/unpaged-antigravity
 ```
 
+Or in the Antigravity Desktop App without the `agy` CLI (restart the app after copying):
+
+```sh
+git clone --depth 1 https://github.com/unpaged/plugins.git /tmp/unpaged-plugins && \
+  mkdir -p ~/.gemini/config/plugins && \
+  rm -rf ~/.gemini/config/plugins/unpaged && \
+  cp -R /tmp/unpaged-plugins/plugins/unpaged-antigravity ~/.gemini/config/plugins/unpaged && \
+  rm -rf /tmp/unpaged-plugins
+```
+
 On first use, authenticate the bundled **unpaged** MCP server in Antigravity with your Unpaged account. Then ask Antigravity to create a visual plan on Unpaged (`visual-plan`), check or arm `@agent` comment listeners (`listen`), or compile an as-built record (`as-built`).
 
 ## Install for Codex — preview
