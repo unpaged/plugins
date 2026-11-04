@@ -31,7 +31,7 @@
 // script that older clients keep using; this file is its host.
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
-import type { ArmedCanvas } from '../types'
+import type { ArchitectureLight, ArmedCanvas } from '../types'
 import {
   ACK_TEXT,
   PROTOCOL_PREAMBLE,
@@ -43,6 +43,33 @@ import {
 } from '../monitors/listen-core.mjs'
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
+import {
+  BLINK_MS,
+  CREATE_PROMPT,
+  DRY_RUN_HEADER,
+  GITHUB_PR_TOOL,
+  NONE,
+  POINTER_PATH,
+  PR_COMMAND,
+  STATES,
+  SUBMIT_DELAY_MS,
+  UPDATE_PROMPT,
+  boardUrlFor,
+  comparePrompt,
+  day,
+  isCommit,
+  describeLight,
+  lightColor,
+  isVerdictState,
+  lightFrom,
+  parsePointer,
+  pullRequestUrl,
+  shownState,
+  storedVerdictFor,
+  text,
+  verdictFromDocument,
+} from './architecture-core'
+import type { Pointer, Verdict } from './architecture-core'
 
 type On = Parameters<Register>[0]
 type Hook = Extract<Parameters<On>[number], (...args: never[]) => unknown>
@@ -151,9 +178,6 @@ function forgetUnrevoked(documentId: string, keyId: string) {
 
 /** `leftToAgent`: the key this arm replaced, left for the agent to revoke in the turn it minted in. */
 type ArmResult = { already: boolean; canvas: ArmedCanvas | undefined; first?: string; leftToAgent?: string }
-
-const boardUrlFor = (documentId: string) => `https://unpaged.io/document/${documentId}/edit`
-const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
 /**
  * A canvas's key in the plugin's store, one entry per canvas. Claude Code
@@ -782,8 +806,371 @@ async function restoreAfterReload($: Api) {
   await sync($)
 }
 
+// ---------------------------------------------------------------------------
+// The architecture line: its state and its hooks' work (its pure part is architecture-core.ts).
+
+const light = atom({ plugin: 'unpaged', key: 'architecture' } as const, null as ArchitectureLight | null)
+
+// Module records: the pointer the working folder holds and the last verdict,
+// and the comparison under way. The atom is the line's view of them.
+let pointer: Pointer | null = null
+let verdict: Verdict | null = null
+let blink: { cancel: () => void } | null = null
+/**
+ * The comparison under way: what the line showed before, whether the turn
+ * that runs it has started, and the agents the session already had when it
+ * did, so a helper that turn starts is told from an earlier background agent.
+ */
+let comparing: { previous: ArchitectureLight; source: 'pull-request' | 'update'; started: boolean; earlier: Set<string> } | null = null
+
+/**
+ * The repository's top level: the nearest folder at or above the session's
+ * working folder that holds `.git` (a folder, or a worktree's file), spelled
+ * out whole; null outside a repository. A session started in a subfolder of
+ * a monorepo finds the pointer file at the top, where the command writes it.
+ */
+async function repositoryRoot($: Api): Promise<string | null> {
+  let folder = (await $.session.cwd()).replace(/[\\/]+$/, '')
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      if (await $.fs.exists(`${folder}/.git`)) return folder
+    } catch {
+      return null
+    }
+    const up = folder.replace(/[\\/][^\\/]*$/, '')
+    if (up === folder || up === '') return null
+    folder = up
+  }
+  return null
+}
+
+async function readPointer($: Api): Promise<Pointer | null> {
+  try {
+    const root = await repositoryRoot($)
+    if (!root) return null
+    const path = `${root}/${POINTER_PATH}`
+    if (!(await $.fs.exists(path))) return null
+    return parsePointer(await $.fs.read(path))
+  } catch {
+    return null
+  }
+}
+
+/** Whether the working folder is in a git repository. */
+async function isRepository($: Api) {
+  return (await repositoryRoot($)) !== null
+}
+
+async function loadVerdict($: Api, documentId: string): Promise<Verdict | null> {
+  const stored = (await $.store.get(storedVerdictFor(documentId))) as Partial<Verdict> | undefined
+  if (!stored || stored.documentId !== documentId || !isVerdictState(stored.state)) return null
+  return {
+    documentId,
+    state: stored.state,
+    title: text(stored.title) || null,
+    checkedAt: day(stored.checkedAt),
+    commit: isCommit(stored.commit) ? stored.commit : null,
+    behindSince: day(stored.behindSince),
+    reportedAt: text(stored.reportedAt),
+  }
+}
+
+/**
+ * Reads the date note off the canvas, only where the person's rules already
+ * let the plugin read a canvas on its own (a check that runs nothing and opens
+ * no dialog): `lost` when the server says the canvas is gone, the note's
+ * verdict when it has one, null when nothing can be said from here.
+ */
+async function probe($: Api, found: Pointer): Promise<Verdict | null> {
+  const server = await mcpServer($)
+  if ((await ruleOn($, server, 'document_get', { documentId: found.documentId })) !== 'allow') return null
+  const reportedAt = new Date(await $.clock.now()).toISOString()
+  try {
+    const result = (await $.mcp.call(server, 'document_get', { documentId: found.documentId })) as {
+      content?: Array<{ type?: string; text?: string }>
+      isError?: boolean
+      structuredContent?: unknown
+    }
+    const body = mcpText(result)
+    if (result.isError) {
+      return /not found|no such|does not exist|deleted|permission|forbidden|access/i.test(body)
+        ? { documentId: found.documentId, state: 'lost', title: found.title, checkedAt: null, commit: null, behindSince: null, reportedAt }
+        : null
+    }
+    return verdictFromDocument(found.documentId, result.structuredContent ?? body, reportedAt)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Reads the pointer and the verdict stored on this machine again and draws
+ * the line from them, at once; then, where the rules allow it, reads the date
+ * note off the canvas and draws again from that. A comparison under way is
+ * left as it is.
+ */
+async function refresh($: Api, { canvas = true } = {}) {
+  pointer = await readPointer($)
+  if (!pointer) {
+    verdict = null
+    const repository = await isRepository($)
+    if (!comparing) await update($, light, () => (repository ? NONE : null))
+    return
+  }
+  const found = pointer
+  verdict = await loadVerdict($, found.documentId)
+  if (!comparing) await update($, light, () => lightFrom(found, verdict))
+  if (!canvas) return
+  const probed = await probe($, found)
+  if (!probed || pointer?.documentId !== found.documentId) return
+  verdict = probed
+  await $.store.set(storedVerdictFor(found.documentId), probed).catch(() => undefined)
+  if (!comparing) await update($, light, () => lightFrom(found, probed))
+}
+
+function stopBlinking() {
+  blink?.cancel()
+  blink = null
+}
+
+/** The dot blinks while a comparison runs: the line reads the phase. */
+function startBlinking($: Api) {
+  stopBlinking()
+  blink = $.clock.every(BLINK_MS, () => update($, light, l => (l && l.state === 'comparing' ? { ...l, on: !l.on } : l)))
+}
+
+/**
+ * Starts a comparison: the line blinks yellow and, once the hook that saw the
+ * pull request has answered, one prompt starts the turn that runs it. One at
+ * a time; none without a pointer.
+ */
+async function startComparison($: Api, source: 'pull-request' | 'update', pullRequest: string | null) {
+  if (comparing) return false
+  if (!pointer) pointer = await readPointer($)
+  if (!pointer) return false
+  const current = (await read($, light)) ?? lightFrom(pointer, verdict)
+  if (current.state === 'none') return false
+  comparing = { previous: current, source, started: false, earlier: new Set() }
+  await update($, light, () => ({ ...current, state: 'comparing' as const, source, on: true }))
+  startBlinking($)
+  const prompt = source === 'pull-request' ? comparePrompt(pullRequest) : UPDATE_PROMPT
+  $.clock.after(SUBMIT_DELAY_MS, () => {
+    const submitted = $.prompt.submit({ text: prompt })
+    void submitted.then(async result => {
+      const under = comparing
+      if (!under) return
+      // A refused prompt resolves with a reason, and no turn follows: give up at once.
+      const dropped = (result as { drop?: unknown } | undefined)?.drop
+      if (dropped !== undefined) return giveUp($, `its prompt was refused: ${text(dropped) || 'no reason given'}`)
+      // The agents the session had as the turn starts: any running later, outside this set, is the turn's helper.
+      under.earlier = new Set((await agentIds($)).map(agent => agent.id))
+      under.started = true
+    }).catch(() => giveUp($, 'its prompt could not be submitted'))
+  })
+  return true
+}
+
+/** The comparison under way reported nothing: the line shows what it showed before, and says why. */
+async function giveUp($: Api, why: string) {
+  const under = comparing
+  if (!under) return
+  comparing = null
+  stopBlinking()
+  await update($, light, () => under.previous)
+  $.ui.toast(`The architecture comparison did not finish (${why}); the line shows the last known state.`, { timeoutMs: 10000 })
+}
+
+/** A verdict the command reported: kept on this machine, drawn, and said. */
+async function settleVerdict($: Api, found: Pointer, reported: Verdict) {
+  verdict = reported
+  comparing = null
+  stopBlinking()
+  await $.store.set(storedVerdictFor(reported.documentId), reported).catch(() => undefined)
+  await update($, light, () => lightFrom(found, reported))
+}
+
+type Ui = ReturnType<Api['ui']['resolve']>
+
+/** The architecture line, drawn with the surface's own elements; null while there is nothing to say. */
+async function architectureRow($: Api, ui: Ui) {
+  const l = await read($, light)
+  if (!l) return null
+  const now = await $.clock.now()
+  const { Box, Text, Button, Link } = ui
+  const shown = shownState(l, now)
+  const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
+  const button = (key: string, label: string, hotkey: string, onPress: () => void) => Button({ key, label, hotkey, plain: true, onPress })
+  const link = () => {
+    if (l.boardUrl) $.ui.toast(l.boardUrl, { timeoutMs: 10000 })
+  }
+  const create = () => void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
+  const updateNow = () => void startComparison($, 'update', null).catch(() => undefined)
+  // A bare digit typed into an empty prompt presses the band button with that
+  // hotkey, and this line stays for the whole session: a digit would take the
+  // leading 3 of any prompt. Every key is a letter, which fires only once the
+  // line has the focus (ctrl+x tab, or a click).
+  const buttons =
+    shown === 'none'
+      ? [button('arch-create', 'create', 'c', create)]
+      : shown === 'lost'
+        ? [button('arch-create', 'create', 'c', create), button('arch-link', 'link', 'l', link)]
+        : shown === 'current' || shown === 'comparing'
+          ? [button('arch-link', 'link', 'l', link)]
+          : [button('arch-update', 'update', 'u', updateNow), button('arch-link', 'link', 'l', link)]
+  const title = l.title && l.boardUrl ? [Text({ wrap: 'truncate-end', children: [Link({ href: l.boardUrl, children: [l.title] })] })] : []
+  return Box({
+    flexDirection: 'row',
+    columnGap: 2,
+    children: [
+      fixed(Text({ color: lightColor(shown), children: [shown === 'comparing' && !l.on ? '○' : '●'] })),
+      fixed(Text({ bold: true, children: ['Architecture'] })),
+      ...title,
+      fixed(Text({ dimColor: true, children: [`·  ${describeLight(l, now)}`] })),
+      ...buttons,
+    ],
+  })
+}
+
+/** Starts the comparison a pull request calls for, once the pointer names a canvas; the tool's answer goes back as it came. */
+async function afterPullRequest($: Api, ran: { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown }) {
+  if (ran.deny !== undefined || ran.isError === true) return
+  const url = pullRequestUrl(ran)
+  if (!url) return
+  // A pointer committed since the session started (a teammate's, pulled meanwhile) is found now.
+  if (!pointer) await refresh($, { canvas: false })
+  if (!pointer) return
+  await startComparison($, 'pull-request', url)
+}
+
+// The hooks the engine lets a plugin register once (session.start, the
+// classic SessionStart, turn.complete, session.end) are register.ts's: it
+// calls these from them. The matched tool.call hooks below are this file's.
+
+/** At session start, before the session goes on: the tool the command reports with. */
+async function registerArchitectureTool($: Api) {
+  try {
+    await $.tool.register({
+      name: 'architecture_report',
+      description:
+        "Report the verdict of a comparison between the repository's architecture canvas and its code, at the end of /unpaged:architecture (create, compare or update): the line above the prompt settles on it. state is current (every claim holds), behind (some do not; behindSince is the day it fell behind) or lost (the canvas is deleted or unreachable); checkedAt is the day of the comparison and commit the commit it was made at, both as written on the canvas's date note. The documentId must be the one .unpaged/architecture.json names.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          documentId: { type: 'string' },
+          state: { type: 'string', enum: [...STATES] },
+          checkedAt: { type: 'string', description: 'YYYY-MM-DD' },
+          commit: { type: 'string' },
+          behindSince: { type: 'string', description: 'YYYY-MM-DD' },
+          title: { type: 'string' },
+        },
+        required: ['documentId', 'state'],
+      },
+    })
+  } catch (err) {
+    $.ui.log(`architecture_report registration failed: ${String(err)}`, { to: 'debug' })
+  }
+}
+
+/** Once the session has started: the line from the pointer file and the last verdict, and the canvas's date note after it, where it may be read. */
+async function startArchitecture($: Api) {
+  await refresh($).catch(() => undefined)
+}
+
+/**
+ * /clear and /resume reset the atoms but not this module: draw the line again.
+ * A comparison under way is drawn as such, blinking, and goes on; one whose
+ * turn had not started when the session was cleared is given up, since its
+ * queued prompt may be gone with the conversation, and the line says so.
+ */
+async function redrawArchitecture($: Api, source: string) {
+  const under = comparing
+  if (!under) return refresh($).catch(() => undefined)
+  if (source === 'clear' && !under.started) return giveUp($, 'the conversation was cleared before its turn started').catch(() => undefined)
+  await update($, light, () => ({ ...under.previous, state: 'comparing' as const, source: under.source, on: true })).catch(() => undefined)
+  startBlinking($)
+}
+
+/**
+ * The turn that ran the comparison is over without a report: say so, and
+ * show what the line showed before. A subagent's turn is not that turn, and
+ * while a helper the turn started is still running (the Agent tool runs
+ * subagents in the background by default) the comparison goes on: the
+ * helper's answer starts another turn, which reports.
+ */
+async function architectureTurnComplete($: Api, e: { agentId?: string }) {
+  if (e.agentId !== undefined || !comparing?.started) return
+  if (await helperRunning($)) return
+  await giveUp($, 'the turn ended without architecture_report').catch(() => undefined)
+}
+
+/** The session's agents, or none where the list cannot be read. */
+async function agentIds($: Api) {
+  try {
+    return await $.agent.list()
+  } catch {
+    return []
+  }
+}
+
+/** Whether a subagent the comparison's own turn started is still running: one outside the set the session had when that turn began. */
+async function helperRunning($: Api) {
+  const under = comparing
+  if (!under) return false
+  return (await agentIds($)).some(agent => agent.status === 'running' && agent.teammateId === undefined && !under.earlier.has(agent.id))
+}
+
+function stopArchitecture() {
+  stopBlinking()
+}
+
 export const register: Register = on => {
+  // The architecture line's own hooks: its report tool and the pull-request tools.
+  on('tool.call', { tool: 'mcp__unpaged__architecture_report' }, async ($, e) => {
+    const input = e as unknown as { documentId?: unknown; state?: unknown; checkedAt?: unknown; commit?: unknown; behindSince?: unknown; title?: unknown }
+    const documentId = text(input.documentId)
+    if (!isDocumentId(documentId)) return { result: 'architecture_report: documentId must be the canvas id the pointer file names.' }
+    if (!isVerdictState(input.state)) return { result: 'architecture_report: state must be current, behind or lost.' }
+    // The pointer may have just been written (create) or changed: read it again.
+    pointer = await readPointer($)
+    if (!pointer || pointer.documentId !== documentId) {
+      return { result: `architecture_report: ${POINTER_PATH} does not name canvas ${documentId}; write the pointer file first, then report again.` }
+    }
+    const checkedAt = day(input.checkedAt)
+    const reported: Verdict = {
+      documentId,
+      state: input.state,
+      title: text(input.title) || pointer.title,
+      checkedAt,
+      commit: isCommit(text(input.commit).trim()) ? text(input.commit).trim() : null,
+      behindSince: input.state === 'behind' ? (day(input.behindSince) ?? checkedAt) : null,
+      reportedAt: new Date(await $.clock.now()).toISOString(),
+    }
+    await settleVerdict($, pointer, reported)
+    const l = lightFrom(pointer, reported)
+    return { result: `Reported. The line above the prompt now shows the architecture document as: ${describeLight(l, await $.clock.now())}.` }
+  })
+
+  // A pull request the session opens from the terminal: `gh pr create`, once
+  // its answer carries the pull request's address. The command runs as it
+  // would; the comparison starts in a turn of its own after this one.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    const command = text((e as unknown as { command?: unknown }).command)
+    // `--web` prints no pull request address; a `--dry-run` prints the title and body it would have used, which may name another pull request.
+    if (!PR_COMMAND.test(command) || DRY_RUN_HEADER.test(text((ran as { text?: unknown }).text))) return ran
+    await afterPullRequest($, ran).catch(() => undefined)
+    return ran
+  })
+
+  // A pull request the session opens through a GitHub connector's tool.
+  on('tool.call', { tool: GITHUB_PR_TOOL }, async ($, e, next) => {
+    const ran = await next(e)
+    await afterPullRequest($, ran).catch(() => undefined)
+    return ran
+  })
+
   on('session.start', async ($, e, next) => {
+    await registerArchitectureTool($)
     try {
       await $.tool.register({
         name: 'listen_arm',
@@ -821,12 +1208,16 @@ export const register: Register = on => {
     }
     const started = await next(e)
     void restoreAfterReload($).catch(() => undefined)
+    // The line from the pointer file and this machine's record; the canvas is
+    // read after the session is up, where the rules allow it.
+    void startArchitecture($)
     return started
   })
 
   // /clear and /resume reset the atoms but not this module: rebuild the view.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await sync($)
+    await redrawArchitecture($, String(e.source))
     return next(e)
   })
 
@@ -986,7 +1377,8 @@ export const register: Register = on => {
     return ran
   })
 
-  // The reply turn is over: the comments it answered are no longer new, on the canvases it covered.
+  // The reply turn is over: the comments it answered are no longer new, on the
+  // canvases it covered. A comparison turn over without a report is put back.
   on('turn.complete', async ($, e, next) => {
     const covered = await read($, replying)
     if (covered.length > 0) {
@@ -994,16 +1386,21 @@ export const register: Register = on => {
       await update($, replying, () => [])
       await sync($)
     }
+    await architectureTurnComplete($, e)
     return next(e)
   })
 
-  // The band above the prompt: one line while this session listens.
+  // The band above the prompt: one line while this session listens, and one
+  // for the repository's architecture document while there is something to say.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const list = await read($, armed)
-    if (list.length === 0 || e.props.hasSurvey) return next(e)
+    const ui = $.ui.resolve(e)
+    const architecture = await architectureRow($, ui)
+    if (list.length === 0 && !architecture) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = ui
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
@@ -1013,7 +1410,9 @@ export const register: Register = on => {
     // the address after the title, so only the title gives way to the width
     // (the rest never wraps), and `1: link` shows the address whole.
     const ours =
-      list.length === 1
+      list.length === 0
+        ? null
+        : list.length === 1
         ? Box({
             flexDirection: 'row',
             columnGap: 2,
@@ -1038,7 +1437,7 @@ export const register: Register = on => {
               button('stop-all', 'stop all', '2', () => void stopAll($)),
             ],
           })
-    const children = typeof theirs === 'object' && theirs !== null ? [theirs, ours] : [ours]
+    const children = [typeof theirs === 'object' && theirs !== null ? theirs : null, ours, architecture].filter(row => row !== null)
     return Box({ flexDirection: 'column', children })
   })
 
@@ -1076,6 +1475,8 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     if (ENDING_REASONS.has(e.reason)) {
       for (const loop of loops.values()) loop.controller.abort()
+      // /clear and /resume end no comparison: its turn goes on, and the redraw keeps it blinking.
+      stopArchitecture()
     }
     return next(e)
   })
