@@ -4,6 +4,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [unpaged-antigravity 0.1.1] - 2026-11-04
+
+### Fixed
+
+- The `as-built` skill runs its `keys.mjs alive` check with `BypassSandbox: true` whenever this conversation's `listen.mjs --once` task was started with it ([#44](https://github.com/unpaged/plugins/pull/44)). Sandboxed, the check read a connected listener as `monitor:absent` where Standard Sandbox Mode blocks `~/.gemini/unpaged`, and the skill told the user push was not armed while the conversation was listening.
+
 ## [1.13.0] - 2026-11-03
 
 ### Added
@@ -263,6 +269,7 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 [Unreleased]: https://github.com/unpaged/plugins/compare/v1.13.0...HEAD
 [1.13.0]: https://github.com/unpaged/plugins/compare/v1.12.0...v1.13.0
+[unpaged-antigravity 0.1.1]: https://github.com/unpaged/plugins/pull/44
 [unpaged-antigravity 0.1.0]: https://github.com/unpaged/plugins/pull/42
 [1.12.0]: https://github.com/unpaged/plugins/releases/tag/v1.12.0
 [1.11.0]: https://github.com/unpaged/plugins/releases/tag/v1.11.0
