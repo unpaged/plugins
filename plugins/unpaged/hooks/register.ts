@@ -991,12 +991,16 @@ async function settleVerdict($: Api, found: Pointer, reported: Verdict) {
 
 type Ui = ReturnType<Api['ui']['resolve']>
 
-/** The architecture line, drawn with the surface's own elements; null while there is nothing to say. */
-async function architectureRow($: Api, ui: Ui) {
+/**
+ * The architecture line, drawn with the surface's own elements; null while
+ * there is nothing to say. The elements come one by one, taken apart where the
+ * hook resolved them: the plugin directory's reader follows `$.ui.resolve(e)`
+ * only into a destructuring, not into a table handed on whole.
+ */
+async function architectureRow($: Api, Box: Ui['Box'], Text: Ui['Text'], Button: Ui['Button'], Link: Ui['Link']) {
   const l = await read($, light)
   if (!l) return null
   const now = await $.clock.now()
-  const { Box, Text, Button, Link } = ui
   const shown = shownState(l, now)
   const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
   const button = (key: string, label: string, hotkey: string, onPress: () => void) => Button({ key, label, hotkey, plain: true, onPress })
@@ -1395,12 +1399,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const list = await read($, armed)
-    const ui = $.ui.resolve(e)
-    const architecture = await architectureRow($, ui)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const architecture = await architectureRow($, Box, Text, Button, Link)
     if (list.length === 0 && !architecture) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button, Link } = ui
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })

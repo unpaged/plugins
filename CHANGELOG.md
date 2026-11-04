@@ -4,6 +4,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-11-04
+
+### Fixed
+
+- The hook that draws the line above the prompt takes the surface's drawing elements apart where it resolves them, as 1.12.0 did, and hands the architecture row those elements instead of the whole table ([#45](https://github.com/unpaged/plugins/pull/45)). The plugin directory's reader follows the first shape and stopped at the second, which blocked its check of 1.13.0 before the policy review ran. Nothing changes on screen.
+
 ## [unpaged-antigravity 0.1.1] - 2026-11-04
 
 ### Fixed
@@ -267,7 +273,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/unpaged/plugins/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/unpaged/plugins/compare/v1.12.0...v1.13.0
 [unpaged-antigravity 0.1.1]: https://github.com/unpaged/plugins/pull/44
 [unpaged-antigravity 0.1.0]: https://github.com/unpaged/plugins/pull/42
