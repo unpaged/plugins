@@ -48,9 +48,22 @@ export function world(
     revokeRule?: 'allow' | 'ask' | 'deny'
     /** No `hostname` program, as on some Linux images: `uname -n` answers instead. */
     noHostname?: boolean
+    /** The rules on document_get: allowed lets the plugin read the architecture canvas's date note at session start; `ask` (the default) leaves it unread. */
+    docRule?: 'allow' | 'ask' | 'deny'
+    /** What document_get answers: the whiteboard, or an error saying it is not found. */
+    document?: unknown
+    documentMissing?: boolean
+    /** The clock at the start, ms since the epoch. */
+    now?: number
+    /** The session's working folder; `/repo` unless the test says otherwise. */
+    cwd?: string
+    /** The engine refuses every submitted prompt with this reason, as a Stop or a blocking hook would; otherwise prompts queue. */
+    dropPrompt?: string
+    /** The session's agents, as `$.agent.list()` answers: none unless the test says otherwise. */
+    agents?: Array<{ id: string; status: string; type?: string; description?: string; teammateId?: string }>
   } = {},
 ) {
-  const clock = mock.clock(on, { now: 1_000_000 })
+  const clock = mock.clock(on, { now: settings.now ?? 1_000_000 })
   mock.env(on, {})
   const files = new Map<string, string>()
   // The plugin's own store, as the engine keeps it between sessions.
@@ -78,16 +91,26 @@ export function world(
     toasts: [] as string[],
     /** The tools the plugin asked the permission rules about, by the name the rules use. */
     checks: [] as string[],
+    /** The architecture line's state, as the plugin last wrote it. */
+    architecture: null as Record<string, unknown> | null,
+    /** The paths the plugin asked the file system about, as the engine passed them. */
+    fs: [] as string[],
   }
-  // The band's view of the armed set, as the plugin writes it.
+  // The band's view of the armed set and of the architecture line, as the plugin writes them.
   on('state.set', (_$, e, next) => {
     const write = e as unknown as { plugin?: string; key?: string; value?: unknown }
     if (write.plugin === 'unpaged' && write.key === 'armed') calls.armed = (write.value as Array<Record<string, unknown>>) ?? []
     if (write.plugin === 'unpaged' && write.key === 'replying') calls.replying = (write.value as string[]) ?? []
     if (write.plugin === 'unpaged' && write.key === 'armedOnce') calls.armedOnce = (write.value as string[]) ?? []
+    if (write.plugin === 'unpaged' && write.key === 'architecture') calls.architecture = (write.value as Record<string, unknown> | null) ?? null
     return next(e)
   })
   on('turn.complete', () => ({ text: '', reason: 'answer' }) as never)
+  // The session's start beneath the plugin: what it registers there is taken, and the session goes on.
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('tool.register', (_$, e) => ({ value: { tool: `mcp__unpaged__${(e as { name?: string }).name ?? ''}` } }))
+  on('command.register', (_$, e) => ({ value: { command: (e as { name?: string }).name ?? '' } }))
+  on('ui.log', () => ({ value: undefined }))
   // The engine's own drawing beneath the plugin: an empty box where the band would be.
   on('ui.render', ($, e) => {
     const { Box } = $.ui.resolve(e)
@@ -95,13 +118,20 @@ export function world(
   })
   // The engine's end of a classic event the test raises.
   on('classic.SessionStart', () => ({}) as never)
-  on('fs.exists', (_$, e) => ({ value: files.has(e.path) }))
-  on('fs.read', (_$, e) => ({ value: files.get(e.path) ?? '' }))
+  on('fs.exists', (_$, e) => {
+    calls.fs.push(e.path)
+    return { value: files.has(e.path) }
+  })
+  on('fs.read', (_$, e) => {
+    calls.fs.push(e.path)
+    return { value: files.get(e.path) ?? '' }
+  })
   on('fs.write', (_$, e) => {
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: settings.cwd ?? '/repo' }))
+  on('agent.list', () => ({ value: (settings.agents ?? []).map(a => ({ type: 'general-purpose', description: 'helper', ...a })) }) as never)
   on('session.id', () => ({ value: 'session-1' }))
   on('process.run', (_$, e) => {
     const argv = [...e.argv]
@@ -123,6 +153,7 @@ export function world(
     if (e.tool === 'mcp__unpaged__comment_reply') return { decision: settings.replyRule ?? 'allow' }
     if (e.tool === 'mcp__unpaged__agent_listener_key_create') return { decision: settings.keyRule ?? 'allow' }
     if (e.tool === 'mcp__unpaged__agent_listener_key_revoke') return { decision: settings.revokeRule ?? 'allow' }
+    if (e.tool === 'mcp__unpaged__document_get') return { decision: settings.docRule ?? 'ask' }
     return { decision: 'ask' }
   })
   // A held mint answers when the test calls releaseMint(); a hung revoke never answers.
@@ -146,6 +177,10 @@ export function world(
       if (settings.ack === 'refused') return { value: { content: [{ type: 'text', text: 'Error: refused' }], isError: true } }
       return { value: { content: [{ type: 'text', text: '{"commentId":"reply-1"}' }], isError: false } }
     }
+    if (e.tool === 'document_get') {
+      if (settings.documentMissing) return { value: { content: [{ type: 'text', text: 'Error: Document not found' }], isError: true } }
+      return { value: { content: [{ type: 'text', text: JSON.stringify(settings.document ?? {}) }], isError: false } }
+    }
     return { value: { content: [], isError: true } }
   })
   let served = 0
@@ -165,6 +200,7 @@ export function world(
   const pendingSubmits: Array<() => void> = []
   on('prompt.submit', (_$, e) => {
     calls.submits.push(e.text)
+    if (settings.dropPrompt) return { drop: settings.dropPrompt } as never
     return new Promise<{ text: string }>(resolve => {
       pendingSubmits.push(() => resolve({ text: e.text }))
     }) as never
