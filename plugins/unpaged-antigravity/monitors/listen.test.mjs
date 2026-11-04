@@ -97,6 +97,29 @@ test("retryable outcomes retain key, cursor and last successful timestamp with c
   assert.equal(JSON.stringify(f.statuses).includes(SECRET), false);
 });
 
+test("a --once run whose first poll Unpaged answers with 429, 503 or 500 retries instead of ending", async (t) => {
+  for (const status of [429, 503, 500]) {
+    const f = fixture(t, { once: true });
+    await f.reply(new Response("private diagnostics", { status }));
+    assert.equal(f.statuses.at(-1).state, "reconnecting");
+    assert.deepEqual(f.sleeps, [30000]);
+    assert.equal(f.lines.length, 0);
+    assert.equal((await f.pending()).url, POLL_URL);
+    await f.reply(response([frame("after-retry")]));
+    assert.deepEqual(await f.run, { reason: "events", nextCursor: null });
+    assert.deepEqual(f.lines, [PROTOCOL_PREAMBLE, JSON.stringify(frame("after-retry"))]);
+  }
+});
+
+test("a --once run whose first poll got no answer at all still ends with the sandbox line", async (t) => {
+  const f = fixture(t, { once: true });
+  const request = await f.pending(); request.done = true; request.reject(new Error(SECRET)); await tick();
+  assert.deepEqual(await f.run, { reason: "poll-failed" });
+  assert.equal(f.sleeps.length, 0);
+  assert.match(f.lines[0], /could not reach Unpaged on its first poll/);
+  assert.equal(f.lines[0].includes(SECRET), false);
+});
+
 test("malformed envelopes and foreign-board frames never emit a partial batch or report connected", async (t) => {
   const f = fixture(t);
   await f.reply(response([frame(), frame("foreign", { documentId: "22222222-2222-4222-8222-222222222222" })]));

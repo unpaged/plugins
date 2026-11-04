@@ -86,9 +86,13 @@ export async function runListener(config, options = {}) {
     let result;
     try {
       result = await poll(config, { signal, cursor, timeoutMs });
-    } catch {
+    } catch (error) {
       if (signal?.aborted) break;
-      if (once && lastSuccessfulPollAt === null) {
+      // An HTTP status or body from Unpaged (429, 503, a malformed page) proves the
+      // request got through, so it retries like any listener. Only a first poll
+      // that got no answer at all (sandbox, DNS, firewall) ends the run.
+      const answered = ["poll_http_error", "poll_invalid_response", "poll_body_limit"].includes(error?.reason);
+      if (once && lastSuccessfulPollAt === null && !answered) {
         await reportStatus("stopped", "poll-failed");
         if (!signal?.aborted) {
           await say(`Unpaged listener for canvas ${config.documentId} could not reach Unpaged on its first poll, so nothing is listening to it. If the sandbox blocks network, start listen.mjs --once ${config.documentId} again with BypassSandbox: true; otherwise tell the user push is off for this canvas.`);
