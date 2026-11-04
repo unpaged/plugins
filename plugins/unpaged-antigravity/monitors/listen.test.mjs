@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KEY_DIR_RELATIVE, PROTOCOL_PREAMBLE, STATUS_DIR_RELATIVE, SUBPROTOCOL } from "./listen-core.mjs";
@@ -313,6 +313,23 @@ test("same-key takeover drains old stdout before the replacement can poll or pub
   assert.equal(await readFile(join(home, KEY_DIR_RELATIVE, `${DOCUMENT}.json`), "utf8"), JSON.stringify(config));
   b.abort();
   await second;
+});
+
+test("a stored key the sandbox keeps the listener from reading prints the BypassSandbox line instead of exiting silently", { skip: process.platform === "win32" || typeof process.getuid !== "function" || process.getuid() === 0 }, async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "unpaged-agy-unreadable-"));
+  const listeners = join(home, KEY_DIR_RELATIVE);
+  t.after(async () => { await chmod(listeners, 0o700); await rm(home, { recursive: true, force: true }); });
+  await mkdir(listeners, { recursive: true });
+  await writeFile(join(listeners, `${DOCUMENT}.json`), JSON.stringify(config), { mode: 0o600 });
+  await chmod(listeners, 0o000);
+  const lines = [], requests = [];
+  const result = await runCommand(DOCUMENT, { home, once: true, say: (line) => lines.push(line), fetch: async (url) => { requests.push(url); throw new Error("unexpected poll"); } });
+  assert.deepEqual(result, { reason: "key-unreadable" });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /could not read the stored key/);
+  assert.match(lines[0], /BypassSandbox: true/);
+  assert.equal(lines[0].includes(SECRET), false);
+  assert.equal(requests.length, 0);
 });
 
 test("startup stays silent when unarmed and gives safe actionable notices for unsupported hosts or ownership refusal", async (t) => {

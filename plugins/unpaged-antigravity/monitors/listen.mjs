@@ -64,7 +64,7 @@ export async function runMonitor(documentId, options = {}) {
   const home = options.home ?? homedir();
   const keyFile = keyFileFor(join(home, KEY_DIR_RELATIVE), documentId);
   let config;
-  try { config = parseListenerConfig(await readFile(keyFile, "utf8")); } catch { return { reason: "not-armed" }; }
+  try { config = parseListenerConfig(await readFile(keyFile, "utf8")); } catch (error) { return { reason: error?.code === "ENOENT" ? "not-armed" : "key-unreadable" }; }
   if (!config || config.documentId !== documentId) return { reason: "not-armed" };
   if (Number((options.nodeVersion ?? process.versions.node).split(".")[0]) < 22 ||
       typeof (options.fetch ?? globalThis.fetch) !== "function") return { reason: "unsupported-node" };
@@ -92,7 +92,7 @@ export async function runMonitor(documentId, options = {}) {
     if (!ownership) return { reason: "ownership-unavailable" };
     // A new key may have been stored while the previous monitor drained.
     // Always start the receiver for the latest still-armed config.
-    try { config = parseListenerConfig(await readFile(keyFile, "utf8")); } catch { return { reason: "not-armed" }; }
+    try { config = parseListenerConfig(await readFile(keyFile, "utf8")); } catch (error) { return { reason: error?.code === "ENOENT" ? "not-armed" : "key-unreadable" }; }
     if (!config || config.documentId !== documentId) return { reason: "not-armed" };
     configHash = hashConfig(config);
     let initialCursor = options.initialCursor;
@@ -132,6 +132,10 @@ export async function runCommand(documentId, options = {}) {
   catch { result = { reason: "monitor-unavailable" }; }
   if (result.reason === "unsupported-node") {
     await say("Unpaged listener needs Node 22 or newer with an HTTP client — push stays off on this machine.");
+  } else if (result.reason === "key-unreadable" && !options.signal?.aborted) {
+    // A key file that exists but cannot be read is the sandbox blocking the folder, not a canvas nobody armed:
+    // a silent exit here would leave a re-arm with nothing to act on.
+    await say(`Unpaged listener could not read the stored key for canvas ${documentId}, so nothing is listening to it. If the sandbox blocks ~/.gemini/unpaged, start listen.mjs --once ${documentId} again with BypassSandbox: true; otherwise tell the user push is off for this canvas.`);
   } else if (result.reason === "ownership-unavailable" && !options.signal?.aborted) {
     await say("Unpaged listener could not take ownership of this canvas's local monitor: another Monitor may still be draining, or too few local ports are usable. Push is off for this canvas on this machine. Check /unpaged:listen status and local port restrictions before retrying; do not mint another key.");
   } else if (result.reason === "monitor-unavailable" && !options.signal?.aborted) {
