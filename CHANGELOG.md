@@ -8,7 +8,7 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ### Fixed
 
-- The hook that draws the line above the prompt takes the surface's drawing elements apart where it resolves them, as 1.12.0 did, and hands the architecture row those elements instead of the whole table ([#45](https://github.com/unpaged/plugins/pull/45)). The plugin directory's reader follows the first shape and stopped at the second, which blocked its check of 1.13.0 before the policy review ran. Nothing changes on screen.
+- The hook that draws the line above the prompt draws the architecture line itself, with the surface's drawing elements destructured where it resolves them, as it draws the listening line; the helper now only says what the line should show ([#45](https://github.com/unpaged/plugins/pull/45)). 1.13.0 stored the element table in a variable and handed it to the helper, and the plugin directory's reader stopped at that line, which blocked its check before the policy review ran. Nothing changes on screen.
 
 ## [unpaged-antigravity 0.1.1] - 2026-11-04
 
