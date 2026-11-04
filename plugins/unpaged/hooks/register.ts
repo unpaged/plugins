@@ -989,46 +989,50 @@ async function settleVerdict($: Api, found: Pointer, reported: Verdict) {
   await update($, light, () => lightFrom(found, reported))
 }
 
-type Ui = ReturnType<Api['ui']['resolve']>
+/** The architecture line's link press: the canvas address as a toast (Claude Code opens the link in the title itself). */
+function showArchitectureLink($: Api, boardUrl: string | null) {
+  if (boardUrl) $.ui.toast(boardUrl, { timeoutMs: 10000 })
+}
 
-/** The architecture line, drawn with the surface's own elements; null while there is nothing to say. */
-async function architectureRow($: Api, ui: Ui) {
+/** The architecture line's create press: one prompt that tells the agent to run the command. */
+function createArchitecture($: Api) {
+  void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
+}
+
+/** The architecture line's update press: the comparison that rewrites what no longer holds. */
+function updateArchitecture($: Api) {
+  void startComparison($, 'update', null).catch(() => undefined)
+}
+
+type ArchitectureButton = { key: string; label: string; hotkey: string; onPress: () => void }
+
+/**
+ * What the architecture line says; null while there is nothing to say. The
+ * line itself is drawn in the ui.render hook, with the elements destructured
+ * there, as the listening line is: nothing from `$.ui.resolve(e)` is handed to
+ * another function, since the plugin directory's reader stops at that.
+ */
+async function architectureLine($: Api) {
   const l = await read($, light)
   if (!l) return null
   const now = await $.clock.now()
-  const { Box, Text, Button, Link } = ui
   const shown = shownState(l, now)
-  const fixed = (child: ReturnType<typeof Text>) => Box({ flexShrink: 0, children: [child] })
-  const button = (key: string, label: string, hotkey: string, onPress: () => void) => Button({ key, label, hotkey, plain: true, onPress })
-  const link = () => {
-    if (l.boardUrl) $.ui.toast(l.boardUrl, { timeoutMs: 10000 })
-  }
-  const create = () => void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
-  const updateNow = () => void startComparison($, 'update', null).catch(() => undefined)
   // A bare digit typed into an empty prompt presses the band button with that
   // hotkey, and this line stays for the whole session: a digit would take the
   // leading 3 of any prompt. Every key is a letter, which fires only once the
   // line has the focus (ctrl+x tab, or a click).
+  const create: ArchitectureButton = { key: 'arch-create', label: 'create', hotkey: 'c', onPress: () => createArchitecture($) }
+  const link: ArchitectureButton = { key: 'arch-link', label: 'link', hotkey: 'l', onPress: () => showArchitectureLink($, l.boardUrl) }
+  const updateNow: ArchitectureButton = { key: 'arch-update', label: 'update', hotkey: 'u', onPress: () => updateArchitecture($) }
   const buttons =
-    shown === 'none'
-      ? [button('arch-create', 'create', 'c', create)]
-      : shown === 'lost'
-        ? [button('arch-create', 'create', 'c', create), button('arch-link', 'link', 'l', link)]
-        : shown === 'current' || shown === 'comparing'
-          ? [button('arch-link', 'link', 'l', link)]
-          : [button('arch-update', 'update', 'u', updateNow), button('arch-link', 'link', 'l', link)]
-  const title = l.title && l.boardUrl ? [Text({ wrap: 'truncate-end', children: [Link({ href: l.boardUrl, children: [l.title] })] })] : []
-  return Box({
-    flexDirection: 'row',
-    columnGap: 2,
-    children: [
-      fixed(Text({ color: lightColor(shown), children: [shown === 'comparing' && !l.on ? '○' : '●'] })),
-      fixed(Text({ bold: true, children: ['Architecture'] })),
-      ...title,
-      fixed(Text({ dimColor: true, children: [`·  ${describeLight(l, now)}`] })),
-      ...buttons,
-    ],
-  })
+    shown === 'none' ? [create] : shown === 'lost' ? [create, link] : shown === 'current' || shown === 'comparing' ? [link] : [updateNow, link]
+  return {
+    dot: shown === 'comparing' && !l.on ? '○' : '●',
+    color: lightColor(shown),
+    title: l.title && l.boardUrl ? { text: l.title, href: l.boardUrl } : null,
+    label: `·  ${describeLight(l, now)}`,
+    buttons,
+  }
 }
 
 /** Starts the comparison a pull request calls for, once the pointer names a canvas; the tool's answer goes back as it came. */
@@ -1395,12 +1399,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const list = await read($, armed)
-    const ui = $.ui.resolve(e)
-    const architecture = await architectureRow($, ui)
-    if (list.length === 0 && !architecture) return next(e)
+    const line = await architectureLine($)
+    if (list.length === 0 && !line) return next(e)
     const theirs = await next(e)
     const covered = await read($, replying)
-    const { Box, Text, Button, Link } = ui
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     const unread = list.reduce((n, c) => n + c.unread, 0)
     const button = (key: string, label: string, hotkey: string, onPress: () => void) =>
       Button({ key, label, hotkey, plain: true, onPress })
@@ -1435,6 +1438,20 @@ export const register: Register = on => {
               Text({ dimColor: true, children: [`·  ${unread > 0 ? `${unread} new` : 'no new comments'}${e.props.isWorking && covered.length > 0 ? '  ·  replying on the canvas' : ''}`] }),
               button('canvases', 'canvases', '1', () => void $.ui.open({ id: PANE, title: 'Listening', focus: true, closeOnEscape: true })),
               button('stop-all', 'stop all', '2', () => void stopAll($)),
+            ],
+          })
+    const architecture =
+      line === null
+        ? null
+        : Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            children: [
+              fixed(Text({ color: line.color, children: [line.dot] })),
+              fixed(Text({ bold: true, children: ['Architecture'] })),
+              ...(line.title ? [Text({ wrap: 'truncate-end', children: [Link({ href: line.title.href, children: [line.title.text] })] })] : []),
+              fixed(Text({ dimColor: true, children: [line.label] })),
+              ...line.buttons.map(b => button(b.key, b.label, b.hotkey, b.onPress)),
             ],
           })
     const children = [typeof theirs === 'object' && theirs !== null ? theirs : null, ours, architecture].filter(row => row !== null)
