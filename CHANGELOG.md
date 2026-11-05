@@ -4,6 +4,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [unpaged-antigravity 0.1.2] - 2026-11-05
+
+### Added
+
+- Bundled the Unpaged mark at `plugins/unpaged-antigravity/assets/logo.svg`, added Marketplace manifest fields (`logo`, `author`, `homepage`, `repository`) to `plugins/unpaged-antigravity/plugin.json`, and documented the Antigravity Desktop App install path without the `agy` CLI in `plugins/unpaged-antigravity/README.md`.
+
 ## [1.13.1] - 2026-11-04
 
 ### Fixed
