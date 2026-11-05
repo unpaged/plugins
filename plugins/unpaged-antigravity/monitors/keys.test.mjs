@@ -37,8 +37,28 @@ const MCP_CONFIG = fileURLToPath(new URL("../mcp_config.json", import.meta.url))
 
 test("the Antigravity plugin manifest and bundled MCP config point at the production Unpaged endpoint", () => {
   const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
+  const allowedKeys = new Set([
+    "name",
+    "displayName",
+    "description",
+    "version",
+    "logo",
+    "author",
+    "homepage",
+    "repository",
+    "suggestedPrompts",
+    "disabled"
+  ]);
+  for (const key of Object.keys(manifest)) {
+    assert.ok(allowedKeys.has(key), `unexpected top-level plugin.json field: ${key}`);
+  }
   assert.equal(manifest.name, "unpaged");
   assert.equal(manifest.displayName, "Unpaged");
+  assert.equal(manifest.logo, "assets/logo.svg");
+  assert.ok(existsSync(fileURLToPath(new URL(`../${manifest.logo}`, import.meta.url))));
+  assert.deepEqual(manifest.author, { name: "Unpaged", url: "https://unpaged.io" });
+  assert.equal(manifest.homepage, "https://unpaged.io");
+  assert.equal(manifest.repository, "https://github.com/unpaged/plugins");
   assert.ok(Array.isArray(manifest.suggestedPrompts) && manifest.suggestedPrompts.length <= 3);
   const mcp = JSON.parse(readFileSync(MCP_CONFIG, "utf8"));
   assert.deepEqual(Object.keys(mcp.mcpServers), ["unpaged"]);
