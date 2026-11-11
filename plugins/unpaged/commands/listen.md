@@ -1,6 +1,6 @@
 ---
 description: Pick a canvas and listen for its @agent comments in this session — status, arm, or revoke per canvas; /unpaged:visual-plan arms the canvas it creates
-argument-hint: [status | arm <documentId> | revoke <documentId|all>]
+argument-hint: "[status | arm <documentId> | revoke <documentId|all>]"
 ---
 
 Listening is per board and per session: `/unpaged:visual-plan` arms the board it just created for the current session, and **nothing listens between sessions** (a later session would otherwise pay for sweeps nobody asked for). On a Claude Code that runs the plugin's mod, the session also listens to every board it creates or changes through the Unpaged tools, from the first call that succeeds. This command lets a session listen to a board it did not create or change, checks what is armed, or revokes keys. With the plugin's mod, keys live in the plugin's own store, which Claude Code keeps; on the Monitor path below, key files live one per board in `~/.claude/unpaged/listeners/<documentId>.json` (mode 600) — never `cat` either, they are credentials.

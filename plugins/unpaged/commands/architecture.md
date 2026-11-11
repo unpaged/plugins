@@ -1,6 +1,6 @@
 ---
 description: Draw this repository's architecture document on Unpaged and keep it in step with the code — create it, or update it; after every pull request the session opens, the plugin compares it with the code and marks it behind
-argument-hint: [update] — omit to create the architecture document for this repository
+argument-hint: "[update] — omit to create the architecture document for this repository"
 ---
 
 The architecture document is one Unpaged canvas, with canvases beneath it, written for an engineer who is new to this repository and opens it to learn how the system works before touching the code. It is organised by the questions that engineer asks, never by folder: what the product does, what runs where and what talks to what, how the main things happen from end to end, what the code is about (its model), who may see and change what, which decisions and constraints shaped the code, and where to start reading. It is built from the code alone — not from any document in the repository, which a repository may well not have — and every card on it is a claim about the code that a later comparison can test. The plugin keeps the line above the prompt in step with it: green while it is up to date, yellow once a pull request changed something it says, red when it is gone or has not been compared for three months. Follow these instructions exactly.

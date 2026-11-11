@@ -60,6 +60,8 @@ jobs:
               const s = fs.readFileSync(dir + "/" + f, "utf8");
               const m = s.match(/^---\n([\s\S]*?)\n---\n/);
               if (!m || !/^description: \S/m.test(m[1])) { console.error("missing frontmatter description:", f); process.exit(1); }
+              const unquoted = m[1].split("\n").filter(l => /^[\w-]+: *[\[{]/.test(l));
+              if (unquoted.length) { console.error("frontmatter value starting with [ or { must be quoted (the Copilot app reads it as strict YAML and rejects the command):", f, unquoted.join(" | ")); process.exit(1); }
               console.log("ok", f);
             }
             const skillsDir = "plugins/unpaged-antigravity/skills";

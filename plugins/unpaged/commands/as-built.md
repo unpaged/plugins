@@ -1,6 +1,6 @@
 ---
 description: Compile the as-built record of an implemented plan — what shipped vs the plan, every decision and its why, the data flow, a reviewer's guide — as a dated, frozen canvas nested under the plan canvas
-argument-hint: [documentId] [base..head] — omit the id to use this session's plan canvas; omit the range for the current branch's changes
+argument-hint: "[documentId] [base..head] — omit the id to use this session's plan canvas; omit the range for the current branch's changes"
 ---
 
 Compile an **as-built record** for a plan that has been implemented, as a nested canvas under the plan canvas on Unpaged, using the `unpaged` MCP tools, then give the user the link. Follow these instructions exactly.

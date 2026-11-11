@@ -4,6 +4,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Fixed
+
+- The GitHub Copilot app loads all four commands (`/unpaged:visual-plan`, `/unpaged:as-built`, `/unpaged:architecture`, `/unpaged:listen`) when the plugin is installed there. Their `argument-hint` is now a quoted string: Copilot reads a command's header as strict YAML, where a value starting with `[` is a list, so it rejected `listen` and `visual-plan` ("argument-hint must be a string") and could not read the headers of `architecture` and `as-built` at all. Without the commands, a request for a visual plan got a one-page canvas instead of the plan format. The hints read the same in Claude Code. CI now fails a command whose header has a value starting with `[` or `{` unquoted.
+
 ## [1.14.0] - 2026-11-05
 
 ### Changed
