@@ -4,12 +4,12 @@
     "name": "Unpaged",
     "url": "https://unpaged.io"
   },
-  "description": "Unpaged plugins for Claude Code: the plan Claude just made, rendered as a whiteboard your team can navigate and comment on, with @agent comments delivered automatically to the session — and, when the code is done, the as-built record of what shipped and why, nested under the plan. Plus the repository's architecture document, drawn from the code and kept in step with it: after every pull request the session opens, the line above the prompt says whether the document still holds.",
+  "description": "Unpaged plugins for Claude Code and GitHub Copilot: the plan your agent just made, rendered as a whiteboard your team can navigate and comment on, with @agent comments delivered automatically to the session — and, when the code is done, the as-built record of what shipped and why, nested under the plan. Plus the repository's architecture document, drawn from the code and kept in step with every pull request the session opens.",
   "plugins": [
     {
       "name": "unpaged",
       "source": "./plugins/unpaged",
-      "description": "Turn Claude Code plans into whiteboards on Unpaged — review on the canvas, comment on the pieces (@agent comments are delivered automatically to the session by a listener inside Claude Code, with a line above the prompt showing what it listens to, for every canvas the session creates or changes, a plan or not, where your permission rules let it create listener keys; otherwise the agent offers to listen), approval flips the canvas to executing; the session keeps a Decision log while it builds, and /unpaged:as-built compiles the record of what shipped and why under the plan. Every plan is filed in a Visual plans folder. /unpaged:architecture draws the repository's architecture document from its code; after every pull request the session opens, the plugin compares the two and the line above the prompt turns green or yellow, with update to rewrite what no longer holds."
+      "description": "Turn Claude Code and GitHub Copilot plans into whiteboards on Unpaged — review on the canvas, comment on the pieces (@agent comments are delivered automatically to the session inside Claude Code or GitHub Copilot, with a line above the prompt in Claude Code showing what it listens to), approval flips the canvas to executing; the session keeps a Decision log while it builds, and /unpaged:as-built compiles the record of what shipped and why under the plan. Every plan is filed in a Visual plans folder. /unpaged:architecture draws the repository's architecture document from its code; after every pull request the session opens, the plugin compares the two and marks the canvas when it no longer holds, with update to rewrite it."
     }
   ]
 }

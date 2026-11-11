@@ -1,6 +1,6 @@
-# Unpaged plugins for Claude Code, Codex, and Antigravity
+# Unpaged plugins for Claude Code, GitHub Copilot, Codex, and Antigravity
 
-Claude Code, Codex, and Google Antigravity plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
+Claude Code, GitHub Copilot, Codex, and Google Antigravity plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
 
 ![A Claude Code plan rendered as a canvas on Unpaged](docs/images/visual-plan-overview.png)
 
@@ -10,6 +10,23 @@ Claude Code, Codex, and Google Antigravity plugins by [Unpaged](https://unpaged.
 /plugin marketplace add unpaged/plugins
 /plugin install unpaged@unpaged
 ```
+
+## Install for GitHub Copilot
+
+In a chat in the **GitHub Copilot desktop app** or **Copilot CLI**:
+
+```
+/plugin marketplace add unpaged/plugins
+/plugin install unpaged@unpaged
+```
+
+Or from a terminal with the Copilot CLI:
+
+```sh
+copilot plugin marketplace add unpaged/plugins && copilot plugin install unpaged@unpaged
+```
+
+On first use, sign in to the bundled **unpaged** server (**Customize → Installed → Sign in** in the GitHub Copilot app, or `/mcp` in the Copilot CLI) with your Unpaged account. Then run `/unpaged:visual-plan`, `/unpaged:as-built`, `/unpaged:architecture`, or `/unpaged:listen`.
 
 ## Install for Google Antigravity
 
@@ -99,7 +116,7 @@ keeps those results and the remaining release gates separate.
 
 | Plugin | What it does |
 | --- | --- |
-| [unpaged](plugins/unpaged) | Renders Claude Code plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. `/unpaged:architecture` draws the repository's architecture document from its code and keeps a line above the prompt in step with it: after every pull request the session opens, the plugin compares the two and marks the canvas behind when it no longer holds, with update to rewrite it. |
+| [unpaged](plugins/unpaged) | Renders Claude Code and GitHub Copilot plans as visual canvases on Unpaged via `/unpaged:visual-plan`. Review the plan on the canvas, comment on the pieces (`@agent` comments are delivered automatically to the session that made it), and watch the canvas flip to *executing* when you approve. When the code is done, `/unpaged:as-built` writes the record of what shipped and why — every decision with its reason, a reviewer's reading order — as a canvas nested under the plan. `/unpaged:architecture` draws the repository's architecture document from its code and keeps it in step with every pull request the session opens (with a line above the prompt in Claude Code), marking the canvas behind when it no longer holds, with `update` to rewrite it. |
 | [unpaged-antigravity](plugins/unpaged-antigravity) | Visual plans (`visual-plan`), reactive `@agent` comment push (`listen`), implementation Decision logs (`rules/AGENTS.md`), and as-built canvases (`as-built`) for Google Antigravity (`agy`). |
 | [unpaged-codex](plugins/unpaged-codex) (preview) | Visual plans, same-task comment review, Decision logs and as-built canvases in Codex. Repository installation passed; Ubuntu sign-in and hook trust are user-confirmed, and a PROPOSED canvas with Decision log was verified. Local-tool setup is user-confirmed. On installed 0.5.0 pre-release build `fddbe96`, polling and a real human-comment wakeup passed; remote readback verified one requested edit and one agent reply, with the canvas still PROPOSED. Event completion is user-confirmed, but the write call remained unanswered for at least 3 h 17 min for an unexplained reason. Completion timeliness, plan lifecycle, an update to the released 0.5.0 with native instructions and restart recovery remain unverified. |
 

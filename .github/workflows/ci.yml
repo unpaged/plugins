@@ -100,12 +100,12 @@ jobs:
 
       - name: Listener syntax
         run: |
-          for f in plugins/unpaged/monitors/*.mjs plugins/unpaged-antigravity/monitors/*.mjs; do
+          for f in plugins/unpaged/monitors/*.mjs plugins/unpaged/extensions/unpaged/*.mjs plugins/unpaged-antigravity/monitors/*.mjs; do
             node --check "$f" || exit 1
           done
 
       - name: Tests
-        run: node --test 'plugins/unpaged/monitors/*.test.mjs' 'plugins/unpaged-antigravity/monitors/*.test.mjs'
+        run: node --test 'plugins/unpaged/monitors/*.test.mjs' 'plugins/unpaged/extensions/unpaged/*.test.mjs' 'plugins/unpaged-antigravity/monitors/*.test.mjs'
 
   mod:
     runs-on: ubuntu-latest

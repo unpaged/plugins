@@ -4,6 +4,15 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-12
+
+### Added
+
+- **GitHub Copilot support (desktop app and Copilot CLI)** via a bundled session extension at `plugins/unpaged/extensions/unpaged/` (`extension.mjs`, `copilot-core.mjs`, `store.mjs`). Installing `unpaged@unpaged` in GitHub Copilot now discovers and starts the extension automatically alongside the four `/unpaged:*` commands and the bundled Unpaged MCP server:
+  - Registers `mcp__unpaged__listen_arm`, `mcp__unpaged__listen_stop`, `mcp__unpaged__listen_status`, `mcp__unpaged__architecture_report`, and the no-turn `/unpaged-listen` slash command.
+  - Mints per-canvas listener keys labelled `copilot on <host>`, scrubs all fields of the `agent_listener_key_create` result in `onPostToolUse` (`textResultForLlm`, `sessionLog`, `contents`) so key material never enters the conversation or session log, stores keys under `~/.copilot/unpaged/listeners/<documentId>.json` (mode `0600`, atomic `tmp` + `rename`), revokes replaced keys, and polls `GET https://mcp.unpaged.io/events/poll` in-session using the shared `monitors/listen-loop.mjs` and `monitors/poll.mjs` modules.
+  - Injects the `hooks/plan-approved-context.json` execution and Decision-log prompt when `exit_plan_mode` succeeds, offers listening once when a canvas is created or edited, stops listening when an armed canvas is deleted, and triggers the `/unpaged:architecture` comparison prompt after `gh pr create` (excluding `--dry-run`) or a GitHub MCP pull-request tool when `.unpaged/architecture.json` is present.
+
 ## [1.14.1] - 2026-11-11
 
 ### Fixed
@@ -290,7 +299,9 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/unpaged/plugins/compare/v1.14.1...v1.15.0
+[1.14.1]: https://github.com/unpaged/plugins/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/unpaged/plugins/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/unpaged/plugins/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/unpaged/plugins/compare/v1.12.0...v1.13.0
