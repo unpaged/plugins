@@ -17,7 +17,7 @@ Every shell step in this command is **read-only** — `git log`, `git diff`, `gi
 
 ## Preconditions
 
-The `unpaged` MCP server ships with this plugin. If its tools (e.g. `node_create_with_elements`) are missing or return an authentication error, tell the user to run `/mcp`, authenticate the **unpaged** server, and re-run `/unpaged:as-built`. Do not fall back to a Markdown file or a chat summary.
+The `unpaged` MCP server ships with this plugin. If its tools (e.g. `node_create_with_elements`) are missing or return an authentication error, tell the user to run `/mcp` (or open **Customize → Installed** and choose **Sign in** on **unpaged** in the GitHub Copilot app), authenticate the **unpaged** server, and re-run `/unpaged:as-built`. Do not fall back to a Markdown file or a chat summary.
 
 ## Read
 
