@@ -472,8 +472,8 @@ export function createUnpagedCopilotController({
     const captured = tracker.captured.shift() ?? extractCopilotMint(rawResult);
     if (tracker.count <= 0 && tracker.captured.length === 0) extensionMints.delete(documentId);
     if (!captured) {
-      const detail = str(rawResult?.textResultForLlm).slice(0, 200);
-      throw new Error(`the mint result carried no listener key${detail ? `: ${detail}` : ""}`);
+      // Never echo the answer here: a key in a shape extractMint misses would reach the conversation.
+      throw new Error("the mint result carried no listener key");
     }
     return saveValidatedMint(documentId, captured);
   }
@@ -867,13 +867,22 @@ export function createUnpagedCopilotController({
       if (mcpTool === "agent_listener_key_create") {
         const documentId = str(args.documentId);
         const found = extractCopilotMint(input?.toolResult);
-        if (!found) return;
+        if (!found && !succeeded) return;
         const inFlight = extensionMints.get(documentId);
         if (inFlight && inFlight.count > 0) {
-          inFlight.captured.push(found);
+          if (found) inFlight.captured.push(found);
           return {
             modifiedResult: scrubToolResult(
-              `Unpaged listener key received by the unpaged plugin for canvas ${isDocumentId(documentId) ? documentId : "<unknown>"}.`
+              found
+                ? `Unpaged listener key received by the unpaged plugin for canvas ${isDocumentId(documentId) ? documentId : "<unknown>"}.`
+                : "Unpaged listener key response scrubbed because no listener key could be read."
+            ),
+          };
+        }
+        if (!found) {
+          return {
+            modifiedResult: scrubToolResult(
+              "Unpaged listener key response scrubbed because no listener key could be read."
             ),
           };
         }

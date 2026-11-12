@@ -621,12 +621,23 @@ test("preserves the server refusal reason when an extension-initiated mint fails
 
     nextMintResult = {
       resultType: "success",
-      textResultForLlm: "{}",
-      sessionLog: "{}",
+      textResultForLlm: `Listener key created: key=${KEY_2} pollUrl=https://mcp.unpaged.io/events/poll`,
+      sessionLog: `Listener key created: key=${KEY_2} pollUrl=https://mcp.unpaged.io/events/poll`,
     };
-    const emptyReply = await armTool.handler({ documentId: DOC_A, title: "Capped Canvas" });
-    assert.equal(emptyReply, "Push is not armed: the mint result carried no listener key: {}");
-    assert.equal(postOutputs[1], undefined);
+    const unparsedReply = await armTool.handler({ documentId: DOC_A, title: "Capped Canvas" });
+    assert.equal(unparsedReply, "Push is not armed: the mint result carried no listener key");
+    assert.ok(!unparsedReply.includes(KEY_2));
+    assert.ok(postOutputs[1]?.modifiedResult);
+    assert.ok(!JSON.stringify(postOutputs[1]).includes(KEY_2));
+
+    const agentUnparsed = await controller.hooks.onPostToolUse({
+      toolName: "unpaged-agent_listener_key_create",
+      toolArgs: { documentId: DOC_A },
+      toolResult: nextMintResult,
+      workingDirectory: dir,
+    });
+    assert.ok(agentUnparsed?.modifiedResult);
+    assert.ok(!JSON.stringify(agentUnparsed).includes(KEY_2));
 
     controller.shutdown();
   });
