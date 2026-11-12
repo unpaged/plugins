@@ -75,6 +75,29 @@ jobs:
             }
           '
 
+      - name: Command headers read as strict YAML, every value a string
+        # The GitHub Copilot app reads a command header as strict YAML and rejects the
+        # command when it does not parse or a value is not a string (a plain value that
+        # starts with [ is a list; a ": " inside one breaks the parse).
+        run: |
+          npm install --prefix "$RUNNER_TEMP/yaml" --no-save --no-package-lock yaml@2.8.1 >/dev/null
+          NODE_PATH="$RUNNER_TEMP/yaml/node_modules" node -e '
+            const fs = require("fs");
+            const YAML = require("yaml");
+            const dir = "plugins/unpaged/commands";
+            let bad = 0;
+            for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".md"))) {
+              const m = fs.readFileSync(dir + "/" + f, "utf8").match(/^---\n([\s\S]*?)\n---\n/);
+              let doc;
+              try { doc = YAML.parse(m[1], { strict: true, uniqueKeys: true }); }
+              catch (e) { console.error("header does not parse as YAML:", f, "-", e.message.split("\n")[0]); bad++; continue; }
+              const notStrings = Object.entries(doc).filter(([, v]) => typeof v !== "string").map(([k]) => k);
+              if (notStrings.length) { console.error("header value is not a string (quote it):", f, "-", notStrings.join(", ")); bad++; continue; }
+              console.log("ok", f);
+            }
+            process.exit(bad ? 1 : 0);
+          '
+
       - name: Listener syntax
         run: |
           for f in plugins/unpaged/monitors/*.mjs plugins/unpaged-antigravity/monitors/*.mjs; do

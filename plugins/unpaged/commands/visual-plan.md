@@ -1,6 +1,6 @@
 ---
 description: Render the current plan — or plan the feature you name — as a whiteboard on Unpaged and return the link
-argument-hint: [plan text, or a feature to plan — omit to use the plan in this conversation]
+argument-hint: "[plan text, or a feature to plan — omit to use the plan in this conversation]"
 ---
 
 Render a plan as a visual board on Unpaged using the `unpaged` MCP tools, then give the user the link. Follow these instructions exactly.
