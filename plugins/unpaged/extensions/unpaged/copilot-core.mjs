@@ -359,9 +359,9 @@ export function createUnpagedCopilotController({
           recordCanvas(documentId, { unread: (canvases.get(documentId)?.unread ?? 0) + 1, lastEventAt: now() });
           const who = str(event.authorName) || "someone";
           const preview = str(event.textPreview).slice(0, 120);
-          await log(`${who} @agent on ${canvas.title || documentId}: ${preview}`).catch(() => {});
+          void log(`${who} @agent on ${canvas.title || documentId}: ${preview}`).catch(() => {});
         } else {
-          await log(line.slice(0, 160), { level: "warning" }).catch(() => {});
+          void log(line.slice(0, 160), { level: "warning" }).catch(() => {});
         }
       }
       loop.pending.push(line);
@@ -867,16 +867,16 @@ export function createUnpagedCopilotController({
       if (mcpTool === "agent_listener_key_create") {
         const documentId = str(args.documentId);
         const found = extractCopilotMint(input?.toolResult);
+        if (!found) return;
         const inFlight = extensionMints.get(documentId);
         if (inFlight && inFlight.count > 0) {
-          if (found) inFlight.captured.push(found);
+          inFlight.captured.push(found);
           return {
             modifiedResult: scrubToolResult(
               `Unpaged listener key received by the unpaged plugin for canvas ${isDocumentId(documentId) ? documentId : "<unknown>"}.`
             ),
           };
         }
-        if (!found) return;
         if (!isDocumentId(documentId)) {
           return {
             modifiedResult: scrubToolResult(

@@ -518,3 +518,116 @@ test("offers listening once on canvas create/edit, handles exit_plan_mode, stops
     await controller.hooks.onSessionEnd();
   });
 });
+
+test("keeps a multi-event poll in one prompt even when session.log is slower than flushDelayMs", async () => {
+  await withTempDir(async (dir) => {
+    const store = createCopilotStore({ copilotHome: join(dir, "copilot") });
+    const prompts = [];
+    const logs = [];
+    let pollCount = 0;
+
+    const controller = createUnpagedCopilotController({
+      executeTool: async (name) => {
+        if (name === "unpaged-agent_listener_key_create") {
+          return {
+            resultType: "success",
+            textResultForLlm: JSON.stringify(mintPayload(DOC_A, KEY_1, "k_slow_log", "Slow Log Canvas")),
+          };
+        }
+        return { resultType: "success", textResultForLlm: "{}" };
+      },
+      log: async (msg) => {
+        await new Promise((r) => setTimeout(r, 80));
+        logs.push(msg);
+      },
+      sendPrompt: async (p) => prompts.push(p),
+      getCwd: async () => dir,
+      store,
+      flushDelayMs: 20,
+      poll: async (_cfg, { signal }) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return {
+            events: [sampleEvent(DOC_A, "evt_slow_1"), sampleEvent(DOC_A, "evt_slow_2")],
+            nextCursor: "cur_slow",
+            cadence: { intervalMs: 5000 },
+          };
+        }
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+        throw new Error("poll_aborted");
+      },
+    });
+
+    const armTool = controller.tools.find((t) => t.name === "mcp__unpaged__listen_arm");
+    await armTool.handler({ documentId: DOC_A, title: "Slow Log Canvas" });
+    await new Promise((r) => setTimeout(r, 140));
+
+    assert.equal(prompts.length, 1);
+    const lines = prompts[0].split("\n");
+    assert.equal(lines[0], "The unpaged plugin sent a message:");
+    assert.equal(lines[1], PROTOCOL_PREAMBLE);
+    assert.equal(lines.length, 4);
+    assert.ok(lines[2].includes('"id":"evt_slow_1"'));
+    assert.ok(lines[3].includes('"id":"evt_slow_2"'));
+    assert.equal(logs.filter((l) => l.includes("@agent on Slow Log Canvas")).length, 2);
+
+    controller.shutdown();
+  });
+});
+
+test("preserves the server refusal reason when an extension-initiated mint fails through onPostToolUse", async () => {
+  await withTempDir(async (dir) => {
+    const store = createCopilotStore({ copilotHome: join(dir, "copilot") });
+    const postOutputs = [];
+    let nextMintResult = {
+      resultType: "failure",
+      textResultForLlm: "Listener key limit reached (max 20)",
+      sessionLog: "Listener key limit reached (max 20)",
+    };
+
+    let controller;
+    const executeThroughHooks = async (name, args) => {
+      const pre = await controller.hooks.onPreToolUse({
+        toolName: name,
+        toolArgs: args,
+        workingDirectory: dir,
+      });
+      const effectiveArgs = pre?.modifiedArgs ?? args;
+      const rawResult = nextMintResult;
+      const post = await controller.hooks.onPostToolUse({
+        toolName: name,
+        toolArgs: effectiveArgs,
+        toolResult: rawResult,
+        workingDirectory: dir,
+      });
+      postOutputs.push(post);
+      return post?.modifiedResult ?? rawResult;
+    };
+
+    controller = createUnpagedCopilotController({
+      executeTool: executeThroughHooks,
+      getCwd: async () => dir,
+      store,
+      poll: async () => ({ events: [], nextCursor: null, cadence: {} }),
+    });
+
+    const armTool = controller.tools.find((t) => t.name === "mcp__unpaged__listen_arm");
+    const refusedReply = await armTool.handler({ documentId: DOC_A, title: "Capped Canvas" });
+    assert.equal(
+      refusedReply,
+      "Push is not armed: the server refused to mint a listener key: Listener key limit reached (max 20)"
+    );
+    assert.equal(postOutputs[0], undefined);
+
+    nextMintResult = {
+      resultType: "success",
+      textResultForLlm: "{}",
+      sessionLog: "{}",
+    };
+    const emptyReply = await armTool.handler({ documentId: DOC_A, title: "Capped Canvas" });
+    assert.equal(emptyReply, "Push is not armed: the mint result carried no listener key: {}");
+    assert.equal(postOutputs[1], undefined);
+
+    controller.shutdown();
+  });
+});
