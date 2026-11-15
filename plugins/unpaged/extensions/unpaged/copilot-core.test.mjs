@@ -389,7 +389,7 @@ test("HTTP 401 retires key without revoking on stop; HTTP 409 preserves stored k
   });
 });
 
-test("offers listening once on canvas create/edit, handles exit_plan_mode, stops on document_delete, and runs PR architecture comparison", async () => {
+test("offers listening once on canvas create/edit, handles exit_plan_mode, stops on document_delete, and starts no architecture comparison when a pull request opens", async () => {
   await withTempDir(async (dir) => {
     const repoRoot = join(dir, "repo");
     await mkdir(join(repoRoot, ".git"), { recursive: true });
@@ -414,8 +414,8 @@ test("offers listening once on canvas create/edit, handles exit_plan_mode, stops
       log: async (m) => logs.push(m),
       getCwd: async () => repoRoot,
       store,
-      submitDelayMs: 5,
-      architectureCommandPath: "/plugins/unpaged/commands/architecture.md",
+      // A fixed clock: the day label gains the year once the year changes, and a verdict goes stale after three months.
+      now: () => Date.parse("2026-11-15T12:00:00Z"),
       planApprovedContext: "STAMP_EXECUTING_CONTEXT",
       poll: async (_cfg, { signal }) => {
         if (!signal.aborted) return { events: [], nextCursor: null, cadence: {} };
@@ -474,21 +474,8 @@ test("offers listening once on canvas create/edit, handles exit_plan_mode, stops
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(await store.loadListener(DOC_A), null);
 
-    // --dry-run gh pr create does NOT trigger architecture comparison.
-    await controller.hooks.onPostToolUse({
-      toolName: "bash",
-      toolArgs: { command: "gh pr create --dry-run" },
-      toolResult: {
-        resultType: "success",
-        textResultForLlm: "Would have created a Pull Request with:\nhttps://github.com/org/repo/pull/1",
-      },
-      workingDirectory: repoRoot,
-    });
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(prompts.length, 0);
-
-    // Real gh pr create triggers comparison prompt, and architecture_report settles and persists verdict.
-    await controller.hooks.onPostToolUse({
+    // Opening a pull request, in the shell or through a GitHub MCP tool, starts no comparison: it is started by hand.
+    const prOut = await controller.hooks.onPostToolUse({
       toolName: "bash",
       toolArgs: { command: "gh pr create --title test --body ok" },
       toolResult: {
@@ -497,10 +484,19 @@ test("offers listening once on canvas create/edit, handles exit_plan_mode, stops
       },
       workingDirectory: repoRoot,
     });
+    assert.equal(prOut, undefined);
+    const mcpPrOut = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "org", repo: "repo", title: "test" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ number: 43, html_url: "https://github.com/org/repo/pull/43" }),
+      },
+      workingDirectory: repoRoot,
+    });
+    assert.equal(mcpPrOut, undefined);
     await new Promise((r) => setTimeout(r, 25));
-    assert.equal(prompts.length, 1);
-    assert.match(prompts[0], /https:\/\/github\.com\/org\/repo\/pull\/42/);
-    assert.match(prompts[0], /architecture\.md/);
+    assert.equal(prompts.length, 0);
 
     const archTool = controller.tools.find((t) => t.name === "mcp__unpaged__architecture_report");
     const reportOut = await archTool.handler({
@@ -510,10 +506,14 @@ test("offers listening once on canvas create/edit, handles exit_plan_mode, stops
       commit: "abc1234",
       title: "Service Arch",
     });
-    assert.match(reportOut, /up to date · checked 12 Nov/);
+    assert.match(reportOut, /status: checked 12 Nov\./);
 
+    // The session-start status says how to start a comparison, since nothing starts one on its own.
     await controller.hooks.onSessionStart({ cwd: repoRoot, source: "startup" });
-    assert.ok(logs.some((l) => l.includes("Architecture (Service Arch): up to date")));
+    assert.ok(
+      logs.some((l) => l.includes("Architecture (Service Arch): checked 12 Nov · /unpaged:architecture compare checks it against the code"))
+    );
+    assert.equal(prompts.length, 0);
 
     await controller.hooks.onSessionEnd();
   });

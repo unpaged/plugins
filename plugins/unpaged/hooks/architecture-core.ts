@@ -8,17 +8,19 @@
 //
 // A repository names its architecture canvas in a small pointer file,
 // .unpaged/architecture.json, which /unpaged:architecture writes when it
-// draws the canvas. From then on, the moment the session opens a pull request
-// (the `gh pr create` command, or a GitHub connector's pull-request tool, once
-// its answer carries the pull request's address), the mod submits one prompt
-// that has the session compare the canvas with the code in a separate helper
-// and mark the canvas; the line blinks yellow meanwhile and settles when the
-// command reports the verdict through the mod's architecture_report tool.
-// "update" does the same for the whole canvas, rewriting what no longer holds.
+// draws the canvas. From then on, when the person presses "compare" on the
+// line, the mod submits one prompt that has the session compare the canvas
+// with the code in a separate helper and mark the canvas; the line blinks
+// yellow meanwhile and settles when the command reports the verdict through
+// the mod's architecture_report tool. Nothing starts a comparison on its own:
+// opening a pull request does not. "update" does the same for the whole
+// canvas, rewriting what no longer holds.
 //
-// The light is green while the canvas is up to date, yellow when it is behind
-// (with update), red when the canvas is gone or was not compared for three
-// months, and a grey invitation while a git repository has no pointer file.
+// The light is green while the last comparison found the canvas up to date,
+// yellow when it is behind (with update), red when the canvas is gone or was
+// not compared for three months, and a grey invitation while a git repository
+// has no pointer file. Compare is on the line in every state but none, lost
+// and a comparison under way.
 // At session start the state comes from the canvas's own date note, where the
 // person's permission rules let the mod read the canvas on its own, else from
 // the verdict the mod stored on this machine, else it is unknown until the
@@ -43,20 +45,11 @@ export const COMMIT_PREFIX = 'compared at '
 /** A canvas not compared for this long is red. */
 export const STALE_AFTER_MS = 90 * 24 * 60 * 60 * 1000
 export const BLINK_MS = 600
-/** The prompt goes out once the hook that saw the pull request has answered. */
+/** The prompt goes out once the press that started it has been answered. */
 export const SUBMIT_DELAY_MS = 50
 /** The verdict the mod stores on this machine, one entry per canvas. */
 export const STORED = 'architecture:'
 export const storedVerdictFor = (documentId: string) => `${STORED}${documentId}`
-
-/** `gh pr create` anywhere in a command, in a pipeline or after `&&` too. */
-export const PR_COMMAND = /(^|[\s;&|(`])gh\s+pr\s+create\b/
-/** A GitHub connector's pull-request tool, by name: a server named after GitHub and a tool that creates a pull request. */
-export const GITHUB_PR_TOOL = /^mcp__[A-Za-z0-9_-]*github[A-Za-z0-9_-]*__(create_pull_request|open_pull_request|pull_request_create|create_pr)$/i
-/** What `gh pr create --dry-run` prints first: the title and body it would have used follow, and may name another pull request. */
-export const DRY_RUN_HEADER = /Would have created a Pull Request with:/
-/** A pull request's address, on GitHub or a GitHub Enterprise host. */
-export const PR_URL = /https?:\/\/[^\s"'<>)\]]+\/pull\/\d+/
 
 export const STATES = ['current', 'behind', 'lost'] as const
 export type VerdictState = (typeof STATES)[number]
@@ -81,9 +74,9 @@ export type Verdict = {
   reportedAt: string
 }
 
-/** What the agent reads after a pull request: the comparison is the command's Compare section, run in its own turn. */
-export const comparePrompt = (pullRequest: string | null) =>
-  `The unpaged plugin sent a message: this session opened a pull request${pullRequest ? ` (${pullRequest})` : ''}, so the repository's architecture document is to be compared with the code now, as the plugin does after every pull request. Invoke the skill unpaged:architecture with the arguments "compare" and follow its Compare section to the end: it runs the comparison in a separate helper with a clean slate, marks the canvas, never rewrites a card, and ends by reporting with architecture_report, which settles the blinking line above the prompt.`
+/** What the agent reads after the compare press: the comparison is the command's Compare section, run in its own turn. */
+export const COMPARE_PROMPT =
+  'The person pressed "compare" on the architecture line above the prompt (the unpaged plugin). Compare the repository\'s architecture document with the code now: invoke the skill unpaged:architecture with the arguments "compare" and follow its Compare section to the end: it runs the comparison in a separate helper with a clean slate, marks the canvas, never rewrites a card, and ends by reporting with architecture_report, which settles the blinking line above the prompt.'
 export const UPDATE_PROMPT =
   'The person pressed "update" on the architecture line above the prompt (the unpaged plugin). Update the repository\'s architecture document now: invoke the skill unpaged:architecture with the arguments "update" and follow its Update section to the end; it ends by reporting with architecture_report, which settles the line.'
 export const CREATE_PROMPT =
@@ -181,11 +174,12 @@ export function describeLight(l: ArchitectureLight, now: number) {
   const shown = shownState(l, now)
   if (shown === 'none') return 'no architecture document yet'
   if (shown === 'unknown') return 'not compared from this machine yet'
-  if (shown === 'comparing') return l.source === 'update' ? 'updating the canvas' : 'comparing with the pull request'
+  if (shown === 'comparing') return l.source === 'update' ? 'updating the canvas' : 'comparing with the code'
   if (shown === 'lost') return 'canvas deleted or unreachable'
   if (shown === 'stale') return `not compared since ${l.checkedAt === null ? 'an unknown day' : dayLabel(l.checkedAt, now)}`
   if (shown === 'behind') return `behind since ${l.behindSince === null ? 'an unknown day' : dayLabel(l.behindSince, now)}`
-  return `up to date${l.checkedAt === null ? '' : `  ·  checked ${dayLabel(l.checkedAt, now)}`}`
+  // Nothing compares on its own any more, so green says when it was last found up to date, not that it still is.
+  return l.checkedAt === null ? 'up to date when last compared' : `checked ${dayLabel(l.checkedAt, now)}`
 }
 
 /** The state the line draws: `stale` (red) for a canvas not compared for three months, else the state as it is. */
@@ -199,10 +193,4 @@ export function lightColor(shown: ReturnType<typeof shownState>) {
   if (shown === 'behind' || shown === 'comparing') return 'yellow'
   if (shown === 'lost' || shown === 'stale') return 'red'
   return 'gray'
-}
-
-/** The pull request's address in a tool's answer, when it carries one. */
-export function pullRequestUrl(ran: { text?: unknown; result?: unknown }) {
-  const haystack = [text(ran.text), typeof ran.result === 'string' ? ran.result : JSON.stringify(ran.result ?? '')].join('\n')
-  return haystack.match(PR_URL)?.[0] ?? null
 }

@@ -37,7 +37,7 @@ export type ArchitectureLight = {
   /** The day the canvas fell behind, ms since the epoch, or null. */
   behindSince: number | null
   /** What started the comparison under way. */
-  source: 'pull-request' | 'update' | null
+  source: 'compare' | 'update' | null
   /** The blink phase while comparing: the dot is drawn full when true. */
   on: boolean
 }

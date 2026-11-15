@@ -7,7 +7,6 @@ import { pollInbox } from "../../monitors/poll.mjs";
 import { createCopilotStore } from "./store.mjs";
 import { createUnpagedCopilotController } from "./copilot-core.mjs";
 
-const architectureCommandPath = fileURLToPath(new URL("../../commands/architecture.md", import.meta.url));
 const planApprovedContextPath = fileURLToPath(new URL("../../hooks/plan-approved-context.json", import.meta.url));
 
 async function loadPlanApprovedContext() {
@@ -48,7 +47,6 @@ const controller = createUnpagedCopilotController({
   getCwd: async () => process.cwd(),
   store: createCopilotStore(),
   poll: (config, settings) => pollInbox(config, settings),
-  architectureCommandPath,
   planApprovedContext: await loadPlanApprovedContext(),
 });
 
@@ -56,10 +54,6 @@ session = await joinSession({
   tools: controller.tools,
   commands: controller.commands,
   hooks: controller.hooks,
-});
-
-session.on("session.idle", () => {
-  controller.onSessionIdle();
 });
 
 process.once("SIGTERM", () => controller.shutdown());

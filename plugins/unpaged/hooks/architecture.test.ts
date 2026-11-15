@@ -1,7 +1,8 @@
 // Tests of the architecture line above the prompt: what it shows in each
-// state, how a pull request starts the comparison, and how the command's
-// report settles it, run against the engine with the world beneath the mod
-// answered by the test's own hooks.
+// state, how its compare press starts the comparison (and that opening a pull
+// request starts nothing), and how the command's report settles it, run
+// against the engine with the world beneath the mod answered by the test's own
+// hooks.
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
@@ -41,17 +42,13 @@ const verdict = (changes: Record<string, unknown> = {}) => ({
 /**
  * The repository beneath the mod: a git folder, its pointer file, and the
  * tools that open a pull request, answered as the terminal and a GitHub
- * connector would.
+ * connector would, to show that opening one starts nothing.
  */
-function repo(on: On, w: World, settings: { git?: boolean; pointer?: boolean; answer?: string; error?: boolean } = {}) {
+function repo(on: On, w: World, settings: { git?: boolean; pointer?: boolean } = {}) {
   if (settings.git !== false) w.files.set(GIT, 'gitdir: /repo/.git')
   if (settings.pointer !== false) w.files.set(POINTER, pointerFor())
-  const answer = settings.answer ?? `Creating pull request for feature into main in acme/shop-api\n\n${PR_URL}\n`
-  on('tool.call', { tool: 'Bash' }, () =>
-    settings.error
-      ? ({ isError: true, result: 'Error: gh failed', text: 'Error: gh failed' } as never)
-      : ({ result: { stdout: answer, stderr: '' }, text: answer } as never),
-  )
+  const answer = `Creating pull request for feature into main in acme/shop-api\n\n${PR_URL}\n`
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: answer, stderr: '' }, text: answer }) as never)
   on('tool.call', { tool: /^mcp__plugin_engineering_github__/ }, () => {
     const body = JSON.stringify({ number: 7, html_url: PR_URL })
     return { result: [{ type: 'text', text: body }], text: body } as never
@@ -72,6 +69,13 @@ async function line($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
   const buttons = (await ui.findAll({ type: 'Button' })).map(b => [b.key, b.props.hotkey])
   const link = await ui.find({ type: 'Link' })
   return { ui, texts, buttons, link }
+}
+
+/** Presses one of the architecture line's buttons, as a click or its letter once the line has the focus. */
+async function press($: Engine, key: string) {
+  const { ui } = await line($)
+  await ui.press({ key })
+  await ui.unmount()
 }
 
 describe('architecture line', () => {
@@ -108,7 +112,7 @@ describe('architecture line', () => {
     expect(w.calls.mcp).toEqual([])
   })
 
-  test('a pointer with no verdict known on this machine: grey, with update and link', async ($, on) => {
+  test('a pointer with no verdict known on this machine: grey, with update, compare and link', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     await start($, w)
@@ -119,6 +123,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('not compared from this machine yet'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
+      ['arch-compare', 'p'],
       ['arch-link', 'l'],
     ])
     expect(link?.props.href).toBe(`https://unpaged.io/document/${ARCH}/edit`)
@@ -128,7 +133,7 @@ describe('architecture line', () => {
     await ui.unmount()
   })
 
-  test('session start reads the date note off the canvas where the rules allow document_get: green, checked on its day', async ($, on) => {
+  test('session start reads the date note off the canvas where the rules allow document_get: green, checked on its day, with compare', async ($, on) => {
     const w = world(on, { now: NOW, docRule: 'allow', document: canvas('**Checked:** 2026-11-03') })
     repo(on, w)
     await start($, w, l => l?.state === 'current')
@@ -136,12 +141,17 @@ describe('architecture line', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234', checkedAt: Date.parse('2026-11-03T00:00:00Z') }))
     expect(w.store.get(`architecture:${ARCH}`)).toEqual(expect.objectContaining({ state: 'current', checkedAt: '2026-11-03', commit: 'abc1234' }))
     const { ui, texts, buttons } = await line($)
-    expect(texts.some(t => t.includes('up to date') && t.includes('checked 3 Nov'))).toBe(true)
-    expect(buttons).toEqual([['arch-link', 'l']])
+    // Nothing compares on its own: the line says the day it was found up to date, not that it still is.
+    expect(texts.some(t => t.includes('checked 3 Nov'))).toBe(true)
+    expect(texts.some(t => t.includes('up to date'))).toBe(false)
+    expect(buttons).toEqual([
+      ['arch-compare', 'p'],
+      ['arch-link', 'l'],
+    ])
     await ui.unmount()
   })
 
-  test('a behind note on the canvas is yellow, since its day, with update', async ($, on) => {
+  test('a behind note on the canvas is yellow, since its day, with update and compare', async ($, on) => {
     const w = world(on, { now: NOW, docRule: 'allow', document: canvas('**Behind since:** 2026-11-05', 'compared at def5678 on 2026-11-08') })
     repo(on, w)
     await start($, w, l => l?.state === 'behind')
@@ -152,6 +162,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('behind since 5 Nov'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
+      ['arch-compare', 'p'],
       ['arch-link', 'l'],
     ])
     await ui.unmount()
@@ -182,7 +193,7 @@ describe('architecture line', () => {
     await ui.unmount()
   })
 
-  test('three months without a comparison is red, with update', async ($, on) => {
+  test('three months without a comparison is red, with update and compare', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict({ checkedAt: '2026-08-01', commit: 'aaa1111' }))
@@ -191,6 +202,7 @@ describe('architecture line', () => {
     expect(texts.some(t => t.includes('not compared since 1 Aug'))).toBe(true)
     expect(buttons).toEqual([
       ['arch-update', 'u'],
+      ['arch-compare', 'p'],
       ['arch-link', 'l'],
     ])
     await ui.unmount()
@@ -204,26 +216,25 @@ describe('architecture line', () => {
   })
 })
 
-describe('the comparison after a pull request', () => {
-  test('gh pr create in the terminal: the line blinks yellow, one prompt starts the comparison, the report settles it', async ($, on) => {
+describe('the comparison, on the compare press', () => {
+  test('compare on the line: the line blinks yellow, one prompt starts the comparison, the report settles it', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    const ran = await $.tool.call({ tool: 'Bash', command: 'git push -u origin feature && gh pr create --title "Feature" --body "Adds it"' } as never)
-    expect(JSON.stringify(ran)).toContain(PR_URL)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request', on: true }))
+    await press($, 'arch-compare')
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'compare', on: true }))
     await w.clock.advance(50)
     expect(w.calls.submits).toHaveLength(1)
-    expect(w.calls.submits[0]).toContain(PR_URL)
-    expect(w.calls.submits[0]).toContain('Invoke the skill unpaged:architecture with the arguments "compare"')
+    expect(w.calls.submits[0]).toContain('pressed "compare"')
+    expect(w.calls.submits[0]).toContain('invoke the skill unpaged:architecture with the arguments "compare"')
     // The dot blinks while the comparison runs.
     await w.clock.advance(600)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', on: false }))
     await w.clock.advance(600)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', on: true }))
     const { ui, texts, buttons } = await line($)
-    expect(texts.some(t => t.includes('comparing with the pull request'))).toBe(true)
+    expect(texts.some(t => t.includes('comparing with the code'))).toBe(true)
     expect(buttons).toEqual([['arch-link', 'l']])
     await ui.unmount()
     await w.startTurn()
@@ -243,79 +254,26 @@ describe('the comparison after a pull request', () => {
     expect(w.calls.toasts.filter(t => t.includes('did not finish'))).toEqual([])
   })
 
-  test("a GitHub connector's pull-request tool starts it too", async ($, on) => {
+  test("opening a pull request starts nothing: gh pr create in the terminal, or a GitHub connector's pull-request tool", async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
+    const before = w.calls.architecture
+    const ran = await $.tool.call({ tool: 'Bash', command: 'git push -u origin feature && gh pr create --title "Feature" --body "Adds it"' } as never)
+    // The command's answer goes back as it came.
+    expect(JSON.stringify(ran)).toContain(PR_URL)
     await $.tool.call({ tool: 'mcp__plugin_engineering_github__create_pull_request', owner: 'acme', repo: 'shop-api', title: 'Feature' } as never)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request' }))
-    await w.clock.advance(50)
-    expect(w.calls.submits).toHaveLength(1)
-    expect(w.calls.submits[0]).toContain(PR_URL)
-  })
-
-  test('a pull-request command that creates nothing here starts nothing: --web, --dry-run, a failure, or no address in its answer', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w, { answer: 'Opening github.com in your browser.\n' })
-    w.store.set(`architecture:${ARCH}`, verdict())
-    await start($, w)
-    for (const command of ['gh pr create --web', 'gh pr create --dry-run --title x', 'gh pr create --title x', 'gh pr list', 'echo gh pr create']) {
-      await $.tool.call({ tool: 'Bash', command } as never)
-    }
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current' }))
     await w.clock.advance(100)
+    expect(w.calls.architecture).toEqual(before)
     expect(w.calls.submits).toEqual([])
-  })
-
-  test('a failed pull-request command starts nothing', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w, { error: true })
-    w.store.set(`architecture:${ARCH}`, verdict())
-    await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
-    await w.clock.advance(100)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current' }))
-    expect(w.calls.submits).toEqual([])
-  })
-
-  test('with no pointer file a pull request starts nothing', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w, { pointer: false })
-    await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
-    await w.clock.advance(100)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'none' }))
-    expect(w.calls.submits).toEqual([])
-  })
-
-  test('a pull request command followed by a browser view, or one whose title names a flag, still starts the comparison', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w)
-    w.store.set(`architecture:${ARCH}`, verdict())
-    await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add a --dry-run flag to deploy" --fill && gh pr view --web' } as never)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request' }))
-  })
-
-  test('a dry run whose printed body names another pull request starts nothing', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w, { answer: 'Would have created a Pull Request with:\ntitle:\tRetry the upload\nbody:\tFollow-up to https://github.com/acme/shop-api/pull/41\n' })
-    w.store.set(`architecture:${ARCH}`, verdict())
-    await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --dry-run --title "Retry the upload" --body "Follow-up to https://github.com/acme/shop-api/pull/41"' } as never)
-    await w.clock.advance(100)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current' }))
-    expect(w.calls.submits).toEqual([])
-  })
-
-  test('a pointer written after the session started is found when the pull request opens', async ($, on) => {
-    const w = world(on, { now: NOW })
-    repo(on, w, { pointer: false })
-    await start($, w)
-    w.files.set(POINTER, pointerFor())
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', documentId: ARCH }))
+    // The line still offers compare.
+    const { ui, buttons } = await line($)
+    expect(buttons).toEqual([
+      ['arch-compare', 'p'],
+      ['arch-link', 'l'],
+    ])
+    await ui.unmount()
   })
 
   test('a turn that ends without a report puts the line back and says so', async ($, on) => {
@@ -323,29 +281,44 @@ describe('the comparison after a pull request', () => {
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
-    // The turn that ran the command ends first: the comparison's turn has not started.
+    // The turn the press interrupted ends first: the comparison's turn has not started.
     await turnOver($)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
     await w.startTurn()
     await turnOver($)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
     expect(w.calls.toasts.at(-1)).toContain('did not finish')
-    // A second pull request starts a new comparison.
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    // A second press starts a new comparison.
+    await press($, 'arch-compare')
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
   })
 
-  test('a second pull request while one comparison runs starts no other', async ($, on) => {
+  test('two compare presses that land together start one comparison', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    const { ui } = await line($)
+    await Promise.all([ui.press({ key: 'arch-compare' }), ui.press({ key: 'arch-compare' })])
+    await ui.unmount()
     await w.clock.advance(100)
     expect(w.calls.submits).toHaveLength(1)
+    expect(w.calls.submits[0]).toContain('pressed "compare"')
+  })
+
+  test('update and compare pressed together on a red line start one of them', async ($, on) => {
+    const w = world(on, { now: NOW })
+    repo(on, w)
+    w.store.set(`architecture:${ARCH}`, verdict({ checkedAt: '2026-08-01', commit: 'aaa1111' }))
+    await start($, w)
+    const { ui } = await line($)
+    await Promise.all([ui.press({ key: 'arch-update' }), ui.press({ key: 'arch-compare' })])
+    await ui.unmount()
+    await w.clock.advance(100)
+    expect(w.calls.submits).toHaveLength(1)
+    expect(w.calls.submits[0]).toContain('pressed "update"')
   })
 
   test('update from the line re-checks the whole canvas: blinking, one prompt, the report turns it green', async ($, on) => {
@@ -406,6 +379,7 @@ describe('the comparison after a pull request', () => {
         ['link', '1'],
         ['stop', '2'],
         ['arch-update', 'u'],
+        ['arch-compare', 'p'],
         ['arch-link', 'l'],
       ])
       await ui.unmount()
@@ -466,18 +440,18 @@ describe('what the review asked for', () => {
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: null, checkedAt: Date.parse('2026-11-08T00:00:00Z') }))
   })
 
-  test('/clear before the comparison turn starts gives it up and says so; the next pull request starts anew', async ($, on) => {
+  test('/clear before the comparison turn starts gives it up and says so; the next press starts anew', async ($, on) => {
     const w = world(on, { now: NOW })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
     expect(w.calls.submits).toHaveLength(1)
     await $.classic.SessionStart({ source: 'clear' } as never)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
     expect(w.calls.toasts.at(-1)).toContain('cleared before its turn started')
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    await press($, 'arch-compare')
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
   })
 
@@ -486,11 +460,11 @@ describe('what the review asked for', () => {
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
     await w.startTurn()
     await $.classic.SessionStart({ source: 'resume' } as never)
-    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'pull-request', on: true }))
+    expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', source: 'compare', on: true }))
     await w.clock.advance(600)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing', on: false }))
     await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'eee5555' } as never)
@@ -514,7 +488,7 @@ describe('what the review asked for', () => {
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
     await w.startTurn()
     // The turn started its helper, which is still running when the turn ends.
@@ -527,7 +501,7 @@ describe('what the review asked for', () => {
     await $.tool.call({ tool: REPORT, documentId: ARCH, state: 'current', checkedAt: '2026-11-10', commit: 'fff6666' } as never)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'fff6666' }))
     // A later comparison whose turn ends with no helper left running is given up.
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
     await w.startTurn()
     await turnOver($)
@@ -540,7 +514,7 @@ describe('what the review asked for', () => {
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     await w.clock.advance(50)
     await w.startTurn()
     await turnOver($)
@@ -548,18 +522,18 @@ describe('what the review asked for', () => {
     expect(w.calls.toasts.at(-1)).toContain('did not finish')
   })
 
-  test('a refused comparison prompt gives the comparison up at once, and the next pull request starts anew', async ($, on) => {
+  test('a refused comparison prompt gives the comparison up at once, and the next press starts anew', async ($, on) => {
     const w = world(on, { now: NOW, dropPrompt: 'a Stop stands' })
     repo(on, w)
     w.store.set(`architecture:${ARCH}`, verdict())
     await start($, w)
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' } as never)
+    await press($, 'arch-compare')
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
     await w.clock.advance(50)
     expect(w.calls.submits).toHaveLength(1)
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'current', commit: 'abc1234' }))
     expect(w.calls.toasts.at(-1)).toContain('refused: a Stop stands')
-    await $.tool.call({ tool: 'Bash', command: 'gh pr create --title y' } as never)
+    await press($, 'arch-compare')
     expect(w.calls.architecture).toEqual(expect.objectContaining({ state: 'comparing' }))
   })
 
