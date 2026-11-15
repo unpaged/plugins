@@ -45,17 +45,14 @@ import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
 import {
   BLINK_MS,
+  COMPARE_PROMPT,
   CREATE_PROMPT,
-  DRY_RUN_HEADER,
-  GITHUB_PR_TOOL,
   NONE,
   POINTER_PATH,
-  PR_COMMAND,
   STATES,
   SUBMIT_DELAY_MS,
   UPDATE_PROMPT,
   boardUrlFor,
-  comparePrompt,
   day,
   isCommit,
   describeLight,
@@ -63,7 +60,6 @@ import {
   isVerdictState,
   lightFrom,
   parsePointer,
-  pullRequestUrl,
   shownState,
   storedVerdictFor,
   text,
@@ -821,7 +817,9 @@ let blink: { cancel: () => void } | null = null
  * that runs it has started, and the agents the session already had when it
  * did, so a helper that turn starts is told from an earlier background agent.
  */
-let comparing: { previous: ArchitectureLight; source: 'pull-request' | 'update'; started: boolean; earlier: Set<string> } | null = null
+let comparing: { previous: ArchitectureLight; source: 'compare' | 'update'; started: boolean; earlier: Set<string> } | null = null
+/** A press whose comparison is being set up: held before it waits on anything, so a second press that lands meanwhile starts none. */
+let startingComparison = false
 
 /**
  * The repository's top level: the nearest folder at or above the session's
@@ -909,7 +907,7 @@ async function probe($: Api, found: Pointer): Promise<Verdict | null> {
  * note off the canvas and draws again from that. A comparison under way is
  * left as it is.
  */
-async function refresh($: Api, { canvas = true } = {}) {
+async function refresh($: Api) {
   pointer = await readPointer($)
   if (!pointer) {
     verdict = null
@@ -920,7 +918,6 @@ async function refresh($: Api, { canvas = true } = {}) {
   const found = pointer
   verdict = await loadVerdict($, found.documentId)
   if (!comparing) await update($, light, () => lightFrom(found, verdict))
-  if (!canvas) return
   const probed = await probe($, found)
   if (!probed || pointer?.documentId !== found.documentId) return
   verdict = probed
@@ -940,12 +937,24 @@ function startBlinking($: Api) {
 }
 
 /**
- * Starts a comparison: the line blinks yellow and, once the hook that saw the
- * pull request has answered, one prompt starts the turn that runs it. One at
- * a time; none without a pointer.
+ * Starts a comparison, or an update, on the person's press: the line blinks
+ * yellow and, once the press has been answered, one prompt starts the turn
+ * that runs it. One at a time, two presses that land together included: a
+ * press is held from its first step, before it waits on anything; none
+ * without a pointer.
  */
-async function startComparison($: Api, source: 'pull-request' | 'update', pullRequest: string | null) {
-  if (comparing) return false
+async function startComparison($: Api, source: 'compare' | 'update') {
+  if (comparing || startingComparison) return false
+  startingComparison = true
+  try {
+    return await beginComparison($, source)
+  } finally {
+    startingComparison = false
+  }
+}
+
+/** The comparison's start, once startComparison holds the press. */
+async function beginComparison($: Api, source: 'compare' | 'update') {
   if (!pointer) pointer = await readPointer($)
   if (!pointer) return false
   const current = (await read($, light)) ?? lightFrom(pointer, verdict)
@@ -953,7 +962,7 @@ async function startComparison($: Api, source: 'pull-request' | 'update', pullRe
   comparing = { previous: current, source, started: false, earlier: new Set() }
   await update($, light, () => ({ ...current, state: 'comparing' as const, source, on: true }))
   startBlinking($)
-  const prompt = source === 'pull-request' ? comparePrompt(pullRequest) : UPDATE_PROMPT
+  const prompt = source === 'compare' ? COMPARE_PROMPT : UPDATE_PROMPT
   $.clock.after(SUBMIT_DELAY_MS, () => {
     const submitted = $.prompt.submit({ text: prompt })
     void submitted.then(async result => {
@@ -999,9 +1008,14 @@ function createArchitecture($: Api) {
   void $.prompt.submit({ text: CREATE_PROMPT }).catch(() => undefined)
 }
 
+/** The architecture line's compare press: the comparison that marks the canvas and rewrites no card. */
+function compareArchitecture($: Api) {
+  void startComparison($, 'compare').catch(() => undefined)
+}
+
 /** The architecture line's update press: the comparison that rewrites what no longer holds. */
 function updateArchitecture($: Api) {
-  void startComparison($, 'update', null).catch(() => undefined)
+  void startComparison($, 'update').catch(() => undefined)
 }
 
 type ArchitectureButton = { key: string; label: string; hotkey: string; onPress: () => void }
@@ -1020,12 +1034,23 @@ async function architectureLine($: Api) {
   // A bare digit typed into an empty prompt presses the band button with that
   // hotkey, and this line stays for the whole session: a digit would take the
   // leading 3 of any prompt. Every key is a letter, which fires only once the
-  // line has the focus (ctrl+x tab, or a click).
+  // line has the focus (ctrl+x tab, or a click). Each letter keeps one meaning
+  // in every state, so compare is `p`: `c` is create's.
   const create: ArchitectureButton = { key: 'arch-create', label: 'create', hotkey: 'c', onPress: () => createArchitecture($) }
   const link: ArchitectureButton = { key: 'arch-link', label: 'link', hotkey: 'l', onPress: () => showArchitectureLink($, l.boardUrl) }
+  const compareNow: ArchitectureButton = { key: 'arch-compare', label: 'compare', hotkey: 'p', onPress: () => compareArchitecture($) }
   const updateNow: ArchitectureButton = { key: 'arch-update', label: 'update', hotkey: 'u', onPress: () => updateArchitecture($) }
+  // Nothing compares on its own: compare is on the line in every state but none, lost and a comparison under way.
   const buttons =
-    shown === 'none' ? [create] : shown === 'lost' ? [create, link] : shown === 'current' || shown === 'comparing' ? [link] : [updateNow, link]
+    shown === 'none'
+      ? [create]
+      : shown === 'lost'
+        ? [create, link]
+        : shown === 'comparing'
+          ? [link]
+          : shown === 'current'
+            ? [compareNow, link]
+            : [updateNow, compareNow, link]
   return {
     dot: shown === 'comparing' && !l.on ? '○' : '●',
     color: lightColor(shown),
@@ -1033,17 +1058,6 @@ async function architectureLine($: Api) {
     label: `·  ${describeLight(l, now)}`,
     buttons,
   }
-}
-
-/** Starts the comparison a pull request calls for, once the pointer names a canvas; the tool's answer goes back as it came. */
-async function afterPullRequest($: Api, ran: { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown }) {
-  if (ran.deny !== undefined || ran.isError === true) return
-  const url = pullRequestUrl(ran)
-  if (!url) return
-  // A pointer committed since the session started (a teammate's, pulled meanwhile) is found now.
-  if (!pointer) await refresh($, { canvas: false })
-  if (!pointer) return
-  await startComparison($, 'pull-request', url)
 }
 
 // The hooks the engine lets a plugin register once (session.start, the
@@ -1128,7 +1142,7 @@ function stopArchitecture() {
 }
 
 export const register: Register = on => {
-  // The architecture line's own hooks: its report tool and the pull-request tools.
+  // The architecture line's own hook: its report tool. No other tool's call starts a comparison.
   on('tool.call', { tool: 'mcp__unpaged__architecture_report' }, async ($, e) => {
     const input = e as unknown as { documentId?: unknown; state?: unknown; checkedAt?: unknown; commit?: unknown; behindSince?: unknown; title?: unknown }
     const documentId = text(input.documentId)
@@ -1152,25 +1166,6 @@ export const register: Register = on => {
     await settleVerdict($, pointer, reported)
     const l = lightFrom(pointer, reported)
     return { result: `Reported. The line above the prompt now shows the architecture document as: ${describeLight(l, await $.clock.now())}.` }
-  })
-
-  // A pull request the session opens from the terminal: `gh pr create`, once
-  // its answer carries the pull request's address. The command runs as it
-  // would; the comparison starts in a turn of its own after this one.
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const ran = await next(e)
-    const command = text((e as unknown as { command?: unknown }).command)
-    // `--web` prints no pull request address; a `--dry-run` prints the title and body it would have used, which may name another pull request.
-    if (!PR_COMMAND.test(command) || DRY_RUN_HEADER.test(text((ran as { text?: unknown }).text))) return ran
-    await afterPullRequest($, ran).catch(() => undefined)
-    return ran
-  })
-
-  // A pull request the session opens through a GitHub connector's tool.
-  on('tool.call', { tool: GITHUB_PR_TOOL }, async ($, e, next) => {
-    const ran = await next(e)
-    await afterPullRequest($, ran).catch(() => undefined)
-    return ran
   })
 
   on('session.start', async ($, e, next) => {

@@ -13,7 +13,6 @@ import { runListener } from "../../monitors/listen-loop.mjs";
 
 export const FIRST_POLL_WAIT_MS = 8000;
 export const FLUSH_DELAY_MS = 50;
-export const SUBMIT_DELAY_MS = 50;
 export const STALE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 
 export const CREATES = Object.freeze(["document_create", "template_clone"]);
@@ -44,12 +43,6 @@ const TRACKED_UNPAGED_TOOLS = [
 const UNPAGED_TOOL_PATTERN = new RegExp(
   `^(?:mcp__(?:plugin_unpaged_)?)?unpaged[A-Za-z0-9_-]*?(?:__|-)((?:${TRACKED_UNPAGED_TOOLS.join("|")}))$`
 );
-const SHELL_TOOLS = new Set(["bash", "powershell", "local_shell", "Bash"]);
-export const PR_COMMAND = /(^|[\s;&|(`])gh\s+pr\s+create\b/;
-export const DRY_RUN_HEADER = /Would have created a Pull Request with:/;
-export const PR_URL = /https?:\/\/[^\s"'<>)\]]+\/pull\/\d+/;
-export const GITHUB_PR_TOOL =
-  /^(?:mcp__)?[A-Za-z0-9_-]*github[A-Za-z0-9_-]*?(?:__|-)(create_pull_request|open_pull_request|pull_request_create|create_pr)$/i;
 
 export const MINT_DENIED =
   "Push is not armed: the person's permission rules deny agent_listener_key_create, so no listener key can be created for this canvas, by the plugin or by you. Do not call it; say that listening needs that rule lifted.";
@@ -156,20 +149,6 @@ export function createdDocumentFromResult(value) {
   return isDocumentId(value.id) ? { id: String(value.id), title: str(value.title) } : null;
 }
 
-export function pullRequestUrlFromResult(toolResult) {
-  if (!toolResult) return null;
-  const parts =
-    typeof toolResult === "string"
-      ? [toolResult]
-      : [
-          str(toolResult.textResultForLlm),
-          str(toolResult.sessionLog),
-          typeof toolResult.contents === "string" ? toolResult.contents : JSON.stringify(toolResult.contents ?? ""),
-        ];
-  const match = parts.join("\n").match(PR_URL);
-  return match ? match[0] : null;
-}
-
 export function offerLine(documentId, title) {
   const name = title ? `"${title}"` : "this whiteboard";
   return `The unpaged plugin can bring @agent comments on ${name} into this session while you work. Unless this turn already arms it with mcp__unpaged__listen_arm (as /unpaged:visual-plan does), offer that in one short question when you hand the whiteboard back. Only if they say yes, call mcp__unpaged__listen_arm with documentId ${documentId}: the plugin keeps the key out of this conversation and starts listening.`;
@@ -181,13 +160,6 @@ function revokeYourselfLine(keyIds) {
 
 function revokeDeniedLine(keyIds) {
   return ` Its listener key is still live (keyId ${keyIds.join(", ")}): the person's permission rules deny agent_listener_key_revoke, so neither the plugin nor you can revoke it. Do not call it; say that it can be revoked in Unpaged, or once that rule is lifted.`;
-}
-
-export function comparePrompt(pullRequest, architectureCommandPath) {
-  const where = architectureCommandPath
-    ? `Read ${architectureCommandPath} and follow its Compare section to the end`
-    : 'Invoke /unpaged:architecture with the argument "compare" and follow its Compare section to the end';
-  return `The unpaged plugin sent a message: this session opened a pull request${pullRequest ? ` (${pullRequest})` : ""}, so the repository's architecture document is to be compared with the code now, as the plugin does after every pull request. ${where}: it runs the comparison in a separate helper with a clean slate, marks the canvas, never rewrites a card, and ends by reporting with mcp__unpaged__architecture_report.`;
 }
 
 function formatDayLabel(isoDay, nowMs) {
@@ -214,8 +186,17 @@ export function describeVerdict(verdict, nowMs) {
   if (verdict.state === "behind") {
     return `behind since ${formatDayLabel(verdict.behindSince, nowMs) ?? "an unknown day"}`;
   }
+  // Nothing compares on its own: the status says when the canvas was last found up to date, not that it still is.
   const checked = formatDayLabel(verdict.checkedAt, nowMs);
-  return `up to date${checked ? ` · checked ${checked}` : ""}`;
+  return checked ? `checked ${checked}` : "up to date when last compared";
+}
+
+/** The session-start status, with how to start a comparison: nothing starts one on its own. */
+export function sessionStartLine(verdict, nowMs) {
+  const summary = describeVerdict(verdict, nowMs);
+  return verdict?.state === "lost"
+    ? summary
+    : `${summary} · /unpaged:architecture compare checks it against the code`;
 }
 
 function defaultSleep(ms, signal) {
@@ -246,8 +227,6 @@ export function createUnpagedCopilotController({
   hostName = hostname(),
   firstPollWaitMs = FIRST_POLL_WAIT_MS,
   flushDelayMs = FLUSH_DELAY_MS,
-  submitDelayMs = SUBMIT_DELAY_MS,
-  architectureCommandPath = null,
   planApprovedContext = "",
 }) {
   if (!store || typeof poll !== "function" || typeof executeTool !== "function") {
@@ -266,8 +245,6 @@ export function createUnpagedCopilotController({
   const timers = new Set();
   let cachedMetadata = null;
   let lastWorkingDirectory = null;
-  let comparing = false;
-  let comparisonTurnStarted = false;
   let closed = false;
 
   async function currentCwd() {
@@ -764,8 +741,6 @@ export function createUnpagedCopilotController({
           behindSince,
           reportedAt: new Date(now()).toISOString(),
         };
-        comparing = false;
-        comparisonTurnStarted = false;
         await store.saveVerdict(reported);
         const summary = describeVerdict(reported, now());
         await log(`Architecture (${reported.title || documentId}): ${summary}`).catch(() => {});
@@ -822,7 +797,7 @@ export function createUnpagedCopilotController({
       const pointer = await store.readArchitecturePointer(await currentCwd());
       if (!pointer) return;
       const stored = await store.loadVerdict(pointer.documentId);
-      const summary = describeVerdict(stored, now());
+      const summary = sessionStartLine(stored, now());
       await log(`Architecture (${stored?.title || pointer.title || pointer.documentId}): ${summary}`, {
         ephemeral: true,
       }).catch(() => {});
@@ -939,29 +914,6 @@ export function createUnpagedCopilotController({
         offered.add(documentId);
         return { additionalContext: offerLine(documentId, title) };
       }
-
-      const isShellPr =
-        SHELL_TOOLS.has(toolName) &&
-        PR_COMMAND.test(str(args.command ?? args.cmd)) &&
-        !DRY_RUN_HEADER.test(str(input?.toolResult?.textResultForLlm));
-      const isMcpPr = GITHUB_PR_TOOL.test(toolName);
-      if (isShellPr || isMcpPr) {
-        const prUrl = pullRequestUrlFromResult(input?.toolResult);
-        if (!prUrl || comparing) return;
-        const pointer = await store.readArchitecturePointer(wd || (await currentCwd()));
-        if (!pointer) return;
-        comparing = true;
-        comparisonTurnStarted = false;
-        schedule(submitDelayMs, async () => {
-          try {
-            await sendPrompt(comparePrompt(prUrl, architectureCommandPath));
-            comparisonTurnStarted = true;
-          } catch {
-            comparing = false;
-            comparisonTurnStarted = false;
-          }
-        });
-      }
     },
 
     onSessionEnd: async () => {
@@ -969,19 +921,11 @@ export function createUnpagedCopilotController({
     },
   };
 
-  function onSessionIdle() {
-    if (comparing && comparisonTurnStarted) {
-      comparing = false;
-      comparisonTurnStarted = false;
-    }
-  }
-
   return {
     label,
     tools,
     commands,
     hooks,
-    onSessionIdle,
     shutdown,
   };
 }

@@ -4,6 +4,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-15
+
+### Changed
+
+- The architecture comparison runs only when you ask for it. Opening a pull request no longer starts it: before, every `gh pr create` (or a GitHub connector's pull-request tool) in a session with `.unpaged/architecture.json` had the plugin submit its own prompt and start a comparison turn in that session, in Claude Code and in GitHub Copilot. In Claude Code the line above the prompt now has a `p: compare` button whenever the repository names a canvas (green, yellow, or red after three months without a comparison, and while nothing was compared from this machine yet); pressing it starts the same comparison, blinking until its report settles the line. Anywhere, `/unpaged:architecture compare` runs it too, and the command's hint lists it. A comparison still judges every change since the last compared commit, so nothing goes unjudged however many pull requests went in between. Since nothing re-checks on its own, the green line reads `checked <day>` instead of `up to date · checked <day>`, and GitHub Copilot's status at session start does the same and, unless the canvas is deleted or unreachable, names `/unpaged:architecture compare`. The comparison's *Behind since* thread opens with `Behind since <day>:`, no longer naming a pull request. The plugin no longer hooks `Bash` or a GitHub connector's pull-request tool, and reads no shell command.
+
 ## [1.15.0] - 2026-11-12
 
 ### Added
@@ -299,7 +305,8 @@ First stable release. The fresh-machine test (clean Ubuntu VM, free Unpaged acco
 
 - First release of the plugin ([#1](https://github.com/unpaged/plugins/pull/1)): marketplace `unpaged` with plugin `unpaged`, bundled Unpaged MCP server (`.mcp.json`), `/unpaged:visual-plan` (renders the conversation's plan, passed text, or drafts a plan for a named feature), and a PostToolUse hook on `ExitPlanMode` that stamps the canvas 🚀 EXECUTING when the plan is approved.
 
-[Unreleased]: https://github.com/unpaged/plugins/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/unpaged/plugins/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/unpaged/plugins/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/unpaged/plugins/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/unpaged/plugins/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/unpaged/plugins/compare/v1.13.1...v1.14.0
