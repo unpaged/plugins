@@ -943,4 +943,20 @@ describe('pull request previews for visual plans', () => {
     expect((resumedPr as { context?: string[] }).context).toBeUndefined()
     expect(w.store.has('plan:/repo\nfeat/after-resume')).toBe(false)
   })
+
+  test('a reftable HEAD stub (.invalid) stores no permanent plan: key and attaches the session plan at most once', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    gitBranch(on, w, '.invalid')
+
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Reftable plan', folderId: 'visual-plans' } as never)
+    expect([...w.store.keys()].filter(k => k.startsWith('plan:'))).toEqual([])
+
+    const firstPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "First" --body "Body"' } as never)
+    expect(((firstPr as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
+    expect([...w.store.keys()].filter(k => k.startsWith('plan:'))).toEqual([])
+
+    const secondPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Second" --body "Body"' } as never)
+    expect((secondPr as { context?: string[] }).context).toBeUndefined()
+  })
 })

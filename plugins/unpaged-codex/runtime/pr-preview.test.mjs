@@ -70,6 +70,17 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   const initial = await executeControl({ operation: "plan_lookup" }, context, options);
   assert.deepEqual(initial, { recorded: false });
 
+  // A Git reftable `.invalid` HEAD stub is rejected so no permanent `.invalid` branch record is ever saved.
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
+  const reftableSaved = await executeControl(
+    { operation: "plan_record", documentId: DOC_1, payload: { title: "codex: Reftable" } },
+    context,
+    options
+  );
+  assert.deepEqual(reftableSaved, { recorded: false });
+  assert.deepEqual(await executeControl({ operation: "plan_lookup" }, context, options), { recorded: false });
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+
   // Recording on `main` stores a one-shot pending plan rather than polluting `main`.
   const savedOnMain = await executeControl(
     { operation: "plan_record", documentId: DOC_1, payload: { title: "codex: Visual plan" } },

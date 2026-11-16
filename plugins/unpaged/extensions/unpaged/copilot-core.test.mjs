@@ -827,6 +827,34 @@ test("plans created on the default branch stay out of persistent main storage an
     assert.equal(secondUnrelated, undefined);
     assert.equal(await store.loadBranchPlan(repo), null);
 
+    // Reftable `.invalid` HEAD stub never writes a permanent `.invalid` branch plan and fires at most once.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Reftable plan", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: Reftable plan" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+    const reftableFirst = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "First" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/91\n" },
+      workingDirectory: repo,
+    });
+    assert.ok(reftableFirst?.additionalContext?.includes(DOC_A));
+    assert.equal(await store.loadBranchPlan(repo), null);
+    const reftableSecond = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Second" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/92\n" },
+      workingDirectory: repo,
+    });
+    assert.equal(reftableSecond, undefined);
+
     controller.shutdown();
   });
 });

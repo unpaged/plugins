@@ -42,6 +42,9 @@ test("parseGitHeadBranch accepts named refs/heads branches and rejects detached 
   assert.equal(parseGitHeadBranch("ref: refs/tags/v1.0.0\n"), null);
   assert.equal(parseGitHeadBranch("ref: refs/heads/../escape\n"), null);
   assert.equal(parseGitHeadBranch("ref: refs/heads/bad.lock\n"), null);
+  assert.equal(parseGitHeadBranch("ref: refs/heads/bad.lock/sub\n"), null);
+  assert.equal(parseGitHeadBranch("ref: refs/heads/.invalid\n"), null);
+  assert.equal(parseGitHeadBranch("ref: refs/heads/feat/.hidden\n"), null);
   assert.equal(parseGitHeadBranch("ref: refs/heads/has space\n"), null);
   assert.equal(parseGitHeadBranch(""), null);
 });
@@ -268,7 +271,7 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
     const wtChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
     assert.equal(wtChk.stdout.trim(), `plan ${DOC_2}`);
 
-    // Detached HEAD skips without error.
+    // Detached HEAD and Git reftable `.invalid` HEAD stubs skip without writing a permanent record.
     await writeFile(join(wtGitDir, "HEAD"), "0123456789abcdef0123456789abcdef01234567\n", "utf8");
     const detachedRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
       cwd: worktree,
@@ -277,6 +280,17 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
     });
     assert.equal(detachedRec.status, 0);
     assert.equal(detachedRec.stdout.trim(), "skipped no-branch");
+
+    await writeFile(join(wtGitDir, "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
+    const reftableRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
+      cwd: worktree,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(reftableRec.status, 0);
+    assert.equal(reftableRec.stdout.trim(), "skipped no-branch");
+    const reftableChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(reftableChk.stdout.trim(), "missing");
 
     // 0-byte stdin (e.g. failed `gh pr view`) exits 1 so an existing PR description is never wiped.
     const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {

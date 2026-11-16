@@ -27,6 +27,7 @@ export function parseGitHeadBranch(rawHead) {
     branch.endsWith(".lock") ||
     branch.includes("..") ||
     branch.includes("//") ||
+    branch.split("/").some((part) => part.startsWith(".") || part.endsWith(".lock")) ||
     /[\0-\x1f\x7f ~^:?*[\\]/.test(branch)
   ) {
     return null;
