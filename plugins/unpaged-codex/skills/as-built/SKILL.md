@@ -261,13 +261,14 @@ state before reporting it connected; use review-plan for recovery or an explicit
 stop. Do not arm a listener merely because this recording operation finished.
 When the current branch has an open GitHub pull request (`state: "OPEN"`), call
 remote `document_join_link({ documentId, role: "viewer" })` so the server
-re-renders the root preview, read the pull request's current `body` (`gh pr view
-"<prUrl>" --json body --jq .body`), splice the updated standalone bounded
-`<!-- unpaged-plan:start -->` section via local `review` (`operation: "pr_splice"`,
-`payload: { url, previewUrl, title, body }`), write the returned `body` to a
-temporary file outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`,
-and delete `<tmpfile>` (skipping with a one-sentence note if `document_join_link`
-is unavailable on an older server or `gh pr edit` is declined).
+re-renders the root preview, resolve `<plugin-root>` as two levels up from this
+`SKILL.md` file, and splice the updated standalone bounded
+`<!-- unpaged-plan:start -->` section directly through temporary files outside
+the repository (never routing the PR body through model context or passing a
+canvas title on the shell command line):
+`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
+then delete `<inFile>` and `<outFile>` (skipping with a one-sentence note if
+`document_join_link` is unavailable on an older server or `gh pr edit` is declined).
 
 Return:
 

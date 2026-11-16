@@ -937,10 +937,18 @@ async function rememberBranchPlan($: Api, documentId: string, title: string | nu
   const where = await repositoryBranch($)
   if (!where) return
   const cleanTitle = (title ?? '').replace(/[\r\n\t]+/g, ' ').trim()
-  currentSessionPlan = { repoTopLevel: where.repoTopLevel, documentId, title: cleanTitle }
-  await update($, sessionPlan, () => currentSessionPlan).catch(() => undefined)
-  // Never persist a cross-session plan entry keyed to `main` / `origin/HEAD`.
-  if (!where.branch || where.isDefaultBranch) return
+  // Keep `sessionPlan` only as a one-shot fallback when the plan was made on the
+  // default branch or a detached HEAD. A plan made on a feature branch already
+  // has its own branch-keyed entry and must never spill onto a later branch's PR.
+  if (!where.branch || where.isDefaultBranch) {
+    currentSessionPlan = { repoTopLevel: where.repoTopLevel, documentId, title: cleanTitle }
+    await update($, sessionPlan, () => currentSessionPlan).catch(() => undefined)
+    return
+  }
+  if (currentSessionPlan) {
+    currentSessionPlan = null
+    await update($, sessionPlan, () => null).catch(() => undefined)
+  }
   const key = planStoreKey(where.repoTopLevel, where.branch)
   const record = normalizePlanRecord({
     documentId,
@@ -988,6 +996,8 @@ async function prPreviewContextForResult(
   }
   if (!plan && currentSessionPlan && currentSessionPlan.repoTopLevel === where.repoTopLevel && isDocumentId(currentSessionPlan.documentId)) {
     plan = { documentId: currentSessionPlan.documentId, title: currentSessionPlan.title }
+    currentSessionPlan = null
+    await update($, sessionPlan, () => null).catch(() => undefined)
     if (where.branch && !where.isDefaultBranch) {
       const key = planStoreKey(where.repoTopLevel, where.branch)
       const promoted = normalizePlanRecord({
@@ -1360,7 +1370,7 @@ export const register: Register = on => {
 
   // /clear and /resume reset the atoms but not this module: rebuild the view.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
-    if (e.source === 'clear') currentSessionPlan = null
+    if (e.source === 'clear' || e.source === 'resume') currentSessionPlan = null
     await sync($)
     await redrawArchitecture($, String(e.source))
     return next(e)

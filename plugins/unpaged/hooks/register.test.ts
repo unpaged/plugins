@@ -910,5 +910,37 @@ describe('pull request previews for visual plans', () => {
       expect.objectContaining({ documentId: SECOND, branch: 'feat/from-main' }),
     )
     expect(w.store.has('plan:/repo\nmain')).toBe(false)
+
+    // A second PR from an unrelated branch in the same session does NOT inherit the consumed session plan.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/fix/readme-typo\n')
+    const unrelated = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Fix typo" --body "Body"' } as never)
+    expect((unrelated as { context?: string[] }).context).toBeUndefined()
+    expect(w.store.has('plan:/repo\nfix/readme-typo')).toBe(false)
+  })
+
+  test('a feature-branch plan never leaks onto a later unrelated branch and /resume clears an unpromoted session plan', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    gitBranch(on, w, 'feat/first')
+    w.files.set('/repo/.git/refs/remotes/origin/HEAD', 'ref: refs/remotes/origin/main\n')
+
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Feature A plan', folderId: 'visual-plans' } as never)
+    const firstPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Feat A" --body "Body"' } as never)
+    expect(((firstPr as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
+
+    // Switch to an unrelated branch with no plan of its own -> no context and no stored record.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/fix/unrelated\n')
+    const secondPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Fix" --body "Body"' } as never)
+    expect((secondPr as { context?: string[] }).context).toBeUndefined()
+    expect(w.store.has('plan:/repo\nfix/unrelated')).toBe(false)
+
+    // Planning on main, then /resume before branching clears the unpromoted session plan.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n')
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: THIRD, title: 'Main draft', plan: true } as never)
+    await $.classic.SessionStart({ source: 'resume' } as never)
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/feat/after-resume\n')
+    const resumedPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "After resume" --body "Body"' } as never)
+    expect((resumedPr as { context?: string[] }).context).toBeUndefined()
+    expect(w.store.has('plan:/repo\nfeat/after-resume')).toBe(false)
   })
 })

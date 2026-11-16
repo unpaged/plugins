@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { renderPrPlanSection as renderClaudeSection } from "../../unpaged/monitors/pr-preview-core.mjs";
 import { controlInputSchema, executeControl } from "./control.mjs";
 import { PR_SECTION_END, PR_SECTION_START, renderPrPlanSection } from "./pr-preview.mjs";
 
+const PR_PREVIEW_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "pr-preview.mjs");
 const DOC_1 = "11111111-2222-3333-4444-555555555555";
 const THREAD_1 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const JOIN_TOKEN = "a".repeat(32);
@@ -25,7 +27,32 @@ test("Codex PR section matches Claude/Copilot/Antigravity format byte-for-byte a
   assert.ok(Buffer.byteLength(JSON.stringify(controlInputSchema)) < 4000);
 });
 
-test("executeControl supports plan_record, default-branch promotion on plan_lookup, and strict pr_splice without opening reviews.sqlite", async (t) => {
+test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdin/stdout and rejects 0-byte stdin", () => {
+  const env = { ...process.env, UNPAGED_PREVIEW_VERSION: "1763282222" };
+
+  const emptyStdin = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    env,
+    input: "",
+    encoding: "utf8",
+  });
+  assert.equal(emptyStdin.status, 1);
+  assert.equal(emptyStdin.stdout, "");
+
+  // 350-line (> 14 KiB) PR body stays completely intact without passing through model context.
+  const longLines = Array.from({ length: 350 }, (_, idx) => `- [x] Verification item #${idx + 1}: checked end-to-end`);
+  const longBody = `## Summary\n\n${longLines.join("\n")}\n`;
+  const spliced = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    env,
+    input: longBody,
+    encoding: "utf8",
+  });
+  assert.equal(spliced.status, 0);
+  assert.ok(spliced.stdout.includes("- [x] Verification item #175: checked end-to-end"));
+  assert.ok(spliced.stdout.includes("- [x] Verification item #350: checked end-to-end"));
+  assert.ok(spliced.stdout.includes(`${PREVIEW_URL}?v=1763282222`));
+});
+
+test("executeControl supports plan_record, default-branch promotion on plan_lookup, and length-checked pr_splice without opening reviews.sqlite", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "unpaged-codex-pr-preview-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -76,13 +103,26 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   // reviews.sqlite was never created by plan_record or plan_lookup.
   await assert.rejects(() => stat(join(codexHome, "unpaged", "reviews.sqlite")), { code: "ENOENT" });
 
-  // pr_splice requires `body` so omitting it can never overwrite an existing PR body.
+  // pr_splice requires both `body` and `bodyLength`, and refuses shortened bodies.
   await assert.rejects(
     () => executeControl({ operation: "pr_splice", payload: { url: JOIN_URL } }, context, options),
     /invalid_control_arguments/
   );
+  await assert.rejects(
+    () =>
+      executeControl(
+        {
+          operation: "pr_splice",
+          payload: { url: JOIN_URL, body: "Shortened … omitted 120 of 300 lines … tail", bodyLength: 9400 },
+        },
+        context,
+        options
+      ),
+    /truncated_pr_body/
+  );
 
   // pr_splice ignores markers quoted in inline code and rejects unpaired standalone start markers.
+  const existingBody = `Existing summary 🎯 mentioning \`${PR_SECTION_START} ... ${PR_SECTION_END}\`.\n`;
   const spliced = await executeControl(
     {
       operation: "pr_splice",
@@ -90,7 +130,8 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
         url: JOIN_URL,
         previewUrl: PREVIEW_URL,
         title: "codex: Visual plan",
-        body: `Existing summary mentioning \`${PR_SECTION_START} ... ${PR_SECTION_END}\`.\n`,
+        body: existingBody,
+        bodyLength: [...existingBody].length,
       },
     },
     context,
@@ -98,13 +139,10 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   );
   assert.equal(spliced.url, JOIN_URL);
   assert.equal(spliced.previewUrl, PREVIEW_URL);
-  assert.ok(
-    spliced.body.startsWith(
-      `Existing summary mentioning \`${PR_SECTION_START} ... ${PR_SECTION_END}\`.\n\n<!-- unpaged-plan:start -->\n`
-    )
-  );
+  assert.ok(spliced.body.startsWith(`${existingBody}\n<!-- unpaged-plan:start -->\n`));
   assert.ok(spliced.body.includes("[Open visual plan on Unpaged (Can view)]"));
 
+  const ambiguousBody = `Intro\n\n${PR_SECTION_START}\nAuthor text`;
   await assert.rejects(
     () =>
       executeControl(
@@ -112,7 +150,8 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
           operation: "pr_splice",
           payload: {
             url: JOIN_URL,
-            body: `Intro\n\n${PR_SECTION_START}\nAuthor text`,
+            body: ambiguousBody,
+            bodyLength: [...ambiguousBody].length,
           },
         },
         context,

@@ -789,6 +789,44 @@ test("plans created on the default branch stay out of persistent main storage an
     await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
     assert.equal(await store.loadBranchPlan(repo), null);
 
+    // Switching to a second unrelated branch in the same session attaches nothing and writes no record.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/readme-typo\n", "utf8");
+    const unrelatedPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Typo" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/89\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(unrelatedPr, undefined);
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // A plan created directly on a feature branch also never spills onto another branch.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/direct\n", "utf8");
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Direct feature plan", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "shop-api: Direct feature plan" }),
+      },
+      workingDirectory: repo,
+    });
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/another-unrelated\n", "utf8");
+    const secondUnrelated = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Fix" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/90\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(secondUnrelated, undefined);
+    assert.equal(await store.loadBranchPlan(repo), null);
+
     controller.shutdown();
   });
 });

@@ -106,14 +106,16 @@ Use current revisions for subsequent edits, as required by review-plan.
 Record the created visual plan for the current git branch through the discovered
 local `unpaged_review` / `review` tool (`operation: "plan_record"`, `documentId`,
 `payload: { title }`) when available. If an open GitHub pull request already
-exists for the current branch (`gh pr view --json number,url,body,state` returns
+exists for the current branch (`gh pr view --json number,url,state` returns
 `state: "OPEN"`), call remote `document_join_link({ documentId, role: "viewer" })`,
-pass `{ url, previewUrl, title, body }` to local `review` (`operation: "pr_splice"`)
-to splice only the bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
-section while preserving surrounding PR text, write `body` to a temporary file
-outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`, and
-delete `<tmpfile>`. Skip quietly when no open PR exists for the branch or
-`document_join_link` is unavailable on an older server.
+resolve `<plugin-root>` as two levels up from this `SKILL.md` file, and splice
+ONLY the standalone bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
+section directly through temporary files outside the repository (so Codex's
+command-output shortening never sees or truncates the PR body, and no canvas
+title is passed on the shell command line):
+`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
+then delete `<inFile>` and `<outFile>`. Skip quietly when no open PR exists for
+the branch or `document_join_link` is unavailable on an older server.
 
 ## During implementation
 
@@ -138,12 +140,11 @@ the plan and append a dated partial or complete record. When opening a GitHub
 pull request during authorized implementation (`gh pr create` without `--dry-run`,
 or a GitHub pull-request tool), check `review` (`operation: "plan_lookup"`) or
 this task's current branch plan; when one is recorded for the branch, call
-remote `document_join_link({ documentId, role: "viewer" })`, read the pull
-request's current `body` (`gh pr view "<prUrl>" --json body --jq .body`), splice
-the standalone bounded `<!-- unpaged-plan:start -->` section via `review`
-(`operation: "pr_splice"`, `payload: { url, previewUrl, title, body }`), and
-update that pull request via `gh pr edit --body-file` using a temporary file
-outside the repository.
+remote `document_join_link({ documentId, role: "viewer" })` and splice the
+standalone bounded `<!-- unpaged-plan:start -->` section directly through
+temporary files outside the repository (`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
+then delete `<inFile>` and `<outFile>`) so long PR descriptions never pass
+through model context.
 
 ## Hand over the review
 

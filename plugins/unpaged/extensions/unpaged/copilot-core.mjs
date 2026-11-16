@@ -672,8 +672,10 @@ export function createUnpagedCopilotController({
               updatedAt: new Date(now()).toISOString(),
             })
             .catch(() => null);
-          if (saved?.repoTopLevel) {
+          if (saved?.persisted === false && saved?.repoTopLevel) {
             sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
+          } else if (saved?.persisted === true) {
+            sessionPlan = null;
           }
         }
         try {
@@ -822,6 +824,9 @@ export function createUnpagedCopilotController({
 
   const hooks = {
     onSessionStart: async (input) => {
+      if (input?.source === "clear" || input?.source === "resume") {
+        sessionPlan = null;
+      }
       const wd = hookCwd(input);
       if (wd) lastWorkingDirectory = wd;
       const pointer = await store.readArchitecturePointer(await currentCwd());
@@ -948,8 +953,10 @@ export function createUnpagedCopilotController({
                 updatedAt: new Date(now()).toISOString(),
               })
               .catch(() => null);
-            if (saved?.repoTopLevel) {
+            if (saved?.persisted === false && saved?.repoTopLevel) {
               sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
+            } else if (saved?.persisted === true) {
+              sessionPlan = null;
             }
           }
         }
@@ -979,6 +986,7 @@ export function createUnpagedCopilotController({
           const branchCtx = await store.resolveRepositoryBranch(targetCwd);
           if (branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
             plan = sessionPlan;
+            sessionPlan = null;
             if (branchCtx.branch && !branchCtx.isDefaultBranch && typeof store.saveBranchPlan === "function") {
               await store
                 .saveBranchPlan({

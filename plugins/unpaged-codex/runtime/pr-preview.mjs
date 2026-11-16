@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Host-side branch-plan storage and bounded GitHub PR section splicing for
 // Unpaged for Codex. Produces the exact same bounded Markdown section as the
 // Claude Code, GitHub Copilot, and Antigravity plugins.
@@ -412,8 +413,10 @@ export async function lookupBranchPlan({ dataDir, cwd }) {
   }
 }
 
-export function buildSplicedPrBody({ url, previewUrl, title = "", body, version } = {}) {
+export function buildSplicedPrBody({ url, previewUrl, title = "", body, bodyLength, version } = {}) {
   if (typeof body !== "string") throw new Error("invalid_pr_body");
+  if (!Number.isSafeInteger(bodyLength) || bodyLength < 0) throw new Error("invalid_pr_body_length");
+  if ([...body].length !== bodyLength) throw new Error("truncated_pr_body");
   const validated = parseJoinLinkUrls({ url, previewUrl });
   if (!validated) throw new Error("invalid_join_link_url");
   const resolvedVersion =
@@ -430,4 +433,64 @@ export function buildSplicedPrBody({ url, previewUrl, title = "", body, version 
     section,
     body: splicePrPlanSection(body, section),
   };
+}
+
+function readStdinText() {
+  return new Promise((resolvePromise) => {
+    let text = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      text += chunk;
+    });
+    process.stdin.on("end", () => resolvePromise(text));
+    process.stdin.on("error", () => resolvePromise(text));
+  });
+}
+
+async function spliceCli(url, previewUrl) {
+  const validated = parseJoinLinkUrls({ url, previewUrl });
+  if (!validated) {
+    process.stderr.write("pr-preview.mjs splice: url must be an Unpaged https /join/<token> link\n");
+    return 1;
+  }
+  if (process.stdin.isTTY) {
+    process.stderr.write("pr-preview.mjs splice: expected existing PR body on stdin (stdin is a TTY)\n");
+    return 1;
+  }
+  const existingBody = await readStdinText();
+  if (existingBody.length === 0) {
+    process.stderr.write(
+      "pr-preview.mjs splice: expected existing PR body on stdin (0 bytes received; check that gh pr view succeeded)\n"
+    );
+    return 1;
+  }
+  const envVersion = process.env.UNPAGED_PREVIEW_VERSION ? Number(process.env.UNPAGED_PREVIEW_VERSION) : 0;
+  const version = Number.isSafeInteger(envVersion) && envVersion > 0 ? envVersion : Math.floor(Date.now() / 1000);
+  try {
+    const section = renderPrPlanSection({
+      title: "",
+      url: validated.url,
+      previewUrl: validated.previewUrl,
+      version,
+    });
+    process.stdout.write(splicePrPlanSection(existingBody, section));
+    return 0;
+  } catch (error) {
+    const reason = error && error.message ? error.message : String(error);
+    process.stderr.write(`pr-preview.mjs splice: ${reason}\n`);
+    return 1;
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]).endsWith("pr-preview.mjs")) {
+  const [verb, first, second] = process.argv.slice(2);
+  const runCli = verb === "splice" ? spliceCli(first, second) : Promise.resolve((process.stderr.write("usage: pr-preview.mjs splice <url> [previewUrl]\n"), 1));
+  runCli
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error) => {
+      process.stderr.write(`pr-preview.mjs: ${error && error.message ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
 }

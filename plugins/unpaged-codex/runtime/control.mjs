@@ -40,7 +40,8 @@ const definitions = {
   plan_record: { document: "required", payload: shape({ title: { type: "string", maxLength: 500 } }, []) },
   plan_lookup: {},
   pr_splice: { payload: shape({ url: { type: "string", maxLength: 512 }, previewUrl: { type: "string", maxLength: 512 },
-    title: { type: "string", maxLength: 500 }, body: { type: "string", maxLength: 524288 } }, ["url", "body"]) }
+    title: { type: "string", maxLength: 500 }, body: { type: "string", maxLength: 524288 },
+    bodyLength: { type: "integer", minimum: 0, maximum: 524288 } }, ["url", "body", "bodyLength"]) }
 };
 
 // Keep strict per-operation validation independent of the advertised schema.
@@ -108,6 +109,7 @@ function validatePayload(operation, payload, documentId, threadId) {
   } else if (operation === "pr_splice") {
     if (typeof payload.url !== "string" || !payload.url || payload.url.length > 512 ||
         typeof payload.body !== "string" || payload.body.length > 524288 ||
+        !Number.isSafeInteger(payload.bodyLength) || payload.bodyLength < 0 || payload.bodyLength > 524288 ||
         (has(payload, "previewUrl") && (typeof payload.previewUrl !== "string" || payload.previewUrl.length > 512)) ||
         (has(payload, "title") && (typeof payload.title !== "string" || payload.title.length > 500))) fail("invalid_control_arguments");
   }
