@@ -103,6 +103,18 @@ A read-only browser view is the fallback only when `node_picture` is missing
 claim a visual pass.
 Use current revisions for subsequent edits, as required by review-plan.
 
+Record the created visual plan for the current git branch through the discovered
+local `unpaged_review` / `review` tool (`operation: "plan_record"`, `documentId`,
+`payload: { title }`) when available. If an open GitHub pull request already
+exists for the current branch (`gh pr view --json number,url,body,state` returns
+`state: "OPEN"`), call remote `document_join_link({ documentId, role: "viewer" })`,
+pass `{ url, previewUrl, title, body }` to local `review` (`operation: "pr_splice"`)
+to splice only the bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
+section while preserving surrounding PR text, write `body` to a temporary file
+outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`, and
+delete `<tmpfile>`. Skip quietly when no open PR exists for the branch or
+`document_join_link` is unavailable on an older server.
+
 ## During implementation
 
 Follow review-plan's `execute` transition only after the user explicitly asks
@@ -122,7 +134,14 @@ flow after task-authorized canvas changes. Preserve the original `acceptedDigest
 as the acceptance receipt even as the Decision log and completion ticks evolve.
 When implementation is ready to record, use the bundled
 [as-built skill](../as-built/SKILL.md) to reconcile the exact Git range against
-the plan and append a dated partial or complete record.
+the plan and append a dated partial or complete record. When opening a GitHub
+pull request during authorized implementation (`gh pr create` without `--dry-run`,
+or a GitHub pull-request tool), check `review` (`operation: "plan_lookup"`) or
+this task's current branch plan; when one is recorded for the branch, call
+remote `document_join_link({ documentId, role: "viewer" })`, splice the bounded
+`<!-- unpaged-plan:start -->` section via `review` (`operation: "pr_splice"`),
+and update that pull request via `gh pr edit --body-file` using a temporary file
+outside the repository.
 
 ## Hand over the review
 

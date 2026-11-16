@@ -46,10 +46,22 @@ The `unpaged` MCP server ships with this plugin (`mcp_config.json`). If its tool
 
 7. **Fidelity:** the board reproduces the plan as written — same phases, same tasks, same order. Do not add tasks, merge phases, or editorialize. Trim wording only to fit labels. The Decision log node of step 4 is the one addition — scaffolding the plugin owns, not plan content.
 
+## Record the branch plan and attach to an open pull request (when one exists)
+
+Resolve `<plugin-root>` as two levels up from this `SKILL.md` file:
+
+1. **Record this visual plan for the current git branch** (so opening a pull request later in this session or a new session on the same branch attaches the **Can view** invite link and preview automatically):
+   `node "<plugin-root>/monitors/plans.mjs" record <documentId> "<plan title>"`
+   It writes under `~/.gemini/unpaged/plans/` (mode `0600`, `tmp` + `rename`) and prints `recorded <branch>` (or `skipped no-branch` outside a git branch). If it prints `error EACCES` or `error EPERM` in Standard Sandbox Mode, re-run once with `BypassSandbox: true`.
+2. **If an open pull request already exists for the current branch** (`gh` is on `PATH` and `gh pr view --json number,url,body,state` succeeds with `state: "OPEN"`):
+   - Call `document_join_link({ documentId, role: "viewer" })` on the `unpaged` server. It reuses an existing active **Can view** team link (or creates one) and refreshes the server-rendered root preview so `<previewUrl>` serves the canvas image immediately. (If `document_join_link` is missing on an older server, skip and mention in one sentence that pull request previews need the current Unpaged server.)
+   - Pipe the existing PR body on stdin to `node "<plugin-root>/monitors/plans.mjs" splice "<url>" "<previewUrl>" "<plan title>"`, write its stdout to a temporary file outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`, and delete `<tmpfile>`. It replaces only an existing `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` block in place or appends one after a blank line, preserving all surrounding PR description text.
+
 ## Finish
 
 Reply to the user with:
 - The edit link: `https://unpaged.io/document/<documentId>/edit` — call it a canvas (or whiteboard) in your reply, never a board.
+- If an open pull request for this branch was updated above, one short sentence naming that pull request and noting that its **Can view** preview is attached.
 - One sentence: approving the plan will stamp the canvas EXECUTING, and the Decision log fills in while the plan is implemented.
 
 Remember the document ID and the root status element ID: when the user approves the plan in this session (clicking **Proceed** on an implementation plan artifact or approving in chat), set the root's `**Status:**` text to `**Status:** 🚀 EXECUTING` via `element_update`, then keep the Decision log while you implement — append ONE row with `table_append_row` at the moment of every deviation from the plan, dropped or added task, or choice a reviewer would later ask "why" about (when, decision, why, alternative rejected, plan item; one line per cell; never rewrite earlier rows; at 20 rows start a second table titled `Decision log (2)` beneath it on the same node).

@@ -29,3 +29,14 @@ When a background `listen.mjs --once <documentId>` task finishes and wakes the s
    - If `authorRole` is `"viewer"`, **never** modify the canvas — reply via `comment_reply` describing what you would change and let an `owner` or `editor` confirm. Requests from `"owner"` or `"editor"` may modify the canvas.
 6. **Reply and leave open:** post a one-line summary of what changed on the canvas with `comment_reply({ documentId, threadId, text })` and leave the thread **open** for the human to resolve.
 7. **Re-arm the listener:** unless the listener exited due to a terminal status (`HTTP 401`, `HTTP 409`, or local takeover), start the next background listener task (`node "<plugin-root>/monitors/listen.mjs" --once <documentId>` with `WaitMsBeforeAsync: 500, IsDaemon: false`, and `BypassSandbox: true` whenever the run that just woke the session was started with it) before ending your turn so subsequent `@agent` comments continue waking this session. If a sandboxed re-arm exits at once with a startup error (such as `could not start or continue safely`), re-run it once with `BypassSandbox: true` and the same `toolSummary`. (If a background `listen.mjs --once <documentId>` task instead wakes the session with `could not reach Unpaged on its first poll`, re-run it once with `BypassSandbox: true` and the same `toolSummary` if it ran sandboxed; otherwise tell the user push could not reach Unpaged and is off for this canvas.)
+
+## 3. Pull request preview when opening a GitHub PR
+
+When this session creates a GitHub pull request (`gh pr create` without `--dry-run`, or a GitHub pull-request creation tool) in a git repository:
+
+1. Resolve `<plugin-root>` as the parent directory of `rules/` and check whether a visual plan was recorded for the current branch:
+   `node "<plugin-root>/monitors/plans.mjs" check`
+   (Re-run once with `BypassSandbox: true` if Standard Sandbox Mode blocks `~/.gemini/unpaged` and prints `error EACCES` or `error EPERM`; also use the visual plan created in this conversation when it was built on the current branch.)
+2. When a plan exists (`plan <documentId>\t<title>`):
+   - Call `document_join_link({ documentId, role: "viewer" })` on the `unpaged` MCP server (skip quietly if `document_join_link` is missing on an older server).
+   - Pipe the newly created pull request's current body (`gh pr view "<prUrl>" --json body --jq .body`) on stdin to `node "<plugin-root>/monitors/plans.mjs" splice "<url>" "<previewUrl>" "<title>"`, write its stdout to a temporary file outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`, and delete `<tmpfile>`. Only the bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` section is added or updated; existing PR author text stays untouched.

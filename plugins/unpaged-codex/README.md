@@ -292,7 +292,12 @@ items and the log, creates a dated record with reviewer guidance and runtime
 flow when relevant, and distinguishes recorded reasons from inference. A partial
 record leaves the phase unchanged; a verified complete record can advance an
 executing plan to BUILT. Existing records remain unchanged on subsequent runs.
-Listening continues through all phases until the user stops it.
+Listening continues through all phases until the user stops it. When a visual
+plan is created on a named git branch, `review` (`plan_record`, `plan_lookup`,
+`pr_splice`) stores the branch plan privately under `${CODEX_HOME:-~/.codex}/unpaged/plans/`
+(mode `0600`) without touching `hooks/hooks.json` or hook trust, so open pull
+requests and newly created pull requests receive a **Can view** join link and
+clickable preview image inside a bounded `<!-- unpaged-plan:start -->` section.
 
 The accepted digest remains an approval receipt as the current canvas digest
 advances through log entries, checklist progress and as-built records. Changes
