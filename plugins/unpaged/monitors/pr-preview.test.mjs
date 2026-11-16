@@ -148,6 +148,22 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   assert.equal(afterUnclosed, `${unclosedFenceBody}\n\`\`\`\`\n\n${first}\n`);
   assert.equal(splicePrPlanSection(afterUnclosed, second), `${unclosedFenceBody}\n\`\`\`\`\n\n${second}\n`);
 
+  // Indented unclosed fences inside `- ` / `1. ` list items preserve their indentation on close (including CRLF),
+  // while a list-scoped fence already ended by unindented text emits no extra fence.
+  const bulletFenceBody = "- Ran the suite:\n  ```text\n  ok\n";
+  const afterBullet = splicePrPlanSection(bulletFenceBody, first);
+  assert.equal(afterBullet, `- Ran the suite:\n  \`\`\`text\n  ok\n  \`\`\`\n\n${first}\n`);
+  assert.equal(splicePrPlanSection(afterBullet, second), `- Ran the suite:\n  \`\`\`text\n  ok\n  \`\`\`\n\n${second}\n`);
+
+  const orderedCrlfBody = "1. Output:\r\n   ~~~text\r\n   pass\r\n";
+  const afterOrdered = splicePrPlanSection(orderedCrlfBody, first);
+  assert.equal(afterOrdered, `1. Output:\r\n   ~~~text\r\n   pass\n   ~~~\n\n${first}\n`);
+  assert.equal(splicePrPlanSection(afterOrdered, second), `1. Output:\r\n   ~~~text\r\n   pass\n   ~~~\n\n${second}\n`);
+
+  const endedByUnindented = "- Ran the suite:\n  ```text\n  ok\n\nSummary outside list.";
+  const afterEnded = splicePrPlanSection(endedByUnindented, first);
+  assert.equal(afterEnded, `${endedByUnindented}\n\n${first}\n`);
+
   // Unpaired or reversed standalone markers throw rather than swallowing author text on refresh.
   assert.throws(
     () => splicePrPlanSection(`Intro\n\n${PR_SECTION_START}\nAuthor prose after stray marker`, first),

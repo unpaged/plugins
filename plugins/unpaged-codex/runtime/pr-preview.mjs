@@ -162,11 +162,24 @@ export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
   ].join("\n");
 }
 
+function leadingIndentColumns(line) {
+  let cols = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === " ") cols += 1;
+    else if (line[i] === "\t") cols += 4 - (cols % 4);
+    else break;
+  }
+  return cols;
+}
+
 function findStandaloneMarkers(body) {
   const starts = [];
   const ends = [];
+  let listIndent = 0;
   let fenceChar = null;
   let fenceLen = 0;
+  let fenceIndent = "";
+  let fenceListIndent = 0;
   let offset = 0;
 
   while (offset <= body.length) {
@@ -174,25 +187,42 @@ function findStandaloneMarkers(body) {
     const lineEnd = nl === -1 ? body.length : nl;
     const contentEnd = lineEnd > offset && body[lineEnd - 1] === "\r" ? lineEnd - 1 : lineEnd;
     const line = body.slice(offset, contentEnd);
+    const trimmed = line.trim();
+
+    if (fenceChar !== null && fenceListIndent > 0 && trimmed !== "" && leadingIndentColumns(line) < fenceListIndent) {
+      fenceChar = null;
+      fenceLen = 0;
+      fenceIndent = "";
+      fenceListIndent = 0;
+      listIndent = 0;
+    }
 
     if (fenceChar !== null) {
       const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
       if (closeMatch && closeMatch[1][0] === fenceChar && closeMatch[1].length >= fenceLen) {
         fenceChar = null;
         fenceLen = 0;
+        fenceIndent = "";
+        fenceListIndent = 0;
       }
     } else {
-      const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-      if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
-        fenceChar = openMatch[1][0];
-        fenceLen = openMatch[1].length;
-      } else {
-        const trimmed = line.trim();
-        if (trimmed === PR_SECTION_START) {
-          starts.push({ start: offset, end: contentEnd });
-        } else if (trimmed === PR_SECTION_END) {
-          ends.push({ start: offset, end: contentEnd });
-        }
+      const listMatch = line.match(/^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)/);
+      if (listMatch) {
+        listIndent = leadingIndentColumns(listMatch[1].replace(/[^\t]/g, " "));
+      } else if (trimmed !== "" && leadingIndentColumns(line) < listIndent) {
+        listIndent = 0;
+      }
+
+      const openMatch = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
+      if (openMatch && !(openMatch[2][0] === "`" && openMatch[3].includes("`"))) {
+        fenceIndent = openMatch[1];
+        fenceChar = openMatch[2][0];
+        fenceLen = openMatch[2].length;
+        fenceListIndent = fenceIndent.length >= listIndent ? listIndent : 0;
+      } else if (trimmed === PR_SECTION_START) {
+        starts.push({ start: offset, end: contentEnd });
+      } else if (trimmed === PR_SECTION_END) {
+        ends.push({ start: offset, end: contentEnd });
       }
     }
 
@@ -200,7 +230,7 @@ function findStandaloneMarkers(body) {
     offset = nl + 1;
   }
 
-  const openFence = fenceChar ? fenceChar.repeat(fenceLen) : "";
+  const openFence = fenceChar ? `${fenceIndent}${fenceChar.repeat(fenceLen)}` : "";
   return { starts, ends, openFence };
 }
 
