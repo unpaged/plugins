@@ -20,7 +20,9 @@ import {
   isPlanRecordFresh,
   normalizePlanRecord,
   parseGitHeadBranch,
+  parseGitHubRepoSlug,
   parseOriginHeadBranch,
+  parseOriginRemoteUrl,
   planStoreKey,
   resolveCommonGitDir,
   resolveGitDirPointer,
@@ -209,6 +211,28 @@ export function createCopilotStore({
     return null;
   }
 
+  async function readOriginRepoSlug(gitDir) {
+    const candidates = [join(gitDir, "config")];
+    try {
+      const commonRaw = await fs.readFile(join(gitDir, "commondir"), "utf8");
+      const commonDir = resolveCommonGitDir(commonRaw, gitDir);
+      if (commonDir && commonDir !== gitDir) {
+        candidates.unshift(join(commonDir, "config"));
+      }
+    } catch {
+      // Standard .git directory has no commondir file.
+    }
+    for (const candidate of candidates) {
+      try {
+        const slug = parseGitHubRepoSlug(parseOriginRemoteUrl(await fs.readFile(candidate, "utf8")));
+        if (slug) return slug;
+      } catch {
+        // Try next candidate.
+      }
+    }
+    return null;
+  }
+
   async function resolveRepositoryBranch(startDir) {
     const repoTopLevel = await findRepositoryRoot(startDir);
     if (!repoTopLevel) return null;
@@ -228,13 +252,15 @@ export function createCopilotStore({
         headRaw = null;
       }
     }
+    const originSlug = await readOriginRepoSlug(gitDir);
     const branch = parseGitHeadBranch(headRaw);
-    if (!branch) return { repoTopLevel, branch: null, isDefaultBranch: false };
+    if (!branch) return { repoTopLevel, branch: null, isDefaultBranch: false, originSlug };
     const defaultBranch = await readOriginDefaultBranch(gitDir);
     return {
       repoTopLevel,
       branch,
       isDefaultBranch: isDefaultBranchName(branch, defaultBranch),
+      originSlug,
     };
   }
 

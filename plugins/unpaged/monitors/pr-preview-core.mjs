@@ -60,6 +60,72 @@ export function parseOriginHeadBranch(rawOriginHead) {
   return parseGitHeadBranch(`ref: refs/heads/${match[1]}`);
 }
 
+/**
+ * Extracts `remote.origin.url` from a `.git/config` file's text, or `null` when
+ * absent.
+ */
+export function parseOriginRemoteUrl(rawGitConfig) {
+  if (typeof rawGitConfig !== "string" || !rawGitConfig) return null;
+  let inOrigin = false;
+  for (const rawLine of rawGitConfig.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+    const section = line.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      inOrigin = /^remote\s+"origin"$/i.test(section[1].trim());
+      continue;
+    }
+    if (!inOrigin) continue;
+    const kv = line.match(/^url\s*=\s*(.+)$/i);
+    if (kv) {
+      let val = kv[1].trim();
+      if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+        val = val.slice(1, -1);
+      }
+      return val || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses a GitHub remote URL (`https://github.com/owner/repo.git`,
+ * `git@github.com:owner/repo.git`, `ssh://git@github.com/owner/repo`) into
+ * lowercase `"owner/repo"`, or `null` when not a GitHub remote URL.
+ */
+export function parseGitHubRepoSlug(rawRemoteUrl) {
+  if (typeof rawRemoteUrl !== "string") return null;
+  const trimmed = rawRemoteUrl.trim();
+  if (!trimmed) return null;
+  let match = trimmed.match(
+    /^(?:https?|ssh|git):\/\/(?:[^@/\s]+@)?github\.com[:/]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i
+  );
+  if (!match) {
+    match = trimmed.match(/^(?:[^@/\s]+@)?github\.com:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
+  }
+  if (!match) return null;
+  const owner = match[1].toLowerCase();
+  const repo = match[2].toLowerCase();
+  if (!owner || !repo || repo === "." || repo === "..") return null;
+  return `${owner}/${repo}`;
+}
+
+/**
+ * Computes the lowercase `"owner/repo"` of a GitHub PR tool call's head
+ * repository (`head` `"forkOwner:branch"` overrides `owner` so fork PRs match
+ * the fork clone's `origin`), or `null` when `owner`/`repo` are absent.
+ */
+export function parseGitHubToolHeadRepoSlug({ owner = "", repo = "", head = "" } = {}) {
+  const cleanRepo = typeof repo === "string" ? repo.trim().toLowerCase() : "";
+  if (!cleanRepo || /[/?#\s\\]/.test(cleanRepo)) return null;
+  const rawHead = typeof head === "string" ? head.trim() : "";
+  const colon = rawHead.indexOf(":");
+  const rawOwner = colon > 0 ? rawHead.slice(0, colon).trim() : typeof owner === "string" ? owner.trim() : "";
+  const cleanOwner = rawOwner.toLowerCase();
+  if (!cleanOwner || /[/?#:\s\\]/.test(cleanOwner)) return null;
+  return `${cleanOwner}/${cleanRepo}`;
+}
+
 export function isDefaultBranchName(branch, originDefaultBranch = null) {
   if (typeof branch !== "string" || !branch) return false;
   if (typeof originDefaultBranch === "string" && originDefaultBranch) {
@@ -438,6 +504,7 @@ export function prPlanAttachContext({
   documentId,
   title,
   pullRequestUrl,
+  repoTopLevel = null,
   branch = null,
   spliceScript = "",
 } = {}) {
@@ -445,15 +512,19 @@ export function prPlanAttachContext({
     return "";
   }
   const safeName = title ? `"${String(title).replace(/[\r\n\t"]+/g, " ").trim()}" ` : "";
+  const cleanRepo = typeof repoTopLevel === "string" ? repoTopLevel.replace(/[\r\n\0"]+/g, "").trim() : "";
   const validBranch = typeof branch === "string" ? parseGitHeadBranch(`ref: refs/heads/${branch}`) : null;
   const cleanScript = typeof spliceScript === "string" ? spliceScript.replace(/[\r\n\0"]+/g, "").trim() : "";
   const scriptPath = cleanScript || "${CLAUDE_PLUGIN_ROOT}/monitors/plans.mjs";
-  const branchCheck = validBranch
-    ? `First verify this pull request was opened from this repository and branch by running gh pr view "${pullRequestUrl}" --json headRefName --jq .headRefName — attach nothing and leave the PR description unchanged unless it prints "${validBranch}" and the pull request belongs to this repository. `
-    : `First verify this pull request belongs to this repository (if it was opened in another repository, attach nothing and leave the PR description unchanged). `;
+  const remoteCmd = cleanRepo ? `git -C "${cleanRepo}" remote get-url origin` : "git remote get-url origin";
+  const checkoutLabel = cleanRepo ? `checkout "${cleanRepo}"` : "this checkout";
+  const repoAndBranchCheck = validBranch
+    ? `First verify ${pullRequestUrl} was opened from ${checkoutLabel} on branch "${validBranch}": take <owner>/<name> from ${remoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository,headRefName --jq '.headRepositoryOwner.login + "/" + .headRepository.name + ":" + .headRefName' — attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>:${validBranch}". `
+    : `First verify ${pullRequestUrl} was opened from ${checkoutLabel}: take <owner>/<name> from ${remoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository --jq '.headRepositoryOwner.login + "/" + .headRepository.name' — attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>". `;
   return (
-    `This repository has an Unpaged visual plan (${safeName}documentId ${documentId}). ` +
-    branchCheck +
+    `Visual plan candidate for ${checkoutLabel} (${safeName}documentId ${documentId}). ` +
+    `Skip this plan and leave the PR description unchanged if this session has already attached it to another pull request. ` +
+    repoAndBranchCheck +
     `Attach this plan to ${pullRequestUrl} now in this turn only if it is about this pull request's work ` +
     `(compare the plan's title — or read the canvas with document_get when the title isn't enough — against the pull request's title and changes; otherwise skip it, leave the PR description unchanged, and say in one sentence why): ` +
     `1) call document_join_link on the unpaged server with documentId "${documentId}" and role "viewer" ` +

@@ -15,6 +15,7 @@ import {
   GITHUB_PR_CREATE_TOOL,
   extractCreatedPullRequest,
   normalizePullRequestHeadRef,
+  parseGitHubToolHeadRepoSlug,
   prPlanAttachContext,
 } from "../../monitors/pr-preview-core.mjs";
 
@@ -687,6 +688,11 @@ export function createUnpagedCopilotController({
         const title = str(args?.title) || null;
         if (args?.plan === true && isDocumentId(documentId)) {
           await rememberPlan(await currentCwd(), documentId, title);
+        } else if (args?.plan === false && isDocumentId(documentId)) {
+          if (sessionPlan?.documentId === documentId) sessionPlan = null;
+          if (typeof store.forgetBranchPlanByDocumentId === "function") {
+            await store.forgetBranchPlanByDocumentId(documentId).catch(() => {});
+          }
         }
         try {
           const result = await arm(documentId, title);
@@ -980,9 +986,17 @@ export function createUnpagedCopilotController({
             ? await store.resolveRepositoryBranch(targetCwd)
             : null;
         if (branchCtx?.isDefaultBranch) return;
-        if (GITHUB_PR_CREATE_TOOL.test(toolName) && str(args.head).trim() !== "") {
-          const toolHead = normalizePullRequestHeadRef(str(args.head));
-          if (!toolHead || !branchCtx?.branch || toolHead !== branchCtx.branch) return;
+        if (GITHUB_PR_CREATE_TOOL.test(toolName)) {
+          if (str(args.head).trim() !== "") {
+            const toolHead = normalizePullRequestHeadRef(str(args.head));
+            if (!toolHead || !branchCtx?.branch || toolHead !== branchCtx.branch) return;
+          }
+          const callSlug = parseGitHubToolHeadRepoSlug({
+            owner: str(args.owner),
+            repo: str(args.repo),
+            head: str(args.head),
+          });
+          if (callSlug && branchCtx?.originSlug && callSlug !== branchCtx.originSlug) return;
         }
         let plan = await store.loadBranchPlan(targetCwd, { nowMs: now() });
         if (!plan && sessionPlan && branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
@@ -997,6 +1011,7 @@ export function createUnpagedCopilotController({
             documentId: plan.documentId,
             title: plan.title,
             pullRequestUrl: createdPr.url,
+            repoTopLevel: branchCtx?.repoTopLevel ?? targetCwd,
             branch: branchCtx?.branch ?? null,
             spliceScript: plansScriptPath,
           });

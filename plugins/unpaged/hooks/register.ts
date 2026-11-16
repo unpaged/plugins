@@ -53,7 +53,10 @@ import {
   normalizePlanRecord,
   normalizePullRequestHeadRef,
   parseGitHeadBranch,
+  parseGitHubRepoSlug,
+  parseGitHubToolHeadRepoSlug,
   parseOriginHeadBranch,
+  parseOriginRemoteUrl,
   planStoreKey,
   prPlanAttachContext,
   resolveCommonGitDir,
@@ -906,12 +909,44 @@ async function originDefaultBranch($: Api, gitDir: string): Promise<string | nul
   return null
 }
 
+async function originRepoSlug($: Api, gitDir: string): Promise<string | null> {
+  const candidates = [`${gitDir}/config`]
+  try {
+    const commonDirFile = `${gitDir}/commondir`
+    if (await $.fs.exists(commonDirFile)) {
+      const commonDir = resolveCommonGitDir(await $.fs.read(commonDirFile), gitDir)
+      if (commonDir && commonDir !== gitDir) {
+        candidates.unshift(`${commonDir}/config`)
+      }
+    }
+  } catch {
+    // Normal .git directory has no commondir file.
+  }
+  for (const candidate of candidates) {
+    try {
+      if (await $.fs.exists(candidate)) {
+        const slug = parseGitHubRepoSlug(parseOriginRemoteUrl(await $.fs.read(candidate)))
+        if (slug) return slug
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null
+}
+
 /**
  * The repository's top level, current named branch (`refs/heads/...`, or `null`
- * on detached HEAD), and whether that branch is the default branch (`origin/HEAD`,
- * falling back to `main`/`master`/`trunk`). Returns `null` outside a repository.
+ * on detached HEAD), whether that branch is the default branch (`origin/HEAD`,
+ * falling back to `main`/`master`/`trunk`), and its lowercase GitHub `owner/repo`
+ * from `remote.origin.url` when present. Returns `null` outside a repository.
  */
-async function repositoryBranch($: Api): Promise<{ repoTopLevel: string; branch: string | null; isDefaultBranch: boolean } | null> {
+async function repositoryBranch($: Api): Promise<{
+  repoTopLevel: string
+  branch: string | null
+  isDefaultBranch: boolean
+  originSlug: string | null
+} | null> {
   const root = await repositoryRoot($)
   if (!root) return null
   try {
@@ -926,10 +961,11 @@ async function repositoryBranch($: Api): Promise<{ repoTopLevel: string; branch:
       gitDir = resolved
       headRaw = await $.fs.read(`${gitDir}/HEAD`)
     }
+    const originSlug = await originRepoSlug($, gitDir)
     const branch = parseGitHeadBranch(headRaw)
-    if (!branch) return { repoTopLevel: root, branch: null, isDefaultBranch: false }
+    if (!branch) return { repoTopLevel: root, branch: null, isDefaultBranch: false, originSlug }
     const defaultBranch = await originDefaultBranch($, gitDir)
-    return { repoTopLevel: root, branch, isDefaultBranch: isDefaultBranchName(branch, defaultBranch) }
+    return { repoTopLevel: root, branch, isDefaultBranch: isDefaultBranchName(branch, defaultBranch), originSlug }
   } catch {
     return null
   }
@@ -975,7 +1011,7 @@ async function prPreviewContextForResult(
   $: Api,
   toolName: string,
   command: string,
-  rawHead: string,
+  toolArgs: { owner: string; repo: string; head: string },
   ran: { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown },
 ): Promise<string | null> {
   if (ran.deny !== undefined || ran.isError === true) return null
@@ -984,9 +1020,13 @@ async function prPreviewContextForResult(
   if (!created) return null
   const where = await repositoryBranch($)
   if (!where || where.isDefaultBranch) return null
-  if (GITHUB_PR_CREATE_TOOL.test(toolName) && rawHead.trim() !== '') {
-    const toolHead = normalizePullRequestHeadRef(rawHead)
-    if (!toolHead || !where.branch || toolHead !== where.branch) return null
+  if (GITHUB_PR_CREATE_TOOL.test(toolName)) {
+    if (toolArgs.head.trim() !== '') {
+      const toolHead = normalizePullRequestHeadRef(toolArgs.head)
+      if (!toolHead || !where.branch || toolHead !== where.branch) return null
+    }
+    const callSlug = parseGitHubToolHeadRepoSlug(toolArgs)
+    if (callSlug && where.originSlug && callSlug !== where.originSlug) return null
   }
 
   const nowMs = await $.clock.now()
@@ -1015,6 +1055,7 @@ async function prPreviewContextForResult(
       documentId: plan.documentId,
       title: plan.title,
       pullRequestUrl: created.url,
+      repoTopLevel: where.repoTopLevel,
       branch: where.branch,
       spliceScript: `${$.plugin.root}/monitors/plans.mjs`,
     }) || null
@@ -1418,6 +1459,8 @@ export const register: Register = on => {
     const documentId = text(input.documentId)
     if (input.plan === true && isDocumentId(documentId)) {
       await rememberBranchPlan($, documentId, text(input.title) || null)
+    } else if (input.plan === false && isDocumentId(documentId)) {
+      await forgetBranchPlan($, documentId)
     }
     try {
       const rule = isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) ? await mintRule($, documentId) : 'allow'
@@ -1517,14 +1560,15 @@ export const register: Register = on => {
     const ran = await next(e)
     const command = text((e as unknown as { command?: unknown }).command)
     if (!PR_CREATE_COMMAND.test(command)) return ran
-    const line = await prPreviewContextForResult($, 'Bash', command, '', ran).catch(() => null)
+    const line = await prPreviewContextForResult($, 'Bash', command, { owner: '', repo: '', head: '' }, ran).catch(() => null)
     return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
   })
 
   on('tool.call', { tool: GITHUB_PR_CREATE_TOOL }, async ($, e, next) => {
     const ran = await next(e)
-    const head = text((e as unknown as Record<string, unknown>).head)
-    const line = await prPreviewContextForResult($, String(e.tool), '', head, ran).catch(() => null)
+    const input = e as unknown as Record<string, unknown>
+    const toolArgs = { owner: text(input.owner), repo: text(input.repo), head: text(input.head) }
+    const line = await prPreviewContextForResult($, String(e.tool), '', toolArgs, ran).catch(() => null)
     return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
   })
 

@@ -103,23 +103,25 @@ A read-only browser view is the fallback only when `node_picture` is missing
 claim a visual pass.
 Use current revisions for subsequent edits, as required by review-plan.
 
-Record the created visual plan for the current git branch through the discovered
-local `unpaged_review` / `review` tool (`operation: "plan_record"`, `documentId`,
-`payload: { title }`) when available. If an open GitHub pull request already
-exists for the current branch (`gh pr view --json number,url,state` returns
-`state: "OPEN"`), call remote `document_join_link({ documentId, role: "viewer" })`,
-resolve `<plugin-root>` as two levels up from this `SKILL.md` file, and splice
-ONLY the standalone bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
-section directly through temporary files outside the repository (so Codex's
-command-output shortening never sees or truncates the PR body, and no canvas
-title is passed on the shell command line):
+If an open GitHub pull request already exists for the current branch
+(`gh pr view --json number,url,state` returns `state: "OPEN"`), call remote
+`document_join_link({ documentId, role: "viewer" })`, resolve `<plugin-root>` as
+two levels up from this `SKILL.md` file, and splice ONLY the standalone bounded
+`<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` section directly
+through temporary files outside the repository (so Codex's command-output
+shortening never sees or truncates the PR body, and no canvas title is passed on
+the shell command line):
 `gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
-then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
-non-zero, leave the pull request description unchanged, delete the temporary
-files, and report in one sentence the reason `pr-preview.mjs splice` printed on
-stderr — never splice by hand after `splice` refused. Skip quietly when no open
-PR exists for the branch or `document_join_link` is unavailable on an older
-server.
+then delete `<inFile>` and `<outFile>` (skip `plan_record` once an open PR is
+updated so this plan's one-PR allowance is spent and not offered to a second PR).
+If `pr-preview.mjs splice` exits non-zero, leave the pull request description
+unchanged, delete the temporary files, and report in one sentence the reason
+`pr-preview.mjs splice` printed on stderr — never splice by hand after `splice`
+refused. When no open PR exists for the branch (or `document_join_link` is
+unavailable on an older server), skip updating GitHub quietly and record the
+created visual plan for a future PR through the discovered local
+`unpaged_review` / `review` tool (`operation: "plan_record"`, `documentId`,
+`payload: { title }`) when available.
 
 ## During implementation
 
@@ -142,12 +144,12 @@ When implementation is ready to record, use the bundled
 [as-built skill](../as-built/SKILL.md) to reconcile the exact Git range against
 the plan and append a dated partial or complete record. When opening a GitHub
 pull request for this repository during authorized implementation (`gh pr create`
-without `--dry-run`, or a GitHub pull-request tool — first verifying the pull
-request belongs to this repository and, on a named branch, that
-`gh pr view "<prUrl>" --json headRefName --jq .headRefName` matches the current
-branch; stop before `plan_lookup` if not so this repository's unspent plan stays
-intact), check `review` (`operation: "plan_lookup"`) or this task's
-unspent plan; when one is found, attach it only if it is about this pull
+without `--dry-run`, or a GitHub pull-request tool — first taking
+`<owner>/<name>` from `git remote get-url origin` and checking
+`gh pr view "<prUrl>" --json headRepositoryOwner,headRepository,headRefName --jq '.headRepositoryOwner.login + "/" + .headRepository.name + ":" + .headRefName'`
+against `<owner>/<name>:<branch>` on a named branch, or `.headRepositoryOwner.login + "/" + .headRepository.name` against `<owner>/<name>` on a detached HEAD; stop before `plan_lookup` if it does not match so this repository's unspent plan stays intact), check `review` (`operation: "plan_lookup"`) or this task's
+unspent plan; when one is found, skip it if this task has already attached that
+plan to another pull request, and attach it only if it is about this pull
 request's work (comparing the plan's title — or reading the canvas with
 `document_get` when the title isn't enough — against the pull request's title and
 changes; otherwise skip it, leave the description unchanged, and say in one

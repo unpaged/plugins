@@ -699,20 +699,34 @@ test("records visual plans per git branch and injects PR preview context on gh p
     });
     assert.equal(dryRun, undefined);
 
-    // GitHub PR tool targeting another repo/head produces no context and leaves the plan unspent.
-    const wrongHead = await controller.hooks.onPostToolUse({
+    await writeFile(join(repo, ".git", "config"), '[remote "origin"]\n\turl = https://github.com/acme/shop.git\n', "utf8");
+
+    // GitHub PR tool targeting another repository — even with the SAME branch name `feat/pr-preview` — produces no context and leaves the plan unspent.
+    const wrongRepoSameBranch = await controller.hooks.onPostToolUse({
       toolName: "github-create_pull_request",
-      toolArgs: { owner: "acme", repo: "public-docs", head: "acme:docs/other", title: "Docs" },
+      toolArgs: { owner: "acme", repo: "public-docs", head: "feat/pr-preview", title: "Docs" },
       toolResult: {
         resultType: "success",
         textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/public-docs/pull/5" }),
       },
       workingDirectory: repo,
     });
+    assert.equal(wrongRepoSameBranch, undefined);
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_A);
+
+    const wrongHead = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "acme", repo: "shop", head: "acme:docs/other", title: "Docs" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/shop/pull/6" }),
+      },
+      workingDirectory: repo,
+    });
     assert.equal(wrongHead, undefined);
     assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_A);
 
-    // Real gh pr create injects additionalContext (naming plans.mjs splice and headRefName) and spends the plan.
+    // Real gh pr create injects additionalContext (naming checkout, plans.mjs splice, headRepository+headRefName, and already-attached guard) and spends the plan.
     const prCreated = await controller.hooks.onPostToolUse({
       toolName: "bash",
       toolArgs: { command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' },
@@ -725,9 +739,11 @@ test("records visual plans per git branch and injects PR preview context on gh p
     assert.ok(prCreated?.additionalContext?.includes(DOC_A));
     assert.ok(prCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/55"));
     assert.ok(prCreated?.additionalContext?.includes('role "viewer"'));
+    assert.ok(prCreated?.additionalContext?.includes(`checkout "${repo}"`));
     assert.ok(prCreated?.additionalContext?.includes('/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
-    assert.ok(prCreated?.additionalContext?.includes('--json headRefName --jq .headRefName'));
-    assert.ok(prCreated?.additionalContext?.includes('"feat/pr-preview"'));
+    assert.ok(prCreated?.additionalContext?.includes("headRepositoryOwner,headRepository,headRefName"));
+    assert.ok(prCreated?.additionalContext?.includes('"<owner>/<name>:feat/pr-preview"'));
+    assert.ok(prCreated?.additionalContext?.includes("if this session has already attached it to another pull request"));
     assert.equal(await store.loadBranchPlan(repo), null);
 
     // Reusing `feat/pr-preview` without a new plan attaches nothing.
@@ -742,7 +758,7 @@ test("records visual plans per git branch and injects PR preview context on gh p
     });
     assert.equal(reused, undefined);
 
-    // GitHub MCP PR creation tool on the matching branch triggers the context and spends its plan.
+    // GitHub MCP PR creation tool on the matching repository and branch triggers the context and spends its plan.
     await controller.hooks.onPostToolUse({
       toolName: "unpaged-document_create",
       toolArgs: { title: "shop-api: MCP PR", folderId: "visual-plans" },
@@ -764,6 +780,30 @@ test("records visual plans per git branch and injects PR preview context on gh p
     assert.ok(mcpPrCreated?.additionalContext?.includes(DOC_B));
     assert.ok(mcpPrCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/57"));
     assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Calling `listen_arm` with `plan: false` after an open-PR attachment spends the plan so a follow-up branch gets nothing.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Attached to open PR", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "shop-api: Attached to open PR" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_B);
+    const armTool = controller.tools.find((t) => t.name === "mcp__unpaged__listen_arm");
+    await armTool.handler({ documentId: DOC_B, title: "shop-api: Attached to open PR", plan: false });
+    assert.equal(await store.loadBranchPlan(repo), null);
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/followup\n", "utf8");
+    const followupPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Followup" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/58\n" },
+      workingDirectory: repo,
+    });
+    assert.equal(followupPr, undefined);
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
 
     // Deleting an unspent plan canvas clears its branch-plan record.
     await controller.hooks.onPostToolUse({
