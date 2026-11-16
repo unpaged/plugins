@@ -200,7 +200,8 @@ function findStandaloneMarkers(body) {
     offset = nl + 1;
   }
 
-  return { starts, ends };
+  const openFence = fenceChar ? fenceChar.repeat(fenceLen) : "";
+  return { starts, ends, openFence };
 }
 
 export function splicePrPlanSection(existingBody, section) {
@@ -212,12 +213,13 @@ export function splicePrPlanSection(existingBody, section) {
     throw new Error("invalid_pr_plan_section");
   }
   const body = typeof existingBody === "string" ? existingBody : "";
-  const { starts, ends } = findStandaloneMarkers(body);
+  const { starts, ends, openFence } = findStandaloneMarkers(body);
 
   if (starts.length === 0 && ends.length === 0) {
     if (!body.trim()) return `${section}\n`;
     const withoutTrailingNewlines = body.replace(/(?:\r?\n)+$/, "");
-    return `${withoutTrailingNewlines}\n\n${section}\n`;
+    const closeFence = openFence ? `\n${openFence}` : "";
+    return `${withoutTrailingNewlines}${closeFence}\n\n${section}\n`;
   }
 
   if (starts.length === 1 && ends.length === 1 && starts[0].start < ends[0].start) {

@@ -50,6 +50,22 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   assert.ok(spliced.stdout.includes("- [x] Verification item #175: checked end-to-end"));
   assert.ok(spliced.stdout.includes("- [x] Verification item #350: checked end-to-end"));
   assert.ok(spliced.stdout.includes(`${PREVIEW_URL}?v=1763282222`));
+
+  // Trailing unclosed code fence is closed before appending so a second splice updates in place.
+  const unclosed = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    env,
+    input: "```text\nunclosed log line\n",
+    encoding: "utf8",
+  });
+  assert.equal(unclosed.status, 0);
+  assert.ok(unclosed.stdout.startsWith("```text\nunclosed log line\n```\n\n<!-- unpaged-plan:start -->\n"));
+  const unclosedAgain = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    env,
+    input: unclosed.stdout,
+    encoding: "utf8",
+  });
+  assert.equal(unclosedAgain.status, 0);
+  assert.equal(unclosedAgain.stdout, unclosed.stdout);
 });
 
 test("executeControl supports plan_record, default-branch promotion on plan_lookup, and length-checked pr_splice without opening reviews.sqlite", async (t) => {

@@ -142,6 +142,12 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   assert.equal(appendedAfterQuoted, `${proseWithQuotedMarkers}\n\n${first}\n`);
   assert.equal(splicePrPlanSection(appendedAfterQuoted, second), `${proseWithQuotedMarkers}\n\n${second}\n`);
 
+  // A trailing unclosed code fence is closed before appending so the section renders outside it and refreshes in place.
+  const unclosedFenceBody = "## Logs\n\n````text\nline 1\nline 2";
+  const afterUnclosed = splicePrPlanSection(unclosedFenceBody, first);
+  assert.equal(afterUnclosed, `${unclosedFenceBody}\n\`\`\`\`\n\n${first}\n`);
+  assert.equal(splicePrPlanSection(afterUnclosed, second), `${unclosedFenceBody}\n\`\`\`\`\n\n${second}\n`);
+
   // Unpaired or reversed standalone markers throw rather than swallowing author text on refresh.
   assert.throws(
     () => splicePrPlanSection(`Intro\n\n${PR_SECTION_START}\nAuthor prose after stray marker`, first),

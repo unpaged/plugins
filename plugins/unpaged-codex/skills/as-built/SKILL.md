@@ -267,8 +267,12 @@ re-renders the root preview, resolve `<plugin-root>` as two levels up from this
 the repository (never routing the PR body through model context or passing a
 canvas title on the shell command line):
 `gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
-then delete `<inFile>` and `<outFile>` (skipping with a one-sentence note if
-`document_join_link` is unavailable on an older server or `gh pr edit` is declined).
+then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
+non-zero, leave the pull request description unchanged, delete the temporary
+files, and say in one sentence that its Unpaged section has stray or duplicate
+marker lines to fix by hand — never splice by hand after `splice` refused
+(skipping with a one-sentence note if `document_join_link` is unavailable on an
+older server or `gh pr edit` is declined).
 
 Return:
 

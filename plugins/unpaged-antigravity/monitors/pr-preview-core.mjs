@@ -285,15 +285,17 @@ function findStandaloneMarkers(body) {
     offset = nl + 1;
   }
 
-  return { starts, ends };
+  const openFence = fenceChar ? fenceChar.repeat(fenceLen) : "";
+  return { starts, ends, openFence };
 }
 
 /**
  * Replaces an existing standalone `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
  * section in place or appends it after existing PR description prose, keeping
  * all surrounding author text untouched. Ignores markers inside inline code or
- * fenced code blocks, and throws `ambiguous_pr_plan_section` on unpaired or
- * duplicate standalone markers so author text is never overwritten or deleted.
+ * fenced code blocks, closes a trailing unclosed code fence before appending,
+ * and throws `ambiguous_pr_plan_section` on unpaired or duplicate standalone
+ * markers so author text is never overwritten or deleted.
  */
 export function splicePrPlanSection(existingBody, section) {
   if (
@@ -304,14 +306,15 @@ export function splicePrPlanSection(existingBody, section) {
     throw new Error("invalid_pr_plan_section");
   }
   const body = typeof existingBody === "string" ? existingBody : "";
-  const { starts, ends } = findStandaloneMarkers(body);
+  const { starts, ends, openFence } = findStandaloneMarkers(body);
 
   if (starts.length === 0 && ends.length === 0) {
     if (!body.trim()) {
       return `${section}\n`;
     }
     const withoutTrailingNewlines = body.replace(/(?:\r?\n)+$/, "");
-    return `${withoutTrailingNewlines}\n\n${section}\n`;
+    const closeFence = openFence ? `\n${openFence}` : "";
+    return `${withoutTrailingNewlines}${closeFence}\n\n${section}\n`;
   }
 
   if (starts.length === 1 && ends.length === 1 && starts[0].start < ends[0].start) {
@@ -366,7 +369,8 @@ export function prPlanAttachContext({ documentId, title, pullRequestUrl } = {}) 
     `2) read the current PR body into a temporary file outside the repository (gh pr view "${pullRequestUrl}" --json body --jq .body > "<inFile>"), ` +
     `splice ONLY the standalone bounded section ${PR_SECTION_START} ... ${PR_SECTION_END} containing "### Visual plan", a blank line, ` +
     `"[![Visual plan](<previewUrl>?v=<unix-seconds>)](<url>)", a blank line, and "[Open visual plan on Unpaged (Can view)](<url>)" ` +
-    `into a second temporary file "<outFile>" (preserving any existing PR description text outside those standalone marker lines; never pass a canvas title on a shell command line), ` +
+    `into a second temporary file "<outFile>" (preserving any existing PR description text outside those standalone marker lines; never pass a canvas title on a shell command line; ` +
+    `if plans.mjs splice exits non-zero, leave the PR description unchanged and note in one sentence that its Unpaged section has stray or duplicate marker lines to fix by hand — never hand-splice after splice refused), ` +
     `run gh pr edit "${pullRequestUrl}" --body-file "<outFile>", and delete both temporary files.`
   );
 }

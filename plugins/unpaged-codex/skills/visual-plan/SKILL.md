@@ -114,8 +114,12 @@ section directly through temporary files outside the repository (so Codex's
 command-output shortening never sees or truncates the PR body, and no canvas
 title is passed on the shell command line):
 `gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
-then delete `<inFile>` and `<outFile>`. Skip quietly when no open PR exists for
-the branch or `document_join_link` is unavailable on an older server.
+then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
+non-zero, leave the pull request description unchanged, delete the temporary
+files, and say in one sentence that its Unpaged section has stray or duplicate
+marker lines to fix by hand — never splice by hand after `splice` refused. Skip
+quietly when no open PR exists for the branch or `document_join_link` is
+unavailable on an older server.
 
 ## During implementation
 
@@ -144,7 +148,10 @@ remote `document_join_link({ documentId, role: "viewer" })` and splice the
 standalone bounded `<!-- unpaged-plan:start -->` section directly through
 temporary files outside the repository (`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
 then delete `<inFile>` and `<outFile>`) so long PR descriptions never pass
-through model context.
+through model context. If `pr-preview.mjs splice` exits non-zero, leave the pull
+request description unchanged and say in one sentence that its Unpaged section
+has stray or duplicate marker lines to fix by hand — never splice by hand after
+`splice` refused.
 
 ## Hand over the review
 

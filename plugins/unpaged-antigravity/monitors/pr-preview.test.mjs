@@ -34,6 +34,11 @@ test("Antigravity PR section matches Claude/Copilot format byte-for-byte and ign
   assert.equal(section, renderClaudeSection(opts));
   const merged = splicePrPlanSection(`Intro mentioning \`${PR_SECTION_START} ... ${PR_SECTION_END}\`.\n`, section);
   assert.ok(merged.startsWith(`Intro mentioning \`${PR_SECTION_START} ... ${PR_SECTION_END}\`.\n\n<!-- unpaged-plan:start -->\n`));
+
+  const unclosed = "```text\npasted log without closing fence";
+  const once = splicePrPlanSection(unclosed, section);
+  assert.equal(once, `${unclosed}\n\`\`\`\n\n${section}\n`);
+  assert.equal(splicePrPlanSection(once, section), once);
 });
 
 test("Antigravity plans.mjs stores mode-0600 records under ~/.gemini/unpaged/plans, promotes default-branch plans, and rejects 0-byte stdin", async () => {
