@@ -164,6 +164,17 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   const afterEnded = splicePrPlanSection(endedByUnindented, first);
   assert.equal(afterEnded, `${endedByUnindented}\n\n${first}\n`);
 
+  // Lazy continuation lines or nested list items before an unclosed indented fence followed by top-level text
+  // place the section at the top of the description (author text unchanged) and replace in place on refresh.
+  for (const trickyBody of [
+    "- Ran the full suite after the\nfix:\n  ```text\n  ok\nSummary at top level.\n",
+    "- Tests\n  - unit: pass\n  ```text\n  log\nSummary.\n",
+  ]) {
+    const splicedOnce = splicePrPlanSection(trickyBody, first);
+    assert.equal(splicedOnce, `${first}\n\n${trickyBody}`);
+    assert.equal(splicePrPlanSection(splicedOnce, second), `${second}\n\n${trickyBody}`);
+  }
+
   // Unpaired or reversed standalone markers throw rather than swallowing author text on refresh.
   assert.throws(
     () => splicePrPlanSection(`Intro\n\n${PR_SECTION_START}\nAuthor prose after stray marker`, first),

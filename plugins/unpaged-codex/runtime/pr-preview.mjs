@@ -180,6 +180,7 @@ function findStandaloneMarkers(body) {
   let fenceLen = 0;
   let fenceIndent = "";
   let fenceListIndent = 0;
+  let fenceDedented = false;
   let offset = 0;
 
   while (offset <= body.length) {
@@ -194,16 +195,21 @@ function findStandaloneMarkers(body) {
       fenceLen = 0;
       fenceIndent = "";
       fenceListIndent = 0;
+      fenceDedented = false;
       listIndent = 0;
     }
 
     if (fenceChar !== null) {
+      if (trimmed !== "" && leadingIndentColumns(line) < fenceIndent.length) {
+        fenceDedented = true;
+      }
       const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
       if (closeMatch && closeMatch[1][0] === fenceChar && closeMatch[1].length >= fenceLen) {
         fenceChar = null;
         fenceLen = 0;
         fenceIndent = "";
         fenceListIndent = 0;
+        fenceDedented = false;
       }
     } else {
       const listMatch = line.match(/^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)/);
@@ -219,6 +225,7 @@ function findStandaloneMarkers(body) {
         fenceChar = openMatch[2][0];
         fenceLen = openMatch[2].length;
         fenceListIndent = fenceIndent.length >= listIndent ? listIndent : 0;
+        fenceDedented = false;
       } else if (trimmed === PR_SECTION_START) {
         starts.push({ start: offset, end: contentEnd });
       } else if (trimmed === PR_SECTION_END) {
@@ -231,7 +238,7 @@ function findStandaloneMarkers(body) {
   }
 
   const openFence = fenceChar ? `${fenceIndent}${fenceChar.repeat(fenceLen)}` : "";
-  return { starts, ends, openFence };
+  return { starts, ends, openFence, openFenceAmbiguous: fenceChar !== null && fenceDedented };
 }
 
 export function splicePrPlanSection(existingBody, section) {
@@ -243,10 +250,11 @@ export function splicePrPlanSection(existingBody, section) {
     throw new Error("invalid_pr_plan_section");
   }
   const body = typeof existingBody === "string" ? existingBody : "";
-  const { starts, ends, openFence } = findStandaloneMarkers(body);
+  const { starts, ends, openFence, openFenceAmbiguous } = findStandaloneMarkers(body);
 
   if (starts.length === 0 && ends.length === 0) {
     if (!body.trim()) return `${section}\n`;
+    if (openFenceAmbiguous) return `${section}\n\n${body}`;
     const withoutTrailingNewlines = body.replace(/(?:\r?\n)+$/, "");
     const closeFence = openFence ? `\n${openFence}` : "";
     return `${withoutTrailingNewlines}${closeFence}\n\n${section}\n`;

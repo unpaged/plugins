@@ -81,6 +81,27 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   });
   assert.equal(listUnclosedAgain.status, 0);
   assert.equal(listUnclosedAgain.stdout, listUnclosed.stdout);
+
+  for (const trickyBody of [
+    "- Ran the full suite after the\nfix:\n  ```text\n  ok\nSummary at top level.\n",
+    "- Tests\n  - unit: pass\n  ```text\n  log\nSummary.\n",
+  ]) {
+    const onceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      env,
+      input: trickyBody,
+      encoding: "utf8",
+    });
+    assert.equal(onceTop.status, 0);
+    assert.ok(onceTop.stdout.startsWith("<!-- unpaged-plan:start -->\n"));
+    assert.ok(onceTop.stdout.endsWith(`\n\n${trickyBody}`));
+    const twiceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      env,
+      input: onceTop.stdout,
+      encoding: "utf8",
+    });
+    assert.equal(twiceTop.status, 0);
+    assert.equal(twiceTop.stdout, onceTop.stdout);
+  }
 });
 
 test("executeControl supports plan_record, default-branch promotion on plan_lookup, and length-checked pr_splice without opening reviews.sqlite", async (t) => {
