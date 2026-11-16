@@ -127,7 +127,7 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   // Re-running with the same section is idempotent.
   assert.equal(splicePrPlanSection(updated, second), updated);
 
-  // Markers quoted in inline backticks or fenced code blocks are ignored, never treated as real boundaries.
+  // Markers quoted in inline backticks, fenced code blocks, or 4-space/tab-indented code blocks are ignored.
   const proseWithQuotedMarkers = [
     "## Summary",
     `Documents \`${PR_SECTION_START} ... ${PR_SECTION_END}\` in prose.`,
@@ -141,6 +141,16 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   const appendedAfterQuoted = splicePrPlanSection(proseWithQuotedMarkers, first);
   assert.equal(appendedAfterQuoted, `${proseWithQuotedMarkers}\n\n${first}\n`);
   assert.equal(splicePrPlanSection(appendedAfterQuoted, second), `${proseWithQuotedMarkers}\n\n${second}\n`);
+
+  for (const indentedExample of [
+    `Use these markers:\n\n    ${PR_SECTION_START}\n    your text\n    ${PR_SECTION_END}\n\nThanks.`,
+    `Use these markers:\n\n\t${PR_SECTION_START}\n\tyour text\n\t${PR_SECTION_END}\n\nThanks.`,
+    `Single quoted start marker:\n\n    ${PR_SECTION_START}\n\nKeep prose.`,
+  ]) {
+    const withIndented = splicePrPlanSection(indentedExample, first);
+    assert.equal(withIndented, `${indentedExample}\n\n${first}\n`);
+    assert.equal(splicePrPlanSection(withIndented, second), `${indentedExample}\n\n${second}\n`);
+  }
 
   // A trailing unclosed code fence is closed before appending so the section renders outside it and refreshes in place.
   const unclosedFenceBody = "## Logs\n\n````text\nline 1\nline 2";

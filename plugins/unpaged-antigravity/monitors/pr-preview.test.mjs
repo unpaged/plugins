@@ -53,6 +53,16 @@ test("Antigravity PR section matches Claude/Copilot format byte-for-byte and ign
     assert.equal(onceTop, `${section}\n\n${trickyBody}`);
     assert.equal(splicePrPlanSection(onceTop, section), onceTop);
   }
+
+  for (const indentedExample of [
+    `Use these markers:\n\n    ${PR_SECTION_START}\n    your text\n    ${PR_SECTION_END}\n\nThanks.`,
+    `Use these markers:\n\n\t${PR_SECTION_START}\n\tyour text\n\t${PR_SECTION_END}\n\nThanks.`,
+    `Single quoted start:\n\n    ${PR_SECTION_START}\n\nThanks.`,
+  ]) {
+    const onceIndented = splicePrPlanSection(indentedExample, section);
+    assert.equal(onceIndented, `${indentedExample}\n\n${section}\n`);
+    assert.equal(splicePrPlanSection(onceIndented, section), onceIndented);
+  }
 });
 
 test("Antigravity plans.mjs stores mode-0600 records under ~/.gemini/unpaged/plans, promotes default-branch plans, and rejects 0-byte stdin", async () => {

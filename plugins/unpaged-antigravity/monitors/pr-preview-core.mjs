@@ -312,9 +312,9 @@ function findStandaloneMarkers(body) {
         fenceLen = openMatch[2].length;
         fenceListIndent = fenceIndent.length >= listIndent ? listIndent : 0;
         fenceDedented = false;
-      } else if (trimmed === PR_SECTION_START) {
+      } else if (trimmed === PR_SECTION_START && leadingIndentColumns(line) <= 3) {
         starts.push({ start: offset, end: contentEnd });
-      } else if (trimmed === PR_SECTION_END) {
+      } else if (trimmed === PR_SECTION_END && leadingIndentColumns(line) <= 3) {
         ends.push({ start: offset, end: contentEnd });
       }
     }
