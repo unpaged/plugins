@@ -1013,6 +1013,7 @@ export function createUnpagedCopilotController({
             pullRequestUrl: createdPr.url,
             repoTopLevel: branchCtx?.repoTopLevel ?? targetCwd,
             branch: branchCtx?.branch ?? null,
+            originSlug: branchCtx?.originSlug ?? null,
             spliceScript: plansScriptPath,
           });
           if (context) return { additionalContext: context };

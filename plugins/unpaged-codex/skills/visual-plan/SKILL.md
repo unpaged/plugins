@@ -144,10 +144,11 @@ When implementation is ready to record, use the bundled
 [as-built skill](../as-built/SKILL.md) to reconcile the exact Git range against
 the plan and append a dated partial or complete record. When opening a GitHub
 pull request for this repository during authorized implementation (`gh pr create`
-without `--dry-run`, or a GitHub pull-request tool — first taking
-`<owner>/<name>` from `git remote get-url origin` and checking
-`gh pr view "<prUrl>" --json headRepositoryOwner,headRepository,headRefName --jq '.headRepositoryOwner.login + "/" + .headRepository.name + ":" + .headRefName'`
-against `<owner>/<name>:<branch>` on a named branch, or `.headRepositoryOwner.login + "/" + .headRepository.name` against `<owner>/<name>` on a detached HEAD; stop before `plan_lookup` if it does not match so this repository's unspent plan stays intact), check `review` (`operation: "plan_lookup"`) or this task's
+without `--dry-run`, or a GitHub pull-request tool — first taking lowercase
+`<owner>/<name>` from `git remote get-url origin | sed -E 's#://[^/@]*@#://#'`
+and checking
+`gh pr view "<prUrl>" --json headRepositoryOwner,headRepository,headRefName --jq '(.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase) + ":" + .headRefName'`
+against `<owner>/<name>:<branch>` on a named branch, or `.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase` against `<owner>/<name>` on a detached HEAD; stop before `plan_lookup` if it does not match so this repository's unspent plan stays intact), check `review` (`operation: "plan_lookup"`) or this task's
 unspent plan; when one is found, skip it if this task has already attached that
 plan to another pull request, and attach it only if it is about this pull
 request's work (comparing the plan's title — or reading the canvas with

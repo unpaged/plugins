@@ -863,9 +863,9 @@ describe('pull request previews for visual plans', () => {
     const dry = await $.tool.call({ tool: 'Bash', command: 'gh pr create --dry-run --title "Feat"' } as never)
     expect((dry as { context?: string[] }).context).toBeUndefined()
 
-    w.files.set('/repo/.git/config', '[remote "origin"]\n\turl = git@github.com:acme/shop-api.git\n')
+    w.files.set('/repo/.git/config', '[remote "origin"]\n\turl = git@github-work:acme/shop-api.git\n')
 
-    // A GitHub PR tool targeting another repository — even with the SAME branch name `feat/pr-preview` — adds no context and leaves the plan unspent.
+    // A GitHub PR tool targeting another repository — even on an SSH host alias and with the SAME branch name `feat/pr-preview` — adds no context and leaves the plan unspent.
     const wrongRepoSameBranch = await $.tool.call({
       tool: 'mcp__plugin_github__create_pull_request',
       owner: 'acme',
@@ -886,7 +886,10 @@ describe('pull request previews for visual plans', () => {
     expect((wrongHead as { context?: string[] }).context).toBeUndefined()
     expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(true)
 
-    // Real gh pr create attaches the instructions (with checkout path, plans.mjs splice path, headRepository+headRefName guard, already-attached guard, and fit check) and spends the plan.
+    // Even when `.git/config` carries an embedded token URL, the context names `acme/shop-api` directly without asking to print `git remote get-url origin`.
+    w.files.set('/repo/.git/config', '[remote "origin"]\n\turl = https://alice:ghp_FAKETOKEN@github.com/acme/shop-api.git\n')
+
+    // Real gh pr create attaches the instructions (with checkout path, plans.mjs splice path, pre-parsed slug guard, already-attached guard, and fit check) and spends the plan.
     const created = await $.tool.call({ tool: 'Bash', command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' } as never)
     const ctx = (created as { context?: string[] }).context ?? []
     expect(ctx).toHaveLength(1)
@@ -894,9 +897,11 @@ describe('pull request previews for visual plans', () => {
     expect(ctx[0]).toContain(PR_URL)
     expect(ctx[0]).toContain('role "viewer"')
     expect(ctx[0]).toContain('checkout "/repo"')
+    expect(ctx[0]).not.toContain('ghp_FAKETOKEN')
+    expect(ctx[0]).not.toContain('remote get-url origin')
     expect(ctx[0]).toContain('/monitors/plans.mjs" splice "<url>" "<previewUrl>"')
     expect(ctx[0]).toContain('headRepositoryOwner,headRepository,headRefName')
-    expect(ctx[0]).toContain('"<owner>/<name>:feat/pr-preview"')
+    expect(ctx[0]).toContain('"acme/shop-api:feat/pr-preview"')
     expect(ctx[0]).toContain('if this session has already attached it to another pull request')
     expect(ctx[0]).toContain("only if it is about this pull request's work")
     expect(w.calls.submits).toEqual([])

@@ -252,6 +252,7 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
     pullRequestUrl: "https://github.com/acme/shop/pull/42",
     repoTopLevel: "/work/shop-api",
     branch: "feat/rate-limit",
+    originSlug: "acme/shop-api",
     spliceScript: "/opt/unpaged/monitors/plans.mjs",
   });
   assert.ok(ctx.includes(DOC_1));
@@ -260,12 +261,25 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
   assert.ok(ctx.includes("never pass a canvas title on a shell command line"));
   assert.ok(ctx.includes('node "/opt/unpaged/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
   assert.ok(ctx.includes('checkout "/work/shop-api"'));
-  assert.ok(ctx.includes('git -C "/work/shop-api" remote get-url origin'));
+  assert.ok(!ctx.includes("remote get-url origin"));
   assert.ok(ctx.includes("headRepositoryOwner,headRepository,headRefName"));
-  assert.ok(ctx.includes('"<owner>/<name>:feat/rate-limit"'));
+  assert.ok(ctx.includes("ascii_downcase"));
+  assert.ok(ctx.includes('"acme/shop-api:feat/rate-limit"'));
   assert.ok(ctx.includes("if this session has already attached it to another pull request"));
   assert.ok(ctx.includes("only if it is about this pull request's work"));
   assert.ok(ctx.includes("reason splice printed on stderr"));
+
+  const fallbackCtx = prPlanAttachContext({
+    documentId: DOC_1,
+    title: "Fallback plan",
+    pullRequestUrl: "https://github.com/acme/shop/pull/42",
+    repoTopLevel: "/work/shop-api",
+    branch: "feat/rate-limit",
+    originSlug: null,
+    spliceScript: "/opt/unpaged/monitors/plans.mjs",
+  });
+  assert.ok(fallbackCtx.includes("git -C \"/work/shop-api\" remote get-url origin | sed -E 's#://[^/@]*@#://#'"));
+  assert.ok(fallbackCtx.includes('"<owner>/<name>:feat/rate-limit"'));
 
   const detachedCtx = prPlanAttachContext({
     documentId: DOC_1,
@@ -273,10 +287,13 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
     pullRequestUrl: "https://github.com/acme/shop/pull/43",
     repoTopLevel: "/work/shop-api",
     branch: null,
+    originSlug: "acme/shop-api",
     spliceScript: "/opt/unpaged/monitors/plans.mjs",
   });
   assert.ok(!detachedCtx.includes("headRefName"));
+  assert.ok(!detachedCtx.includes("remote get-url origin"));
   assert.ok(detachedCtx.includes("headRepositoryOwner,headRepository"));
+  assert.ok(detachedCtx.includes('"acme/shop-api"'));
   assert.ok(detachedCtx.includes("if this session has already attached it to another pull request"));
   assert.equal(normalizePullRequestHeadRef("acme:docs/rate-limit"), "docs/rate-limit");
   assert.equal(normalizePullRequestHeadRef("refs/heads/feat/x"), "feat/x");
@@ -286,8 +303,14 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
     "git@github.com:Acme/Shop-Api.git"
   );
   assert.equal(parseGitHubRepoSlug("git@github.com:Acme/Shop-Api.git"), "acme/shop-api");
-  assert.equal(parseGitHubRepoSlug("https://github.com/Acme/Shop-Api.git"), "acme/shop-api");
-  assert.equal(parseGitHubRepoSlug("ssh://git@github.com/Acme/Shop-Api/"), "acme/shop-api");
+  assert.equal(parseGitHubRepoSlug("git@github-work:Acme/Shop-Api.git"), "acme/shop-api");
+  assert.equal(parseGitHubRepoSlug("https://alice:ghp_FAKE@github.com/Acme/Shop-Api.git"), "acme/shop-api");
+  assert.equal(parseGitHubRepoSlug("ssh://git@ssh.github.com:443/Acme/Shop-Api/"), "acme/shop-api");
+  assert.equal(parseGitHubRepoSlug("gh:Acme/Shop-Api"), "acme/shop-api");
+  assert.equal(parseGitHubRepoSlug("/tmp/acme/shop-api"), null);
+  assert.equal(parseGitHubRepoSlug("C:/work/acme/shop-api"), null);
+  assert.equal(parseGitHubRepoSlug("file:///tmp/acme/shop-api"), null);
+  assert.equal(parseGitHubRepoSlug("https://gitlab.com/group/sub/repo.git"), null);
   assert.equal(
     parseGitHubToolHeadRepoSlug({ owner: "acme", repo: "public-docs", head: "feat/rate-limit" }),
     "acme/public-docs"

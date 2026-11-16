@@ -1057,6 +1057,7 @@ async function prPreviewContextForResult(
       pullRequestUrl: created.url,
       repoTopLevel: where.repoTopLevel,
       branch: where.branch,
+      originSlug: where.originSlug,
       spliceScript: `${$.plugin.root}/monitors/plans.mjs`,
     }) || null
   )

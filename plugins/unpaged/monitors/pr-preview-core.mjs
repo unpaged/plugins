@@ -89,19 +89,20 @@ export function parseOriginRemoteUrl(rawGitConfig) {
 }
 
 /**
- * Parses a GitHub remote URL (`https://github.com/owner/repo.git`,
- * `git@github.com:owner/repo.git`, `ssh://git@github.com/owner/repo`) into
- * lowercase `"owner/repo"`, or `null` when not a GitHub remote URL.
+ * Parses a two-segment remote URL (`https://github.com/owner/repo.git`,
+ * `git@github-work:owner/repo.git`, `ssh://git@ssh.github.com:443/owner/repo`,
+ * or `gh:owner/repo`) into lowercase `"owner/repo"`, or `null` for local paths,
+ * `file://` URLs, or multi-segment group paths.
  */
 export function parseGitHubRepoSlug(rawRemoteUrl) {
   if (typeof rawRemoteUrl !== "string") return null;
   const trimmed = rawRemoteUrl.trim();
-  if (!trimmed) return null;
+  if (!trimmed || /^(?:file:\/\/|[A-Za-z]:[\\/])/i.test(trimmed)) return null;
   let match = trimmed.match(
-    /^(?:https?|ssh|git):\/\/(?:[^@/\s]+@)?github\.com[:/]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i
+    /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/\s]+@)?[^/\s:]+(?::\d+)?\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i
   );
   if (!match) {
-    match = trimmed.match(/^(?:[^@/\s]+@)?github\.com:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
+    match = trimmed.match(/^(?:[^@/\s]+@)?[^/\s:]+:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
   }
   if (!match) return null;
   const owner = match[1].toLowerCase();
@@ -506,6 +507,7 @@ export function prPlanAttachContext({
   pullRequestUrl,
   repoTopLevel = null,
   branch = null,
+  originSlug = null,
   spliceScript = "",
 } = {}) {
   if (!isDocumentId(documentId) || typeof pullRequestUrl !== "string" || !PR_URL_PATTERN.test(pullRequestUrl)) {
@@ -514,13 +516,38 @@ export function prPlanAttachContext({
   const safeName = title ? `"${String(title).replace(/[\r\n\t"]+/g, " ").trim()}" ` : "";
   const cleanRepo = typeof repoTopLevel === "string" ? repoTopLevel.replace(/[\r\n\0"]+/g, "").trim() : "";
   const validBranch = typeof branch === "string" ? parseGitHeadBranch(`ref: refs/heads/${branch}`) : null;
+  const validSlug =
+    typeof originSlug === "string" && /^[a-z0-9._-]+\/[a-z0-9._-]+$/.test(originSlug.trim())
+      ? originSlug.trim()
+      : null;
   const cleanScript = typeof spliceScript === "string" ? spliceScript.replace(/[\r\n\0"]+/g, "").trim() : "";
   const scriptPath = cleanScript || "${CLAUDE_PLUGIN_ROOT}/monitors/plans.mjs";
-  const remoteCmd = cleanRepo ? `git -C "${cleanRepo}" remote get-url origin` : "git remote get-url origin";
   const checkoutLabel = cleanRepo ? `checkout "${cleanRepo}"` : "this checkout";
-  const repoAndBranchCheck = validBranch
-    ? `First verify ${pullRequestUrl} was opened from ${checkoutLabel} on branch "${validBranch}": take <owner>/<name> from ${remoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository,headRefName --jq '.headRepositoryOwner.login + "/" + .headRepository.name + ":" + .headRefName' — attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>:${validBranch}". `
-    : `First verify ${pullRequestUrl} was opened from ${checkoutLabel}: take <owner>/<name> from ${remoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository --jq '.headRepositoryOwner.login + "/" + .headRepository.name' — attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>". `;
+  const scrubbedRemoteCmd = cleanRepo
+    ? `git -C "${cleanRepo}" remote get-url origin | sed -E 's#://[^/@]*@#://#'`
+    : `git remote get-url origin | sed -E 's#://[^/@]*@#://#'`;
+  let repoAndBranchCheck;
+  if (validSlug && validBranch) {
+    repoAndBranchCheck =
+      `First verify ${pullRequestUrl} was opened from ${checkoutLabel} (${validSlug} on branch "${validBranch}"): ` +
+      `run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository,headRefName --jq '(.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase) + ":" + .headRefName' — ` +
+      `attach nothing and leave the PR description unchanged unless it prints "${validSlug}:${validBranch}". `;
+  } else if (validSlug) {
+    repoAndBranchCheck =
+      `First verify ${pullRequestUrl} was opened from ${checkoutLabel} (${validSlug}): ` +
+      `run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository --jq '.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase' — ` +
+      `attach nothing and leave the PR description unchanged unless it prints "${validSlug}". `;
+  } else if (validBranch) {
+    repoAndBranchCheck =
+      `First verify ${pullRequestUrl} was opened from ${checkoutLabel} on branch "${validBranch}": ` +
+      `take lowercase <owner>/<name> from ${scrubbedRemoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository,headRefName --jq '(.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase) + ":" + .headRefName' — ` +
+      `attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>:${validBranch}". `;
+  } else {
+    repoAndBranchCheck =
+      `First verify ${pullRequestUrl} was opened from ${checkoutLabel}: ` +
+      `take lowercase <owner>/<name> from ${scrubbedRemoteCmd} and run gh pr view "${pullRequestUrl}" --json headRepositoryOwner,headRepository --jq '.headRepositoryOwner.login + "/" + .headRepository.name | ascii_downcase' — ` +
+      `attach nothing and leave the PR description unchanged unless it prints "<owner>/<name>". `;
+  }
   return (
     `Visual plan candidate for ${checkoutLabel} (${safeName}documentId ${documentId}). ` +
     `Skip this plan and leave the PR description unchanged if this session has already attached it to another pull request. ` +
