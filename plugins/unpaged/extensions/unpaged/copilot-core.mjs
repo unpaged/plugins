@@ -10,6 +10,10 @@ import {
   printableKeyId,
 } from "../../monitors/listen-core.mjs";
 import { runListener } from "../../monitors/listen-loop.mjs";
+import {
+  extractCreatedPullRequest,
+  prPlanAttachContext,
+} from "../../monitors/pr-preview-core.mjs";
 
 export const FIRST_POLL_WAIT_MS = 8000;
 export const FLUSH_DELAY_MS = 50;
@@ -62,6 +66,16 @@ function isSuccessfulToolResult(toolResult) {
   if (toolResult.isError === true) return false;
   const rt = str(toolResult.resultType);
   return !rt || rt === "success";
+}
+
+function toolResultText(toolResult) {
+  if (!toolResult) return "";
+  if (typeof toolResult === "string") return toolResult;
+  return [
+    str(toolResult.textResultForLlm),
+    str(toolResult.sessionLog),
+    typeof toolResult.contents === "string" ? toolResult.contents : JSON.stringify(toolResult.contents ?? ""),
+  ].join("\n");
 }
 
 function shortHostName(raw) {
@@ -640,12 +654,23 @@ export function createUnpagedCopilotController({
         properties: {
           documentId: { type: "string" },
           title: { type: "string" },
+          plan: { type: "boolean" },
         },
         required: ["documentId"],
       },
       handler: async (args) => {
         const documentId = str(args?.documentId);
         const title = str(args?.title) || null;
+        if (args?.plan === true && isDocumentId(documentId) && typeof store.saveBranchPlan === "function") {
+          await store
+            .saveBranchPlan({
+              cwd: await currentCwd(),
+              documentId,
+              title: title || "",
+              updatedAt: new Date(now()).toISOString(),
+            })
+            .catch(() => {});
+        }
         try {
           const result = await arm(documentId, title);
           const line = result.already
@@ -884,6 +909,9 @@ export function createUnpagedCopilotController({
 
       if (mcpTool === "document_delete") {
         const documentId = str(args.documentId);
+        if (typeof store.forgetBranchPlanByDocumentId === "function") {
+          await store.forgetBranchPlanByDocumentId(documentId).catch(() => {});
+        }
         if (canvases.has(documentId) || arming.has(documentId)) {
           const pending = canvases.has(documentId) ? Promise.resolve() : arming.get(documentId)?.catch(() => {});
           void Promise.resolve(pending)
@@ -901,6 +929,20 @@ export function createUnpagedCopilotController({
           if (!created) return;
           documentId = created.id;
           title = created.title || str(args.title) || null;
+          if (
+            mcpTool === "document_create" &&
+            str(args.folderId) === "visual-plans" &&
+            typeof store.saveBranchPlan === "function"
+          ) {
+            await store
+              .saveBranchPlan({
+                cwd: wd || (await currentCwd()),
+                documentId,
+                title: title || "",
+                updatedAt: new Date(now()).toISOString(),
+              })
+              .catch(() => {});
+          }
         }
         if (
           !isDocumentId(documentId) ||
@@ -913,6 +955,24 @@ export function createUnpagedCopilotController({
         }
         offered.add(documentId);
         return { additionalContext: offerLine(documentId, title) };
+      }
+
+      const createdPr = extractCreatedPullRequest({
+        toolName,
+        command: str(args.command ?? args.cmd),
+        resultText: toolResultText(input?.toolResult),
+        isError: false,
+      });
+      if (createdPr && typeof store.loadBranchPlan === "function") {
+        const plan = await store.loadBranchPlan(wd || (await currentCwd()));
+        if (plan) {
+          const context = prPlanAttachContext({
+            documentId: plan.documentId,
+            title: plan.title,
+            pullRequestUrl: createdPr.url,
+          });
+          if (context) return { additionalContext: context };
+        }
       }
     },
 

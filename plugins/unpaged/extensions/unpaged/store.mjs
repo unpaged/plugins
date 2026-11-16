@@ -3,7 +3,7 @@
 // mode 0600 files written via tmp + rename), plus reading .unpaged/architecture.json
 // at the git repository root. Never writes to stdout.
 import { access, link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -13,6 +13,12 @@ import {
   parseListenerConfig,
   retireKeyFile,
 } from "../../monitors/listen-core.mjs";
+import {
+  normalizePlanRecord,
+  parseGitHeadBranch,
+  planStoreKey,
+  resolveGitDirPointer,
+} from "../../monitors/pr-preview-core.mjs";
 
 export const POINTER_RELATIVE = join(".unpaged", "architecture.json");
 const VERDICT_STATES = new Set(["current", "behind", "lost"]);
@@ -50,6 +56,14 @@ export function createCopilotStore({
   const rootDir = join(copilotHome, "unpaged");
   const keyDir = join(rootDir, "listeners");
   const verdictDir = join(rootDir, "architecture");
+  const planDir = join(rootDir, "plans");
+
+  function planFileFor(repoTopLevel, branch) {
+    const key = planStoreKey(repoTopLevel, branch);
+    if (!key) return null;
+    const hash = createHash("sha256").update(key).digest("hex");
+    return join(planDir, `${hash}.json`);
+  }
 
   async function writeAtomicJson(dir, file, value) {
     await fs.mkdir(rootDir, { recursive: true, mode: 0o700 });
@@ -167,9 +181,93 @@ export function createCopilotStore({
     }
   }
 
+  async function resolveRepositoryBranch(startDir) {
+    const repoTopLevel = await findRepositoryRoot(startDir);
+    if (!repoTopLevel) return null;
+    let headRaw = null;
+    try {
+      headRaw = await fs.readFile(join(repoTopLevel, ".git", "HEAD"), "utf8");
+    } catch {
+      try {
+        const dotGitRaw = await fs.readFile(join(repoTopLevel, ".git"), "utf8");
+        const gitDir = resolveGitDirPointer(dotGitRaw, repoTopLevel);
+        if (gitDir) {
+          headRaw = await fs.readFile(join(gitDir, "HEAD"), "utf8");
+        }
+      } catch {
+        headRaw = null;
+      }
+    }
+    const branch = parseGitHeadBranch(headRaw);
+    return branch ? { repoTopLevel, branch } : null;
+  }
+
+  async function saveBranchPlan({ cwd, documentId, title = "", updatedAt = "" } = {}) {
+    if (!isDocumentId(documentId)) return null;
+    const branchCtx = await resolveRepositoryBranch(cwd);
+    if (!branchCtx) return null;
+    const record = normalizePlanRecord({
+      documentId,
+      title,
+      repoTopLevel: branchCtx.repoTopLevel,
+      branch: branchCtx.branch,
+      updatedAt: updatedAt || new Date().toISOString(),
+    });
+    const file = record ? planFileFor(record.repoTopLevel, record.branch) : null;
+    if (!record || !file) return null;
+    await writeAtomicJson(planDir, file, record);
+    return record;
+  }
+
+  async function loadBranchPlan(cwd) {
+    const branchCtx = await resolveRepositoryBranch(cwd);
+    if (!branchCtx) return null;
+    const file = planFileFor(branchCtx.repoTopLevel, branchCtx.branch);
+    if (!file) return null;
+    try {
+      const parsed = normalizePlanRecord(JSON.parse(await fs.readFile(file, "utf8")));
+      if (
+        !parsed ||
+        parsed.repoTopLevel !== branchCtx.repoTopLevel ||
+        parsed.branch !== branchCtx.branch
+      ) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  async function forgetBranchPlanByDocumentId(documentId) {
+    if (!isDocumentId(documentId)) return 0;
+    let names = [];
+    try {
+      names = await fs.readdir(planDir);
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      const file = join(planDir, name);
+      try {
+        const parsed = normalizePlanRecord(JSON.parse(await fs.readFile(file, "utf8")));
+        if (parsed && parsed.documentId === documentId) {
+          await fs.rm(file, { force: true });
+          removed += 1;
+        }
+      } catch {
+        // Keep unreadable or non-matching entries intact.
+      }
+    }
+    return removed;
+  }
+
   return {
     keyDir,
     verdictDir,
+    planDir,
     loadListener,
     saveListener,
     listListeners,
@@ -179,5 +277,9 @@ export function createCopilotStore({
     saveVerdict,
     findRepositoryRoot,
     readArchitecturePointer,
+    resolveRepositoryBranch,
+    saveBranchPlan,
+    loadBranchPlan,
+    forgetBranchPlanByDocumentId,
   };
 }

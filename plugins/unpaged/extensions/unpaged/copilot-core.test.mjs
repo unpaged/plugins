@@ -642,3 +642,98 @@ test("preserves the server refusal reason when an extension-initiated mint fails
     controller.shutdown();
   });
 });
+
+test("records visual plans per git branch and injects PR preview context on gh pr create or GitHub PR tool", async () => {
+  await withTempDir(async (dir) => {
+    const copilotHome = join(dir, "copilot-home");
+    const repo = join(dir, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
+
+    const store = createCopilotStore({ copilotHome, pid: 7777 });
+    const controller = createUnpagedCopilotController({
+      executeTool: async () => ({
+        resultType: "success",
+        textResultForLlm: JSON.stringify(mintPayload(DOC_A)),
+      }),
+      getCwd: async () => repo,
+      store,
+      poll: async () => ({ events: [], nextCursor: null, cadence: {} }),
+    });
+
+    // Non-plan document_create (no folderId: "visual-plans") does not record a branch plan.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "Scratchpad" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "Scratchpad" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Visual-plan creation records the branch plan automatically.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: PR previews", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: PR previews" }),
+      },
+      workingDirectory: repo,
+    });
+    const saved = await store.loadBranchPlan(repo);
+    assert.equal(saved?.documentId, DOC_A);
+    assert.equal(saved?.branch, "feat/pr-preview");
+
+    // --dry-run produces no context.
+    const dryRun = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --dry-run --title "Feat"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "Would have created a Pull Request with:\nhttps://github.com/acme/shop/pull/1\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(dryRun, undefined);
+
+    // Real gh pr create injects additionalContext for attaching the Can view link + preview.
+    const prCreated = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/55\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(prCreated?.additionalContext?.includes(DOC_A));
+    assert.ok(prCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/55"));
+    assert.ok(prCreated?.additionalContext?.includes('role "viewer"'));
+
+    // GitHub MCP PR creation tool triggers the same context.
+    const mcpPrCreated = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "acme", repo: "shop", title: "Feat" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/shop/pull/56" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(mcpPrCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/56"));
+
+    // Deleting the plan canvas clears the branch-plan record.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_delete",
+      toolArgs: { documentId: DOC_A },
+      toolResult: { resultType: "success", textResultForLlm: '{"deleted":true}' },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    controller.shutdown();
+  });
+});

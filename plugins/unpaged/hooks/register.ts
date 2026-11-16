@@ -44,6 +44,16 @@ import {
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
 import {
+  GITHUB_PR_CREATE_TOOL,
+  PR_CREATE_COMMAND,
+  extractCreatedPullRequest,
+  normalizePlanRecord,
+  parseGitHeadBranch,
+  planStoreKey,
+  prPlanAttachContext,
+  resolveGitDirPointer,
+} from '../monitors/pr-preview-core.mjs'
+import {
   BLINK_MS,
   COMPARE_PROMPT,
   CREATE_PROMPT,
@@ -859,6 +869,74 @@ async function isRepository($: Api) {
   return (await repositoryRoot($)) !== null
 }
 
+/**
+ * The repository's top level and current named branch (`refs/heads/...`), read
+ * from `.git/HEAD` or a worktree's `gitdir:` pointer; null outside a repository
+ * or on a detached HEAD.
+ */
+async function repositoryBranch($: Api): Promise<{ repoTopLevel: string; branch: string } | null> {
+  const root = await repositoryRoot($)
+  if (!root) return null
+  try {
+    const directHead = `${root}/.git/HEAD`
+    if (await $.fs.exists(directHead)) {
+      const branch = parseGitHeadBranch(await $.fs.read(directHead))
+      return branch ? { repoTopLevel: root, branch } : null
+    }
+    const gitDir = resolveGitDirPointer(await $.fs.read(`${root}/.git`), root)
+    if (!gitDir) return null
+    const worktreeHead = `${gitDir}/HEAD`
+    if (!(await $.fs.exists(worktreeHead))) return null
+    const branch = parseGitHeadBranch(await $.fs.read(worktreeHead))
+    return branch ? { repoTopLevel: root, branch } : null
+  } catch {
+    return null
+  }
+}
+
+async function rememberBranchPlan($: Api, documentId: string, title: string | null) {
+  if (!isDocumentId(documentId)) return
+  const where = await repositoryBranch($)
+  if (!where) return
+  const key = planStoreKey(where.repoTopLevel, where.branch)
+  const record = normalizePlanRecord({
+    documentId,
+    title: title ?? '',
+    repoTopLevel: where.repoTopLevel,
+    branch: where.branch,
+    updatedAt: new Date(await $.clock.now()).toISOString(),
+  })
+  if (key && record) await $.store.set(key, record).catch(() => undefined)
+}
+
+async function forgetBranchPlan($: Api, documentId: string) {
+  if (!isDocumentId(documentId)) return
+  for (const name of await $.store.keys()) {
+    if (!name.startsWith('plan:')) continue
+    const record = normalizePlanRecord(await $.store.get(name))
+    if (record?.documentId === documentId) await $.store.delete(name).catch(() => undefined)
+  }
+}
+
+async function prPreviewContextForResult(
+  $: Api,
+  toolName: string,
+  command: string,
+  ran: { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown },
+): Promise<string | null> {
+  if (ran.deny !== undefined || ran.isError === true) return null
+  const haystack = [text(ran.text), typeof ran.result === 'string' ? ran.result : JSON.stringify(ran.result ?? '')].join('\n')
+  const created = extractCreatedPullRequest({ toolName, command, resultText: haystack, isError: false })
+  if (!created) return null
+  const where = await repositoryBranch($)
+  if (!where) return null
+  const key = planStoreKey(where.repoTopLevel, where.branch)
+  if (!key) return null
+  const plan = normalizePlanRecord(await $.store.get(key))
+  if (!plan || plan.repoTopLevel !== where.repoTopLevel || plan.branch !== where.branch) return null
+  return prPlanAttachContext({ documentId: plan.documentId, title: plan.title, pullRequestUrl: created.url }) || null
+}
+
 async function loadVerdict($: Api, documentId: string): Promise<Verdict | null> {
   const stored = (await $.store.get(storedVerdictFor(documentId))) as Partial<Verdict> | undefined
   if (!stored || stored.documentId !== documentId || !isVerdictState(stored.state)) return null
@@ -1177,7 +1255,7 @@ export const register: Register = on => {
           'Listen to an Unpaged canvas for @agent comments in this session: mints the listener key where the permission rules let the plugin (otherwise its answer asks you to call agent_listener_key_create, and the plugin takes the key from that), keeps it, and polls from inside Claude Code. New comments arrive as a message from the unpaged plugin. Pass the documentId (and the title for the band).',
         inputSchema: {
           type: 'object',
-          properties: { documentId: { type: 'string' }, title: { type: 'string' } },
+          properties: { documentId: { type: 'string' }, title: { type: 'string' }, plan: { type: 'boolean' } },
           required: ['documentId'],
         },
       })
@@ -1251,8 +1329,11 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__unpaged__listen_arm' }, async ($, e) => {
-    const input = e as unknown as { documentId?: string; title?: string }
+    const input = e as unknown as { documentId?: string; title?: string; plan?: boolean }
     const documentId = text(input.documentId)
+    if (input.plan === true && isDocumentId(documentId)) {
+      await rememberBranchPlan($, documentId, text(input.title) || null)
+    }
     try {
       const rule = isDocumentId(documentId) && !loops.has(documentId) && !arming.has(documentId) ? await mintRule($, documentId) : 'allow'
       if (rule === 'deny') return { result: MINT_DENIED }
@@ -1309,6 +1390,9 @@ export const register: Register = on => {
       if (!created) return ran
       documentId = created.id
       title = created.title || text(input.title) || null
+      if (e.tool.endsWith('__document_create') && text(input.folderId) === 'visual-plans') {
+        await rememberBranchPlan($, documentId, title)
+      }
     }
     if (!isDocumentId(documentId) || armedBefore.has(documentId) || offered.has(documentId) || arming.has(documentId) || loops.has(documentId)) return ran
     const rule = await mintRule($, documentId)
@@ -1327,6 +1411,9 @@ export const register: Register = on => {
   on('tool.call', { tool: unpagedTool(['document_delete']) }, async ($, e, next) => {
     const ran = await next(e)
     const documentId = text((e as unknown as Record<string, unknown>).documentId)
+    if (ran.deny === undefined && ran.isError !== true) {
+      await forgetBranchPlan($, documentId).catch(() => undefined)
+    }
     if (ran.deny === undefined && ran.isError !== true && (canvases.has(documentId) || arming.has(documentId))) {
       // Mid-mint, wait for the canvas to be recorded; once it is, stop it at once.
       const recorded = canvases.has(documentId) ? undefined : arming.get(documentId)?.catch(() => undefined)
@@ -1335,6 +1422,24 @@ export const register: Register = on => {
         .catch(() => undefined)
     }
     return ran
+  })
+
+  // When a pull request is opened on a branch that has a visual plan recorded
+  // in the plugin's store, add one context line so the agent attaches its Can
+  // view join link and preview in the same turn. Submits no prompt and starts
+  // no comparison turn.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    const command = text((e as unknown as { command?: unknown }).command)
+    if (!PR_CREATE_COMMAND.test(command)) return ran
+    const line = await prPreviewContextForResult($, 'Bash', command, ran).catch(() => null)
+    return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
+  })
+
+  on('tool.call', { tool: GITHUB_PR_CREATE_TOOL }, async ($, e, next) => {
+    const ran = await next(e)
+    const line = await prPreviewContextForResult($, String(e.tool), '', ran).catch(() => null)
+    return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
   })
 
   // A key the agent or another plugin mints by hand. For a canvas this session

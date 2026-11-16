@@ -818,3 +818,78 @@ describe('where the permission rules keep the plugin from revoking on its own', 
     expect(w.store.has(STORED)).toBe(false)
   })
 })
+
+describe('pull request previews for visual plans', () => {
+  const PR_URL = 'https://github.com/acme/shop-api/pull/77'
+
+  function gitBranch(on: Parameters<typeof world>[0], w: World, branch = 'feat/pr-preview', worktree = false) {
+    if (worktree) {
+      w.files.set('/repo/.git', 'gitdir: /main-repo/.git/worktrees/wt\n')
+      w.files.set('/main-repo/.git/worktrees/wt/HEAD', `ref: refs/heads/${branch}\n`)
+    } else {
+      w.files.set('/repo/.git', '')
+      w.files.set('/repo/.git/HEAD', `ref: refs/heads/${branch}\n`)
+    }
+    on('tool.call', { tool: 'Bash' }, (_$, e) => {
+      const cmd = String((e as unknown as { command?: string }).command ?? '')
+      if (cmd.includes('--dry-run')) {
+        return { result: `Would have created a Pull Request with:\n${PR_URL}`, text: `Would have created a Pull Request with:\n${PR_URL}` } as never
+      }
+      return { result: `${PR_URL}\n`, text: `${PR_URL}\n` } as never
+    })
+    on('tool.call', { tool: 'mcp__plugin_github__create_pull_request' }, () => {
+      return { result: [{ type: 'text', text: JSON.stringify({ html_url: PR_URL }) }], text: PR_URL } as never
+    })
+  }
+
+  test('records a visual plan per repository branch and adds context in the same turn when gh pr create or a GitHub PR tool opens a PR', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    gitBranch(on, w)
+
+    // Non-plan document_create (no folderId: "visual-plans") records no branch plan.
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Notes' } as never)
+    const noPlanRan = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Notes" --body "Body"' } as never)
+    expect((noPlanRan as { context?: string[] }).context).toBeUndefined()
+
+    // Visual plan creation records the branch plan without running Node or writing files.
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'shop-api: Rate limiting', folderId: 'visual-plans' } as never)
+    expect(w.store.get('plan:/repo\nfeat/pr-preview')).toEqual(
+      expect.objectContaining({ documentId: SECOND, title: 'shop-api: Rate limiting', branch: 'feat/pr-preview' }),
+    )
+    expect(w.files.size).toBe(2)
+
+    // --dry-run adds no context.
+    const dry = await $.tool.call({ tool: 'Bash', command: 'gh pr create --dry-run --title "Feat"' } as never)
+    expect((dry as { context?: string[] }).context).toBeUndefined()
+
+    // Real gh pr create attaches the instructions in context without submitting a separate prompt.
+    const created = await $.tool.call({ tool: 'Bash', command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' } as never)
+    const ctx = (created as { context?: string[] }).context ?? []
+    expect(ctx).toHaveLength(1)
+    expect(ctx[0]).toContain(SECOND)
+    expect(ctx[0]).toContain(PR_URL)
+    expect(ctx[0]).toContain('role "viewer"')
+    expect(w.calls.submits).toEqual([])
+
+    // GitHub connector PR tool receives the same context.
+    const mcpCreated = await $.tool.call({ tool: 'mcp__plugin_github__create_pull_request', title: 'Feat' } as never)
+    expect(((mcpCreated as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
+
+    // Deleting the plan canvas clears the branch-plan entry.
+    await $.tool.call({ tool: 'mcp__unpaged__document_delete', documentId: SECOND } as never)
+    expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(false)
+  })
+
+  test('resolves git worktree .git pointer files and records on listen_arm with plan: true', async ($, on) => {
+    const w = world(on)
+    gitBranch(on, w, 'feat/worktree-plan', true)
+
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Worktree plan', plan: true } as never)
+    expect(w.store.get('plan:/repo\nfeat/worktree-plan')).toEqual(
+      expect.objectContaining({ documentId: DOCUMENT, title: 'Worktree plan', branch: 'feat/worktree-plan' }),
+    )
+    const created = await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
+    expect(((created as { context?: string[] }).context ?? [])[0]).toContain(DOCUMENT)
+  })
+})
