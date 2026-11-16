@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AMBIGUOUS_PR_SECTION_MESSAGE,
   PR_SECTION_END,
   PR_SECTION_START,
   escapeMarkdownText,
   extractCreatedPullRequest,
+  normalizePullRequestHeadRef,
   parseGitHeadBranch,
   parseJoinLinkUrls,
   planStoreKey,
@@ -245,24 +247,47 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
     documentId: DOC_1,
     title: 'shop-api: `$(touch /tmp/pwn)` "Rate limiting"',
     pullRequestUrl: "https://github.com/acme/shop/pull/42",
+    branch: "feat/rate-limit",
+    spliceScript: "/opt/unpaged/monitors/plans.mjs",
   });
   assert.ok(ctx.includes(DOC_1));
   assert.ok(ctx.includes('role "viewer"'));
   assert.ok(ctx.includes("https://github.com/acme/shop/pull/42"));
   assert.ok(ctx.includes("never pass a canvas title on a shell command line"));
+  assert.ok(ctx.includes('node "/opt/unpaged/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
+  assert.ok(ctx.includes('--json headRefName --jq .headRefName'));
+  assert.ok(ctx.includes('"feat/rate-limit"'));
+  assert.ok(ctx.includes("only if it is about this pull request's work"));
+  assert.ok(ctx.includes("reason splice printed on stderr"));
+
+  const detachedCtx = prPlanAttachContext({
+    documentId: DOC_1,
+    title: "Detached plan",
+    pullRequestUrl: "https://github.com/acme/shop/pull/43",
+    branch: null,
+    spliceScript: "/opt/unpaged/monitors/plans.mjs",
+  });
+  assert.ok(!detachedCtx.includes("headRefName"));
+  assert.equal(normalizePullRequestHeadRef("acme:docs/rate-limit"), "docs/rate-limit");
+  assert.equal(normalizePullRequestHeadRef("refs/heads/feat/x"), "feat/x");
+  assert.equal(normalizePullRequestHeadRef(""), null);
   assert.ok(planStoreKey("/repo", "feat/x")?.startsWith("plan:/repo\nfeat/x"));
 });
 
-test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plans, rejects 0-byte stdin, and splices PR bodies", async () => {
+test("plans.mjs CLI spends plans once on check, handles branch renames and detached HEADs, expires stale entries after 14 days, and prints clear splice stderr reasons", async () => {
   await withTempDir(async (dir) => {
     const home = join(dir, "home");
     const repo = join(dir, "repo");
+    const otherRepo = join(dir, "other-repo");
     const subDir = join(repo, "packages", "api");
     await mkdir(join(repo, ".git", "refs", "remotes", "origin"), { recursive: true });
+    await mkdir(join(otherRepo, ".git"), { recursive: true });
     await mkdir(subDir, { recursive: true });
     await writeFile(join(repo, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/develop\n", "utf8");
+    await writeFile(join(otherRepo, ".git", "HEAD"), "ref: refs/heads/feat/other-repo\n", "utf8");
 
     const env = { ...process.env, HOME: home, USERPROFILE: home, UNPAGED_PREVIEW_VERSION: "1763281234" };
+    const planDir = join(home, ".claude", "unpaged", "plans");
 
     // Planning on the remote default branch (`develop`) records a pending entry without polluting `develop`.
     await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/develop\n", "utf8");
@@ -273,30 +298,61 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
     });
     assert.equal(pendingRec.status, 0);
     assert.equal(pendingRec.stdout.trim(), "recorded pending-branch");
+
+    const pendingFiles = await readdir(planDir);
+    assert.equal(pendingFiles.length, 1);
+    if (process.platform !== "win32") {
+      const st = await stat(join(planDir, pendingFiles[0]));
+      assert.equal(st.mode & 0o777, 0o600);
+    }
+
     const onDefaultChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
     assert.equal(onDefaultChk.stdout.trim(), "missing");
 
-    // Switching to a feature branch promotes the pending plan once and leaves `develop` clean.
+    // Another repository never sees this checkout's pending plan.
+    const otherRepoChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: otherRepo, env, encoding: "utf8" });
+    assert.equal(otherRepoChk.stdout.trim(), "missing");
+
+    // Switching to a feature branch consumes and spends the pending plan once.
     await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
     const promotedChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: subDir, env, encoding: "utf8" });
     assert.equal(promotedChk.status, 0);
     assert.equal(promotedChk.stdout.trim(), `plan ${DOC_1}`);
+    assert.equal((await readdir(planDir)).length, 0);
 
-    const planDir = join(home, ".claude", "unpaged", "plans");
-    const files = await readdir(planDir);
-    assert.equal(files.length, 1);
-    if (process.platform !== "win32") {
-      const st = await stat(join(planDir, files[0]));
-      assert.equal(st.mode & 0o777, 0o600);
-    }
-
-    // Switching to a second unrelated feature branch does NOT inherit the consumed pending plan.
+    // Reusing `feat/pr-preview` or switching to another branch after spending gets `missing`.
+    const reusedChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(reusedChk.stdout.trim(), "missing");
     await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/other\n", "utf8");
     const otherChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
     assert.equal(otherChk.stdout.trim(), "missing");
-    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
 
-    // Worktree with `.git` pointer file resolves its own branch cleanly.
+    // Branch rename (`claude/<folder>` -> `feat/descriptive`) keeps the plan for one use, then spends both files.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/claude/session-wt\n", "utf8");
+    const renameRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(renameRec.stdout.trim(), "recorded claude/session-wt");
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/descriptive\n", "utf8");
+    const afterRenameChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(afterRenameChk.stdout.trim(), `plan ${DOC_1}`);
+    assert.equal((await readdir(planDir)).length, 0);
+    const secondAfterRename = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(secondAfterRename.stdout.trim(), "missing");
+
+    // Unused branch record older than 14 days expires on lookup instead of attaching to a reused branch name.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/typo\n", "utf8");
+    spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1], { cwd: repo, env, encoding: "utf8" });
+    const staleStamp = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    for (const f of await readdir(planDir)) {
+      const p = join(planDir, f);
+      const raw = JSON.parse(await (await import("node:fs/promises")).readFile(p, "utf8"));
+      raw.updatedAt = staleStamp;
+      await writeFile(p, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+    }
+    const staleChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(staleChk.stdout.trim(), "missing");
+    assert.equal((await readdir(planDir)).length, 0);
+
+    // Worktree with `.git` pointer file resolves its own branch cleanly, and `forget` removes matching documentId.
     const worktree = join(dir, "wt");
     const wtGitDir = join(dir, "main-git", "worktrees", "wt");
     await mkdir(worktree, { recursive: true });
@@ -311,10 +367,12 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
     });
     assert.equal(wtRec.status, 0);
     assert.equal(wtRec.stdout.trim(), "recorded feat/wt-branch");
-    const wtChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
-    assert.equal(wtChk.stdout.trim(), `plan ${DOC_2}`);
+    const forgot = spawnSync(process.execPath, [PLANS_SCRIPT, "forget", DOC_2], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(forgot.stdout.trim(), "forgotten 2");
+    const chkAfterForget = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(chkAfterForget.stdout.trim(), "missing");
 
-    // Detached HEAD and Git reftable `.invalid` HEAD stubs skip without writing a permanent record.
+    // Detached HEAD and Git reftable `.invalid` HEAD stubs write only a one-shot pending entry (never a permanent `.invalid` branch record).
     await writeFile(join(wtGitDir, "HEAD"), "0123456789abcdef0123456789abcdef01234567\n", "utf8");
     const detachedRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
       cwd: worktree,
@@ -322,7 +380,11 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
       encoding: "utf8",
     });
     assert.equal(detachedRec.status, 0);
-    assert.equal(detachedRec.stdout.trim(), "skipped no-branch");
+    assert.equal(detachedRec.stdout.trim(), "recorded pending-branch");
+    const detachedFirstChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(detachedFirstChk.stdout.trim(), `plan ${DOC_2}`);
+    const detachedSecondChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(detachedSecondChk.stdout.trim(), "missing");
 
     await writeFile(join(wtGitDir, "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
     const reftableRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
@@ -331,11 +393,13 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
       encoding: "utf8",
     });
     assert.equal(reftableRec.status, 0);
-    assert.equal(reftableRec.stdout.trim(), "skipped no-branch");
-    const reftableChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
-    assert.equal(reftableChk.stdout.trim(), "missing");
+    assert.equal(reftableRec.stdout.trim(), "recorded pending-branch");
+    const reftableFirstChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(reftableFirstChk.stdout.trim(), `plan ${DOC_2}`);
+    const reftableSecondChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
+    assert.equal(reftableSecondChk.stdout.trim(), "missing");
 
-    // 0-byte stdin (e.g. failed `gh pr view`) exits 1 so an existing PR description is never wiped.
+    // 0-byte stdin, bad url vs bad previewUrl, and unpaired markers print distinct human-readable stderr messages.
     const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
       cwd: repo,
       env,
@@ -344,6 +408,34 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
     });
     assert.equal(emptyStdin.status, 1);
     assert.equal(emptyStdin.stdout, "");
+    assert.ok(emptyStdin.stderr.includes("0 bytes received"));
+
+    const badUrl = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", "http://localhost/join/abc", PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: "Body\n",
+      encoding: "utf8",
+    });
+    assert.equal(badUrl.status, 1);
+    assert.ok(badUrl.stderr.includes("url must be"));
+
+    const badPreview = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, "https://evil.example.com/p.png"], {
+      cwd: repo,
+      env,
+      input: "Body\n",
+      encoding: "utf8",
+    });
+    assert.equal(badPreview.status, 1);
+    assert.ok(badPreview.stderr.includes("previewUrl must be"));
+
+    const strayMarker = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: `Intro\n${PR_SECTION_START}\nUnclosed section\n`,
+      encoding: "utf8",
+    });
+    assert.equal(strayMarker.status, 1);
+    assert.ok(strayMarker.stderr.includes(AMBIGUOUS_PR_SECTION_MESSAGE));
 
     // Empty PR body from `gh pr view --json body --jq .body` arrives as "\n" and succeeds.
     const newlineOnly = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
@@ -369,11 +461,5 @@ test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plan
       )
     );
     assert.ok(spliced.stdout.includes(`${PREVIEW_URL}?v=1763281234`));
-
-    // Forget removes matching documentId only.
-    const forgot = spawnSync(process.execPath, [PLANS_SCRIPT, "forget", DOC_1], { cwd: repo, env, encoding: "utf8" });
-    assert.equal(forgot.stdout.trim(), "forgotten 1");
-    const chkAfter = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
-    assert.equal(chkAfter.stdout.trim(), "missing");
   });
 });

@@ -389,8 +389,10 @@ branch with a recorded visual plan has or opens a GitHub pull request, the agent
 writes that canvas's **Can view** `/join/<token>` link and `/join/<token>/preview.png`
 image URL into the pull request description via `gh pr edit` (on public repositories,
 anyone reading the pull request can view the canvas through that link and GitHub's
-image proxy fetches the preview picture; revoking the team link in Unpaged disables
-access). Only the legacy CLI supports
+image proxy fetches the preview picture; revoking the team link in Unpaged's Share dialog
+stops anyone new from joining through it and turns the preview into Unpaged's generic
+card; people who already opened it keep Can view until you remove them from the
+collaborator list in the same dialog). Only the legacy CLI supports
 `--data` for isolated tests or explicitly approved host maintenance. The local
 tool never accepts a data-path override.
 

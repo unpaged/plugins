@@ -183,10 +183,22 @@ export async function executeCli(argv, options = {}) {
   const allowed = ["doctor", "arm", "resume", "status", "pending", "begin", "complete", "accept", "submit", "approve", "execute", "checkpoint", "built", "stop", "revoked", "reconcile", "recover", "session-start", "plan_record", "plan_lookup", "pr_splice"];
   if (!allowed.includes(args.command)) fail("unknown_command");
   if (Number(process.versions.node.split(".")[0]) < 24) fail("node_24_required");
-  if (args.command === "plan_lookup") return await lookupBranchPlan({ dataDir: directory, cwd: options.cwd ?? process.cwd() });
+  if (args.command === "plan_lookup") {
+    return await lookupBranchPlan({
+      dataDir: directory,
+      cwd: options.cwd ?? process.cwd(),
+      threadId: env.CODEX_THREAD_ID || "",
+    });
+  }
   if (args.command === "plan_record") {
     const payload = await readJson(input);
-    return await recordBranchPlan({ dataDir: directory, cwd: options.cwd ?? process.cwd(), documentId: args.positionals[0], title: payload?.title ?? "" });
+    return await recordBranchPlan({
+      dataDir: directory,
+      cwd: options.cwd ?? process.cwd(),
+      threadId: env.CODEX_THREAD_ID || "",
+      documentId: args.positionals[0],
+      title: payload?.title ?? "",
+    });
   }
   if (args.command === "pr_splice") return buildSplicedPrBody(await readJson(input));
   if (args.command === "doctor") return (await checkSetup(args.codex, options, env)).report;

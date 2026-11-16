@@ -17,7 +17,11 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDocumentId } from "./listen-core.mjs";
 import {
+  AMBIGUOUS_PR_SECTION_MESSAGE,
+  BRANCH_PLAN_MAX_AGE_MS,
+  describeJoinLinkError,
   isDefaultBranchName,
+  isPlanRecordFresh,
   normalizePlanRecord,
   parseGitHeadBranch,
   parseJoinLinkUrls,
@@ -104,7 +108,13 @@ export async function resolveRepositoryBranch(startDir, fs = { readFile, stat })
       if (!gitDir) return null;
       const headRaw = await fs.readFile(join(gitDir, "HEAD"), "utf8");
       const branch = parseGitHeadBranch(headRaw);
-      if (!branch) return null;
+      if (!branch) {
+        return {
+          repoTopLevel: folder,
+          branch: null,
+          isDefaultBranch: false,
+        };
+      }
       const defaultBranch = await readOriginDefaultBranch(gitDir, fs);
       return {
         repoTopLevel: folder,
@@ -130,6 +140,27 @@ async function writeAtomicJson(fileName, value) {
   await rename(tmp, target);
 }
 
+async function removePlansForDocument(documentId) {
+  let names = [];
+  try {
+    names = await readdir(planDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const full = join(planDir, name);
+    try {
+      const parsed = JSON.parse(await readFile(full, "utf8"));
+      if (parsed && typeof parsed === "object" && parsed.documentId === documentId) {
+        await rm(full, { force: true }).catch(() => {});
+      }
+    } catch {
+      // Leave unreadable or non-matching files untouched.
+    }
+  }
+}
+
 async function recordPlan(documentId) {
   if (!isDocumentId(documentId)) {
     say("error not a document id");
@@ -141,43 +172,33 @@ async function recordPlan(documentId) {
     return 0;
   }
   const updatedAt = new Date().toISOString();
-  if (branchCtx.isDefaultBranch) {
-    const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
-    if (!pendingName) {
-      say("skipped no-branch");
-      return 0;
-    }
-    try {
+  const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
+  try {
+    if (pendingName) {
       await writeAtomicJson(pendingName, {
         documentId,
         repoTopLevel: branchCtx.repoTopLevel,
         updatedAt,
       });
-      say("recorded pending-branch");
-      return 0;
-    } catch (error) {
-      const code = error && typeof error.code === "string" ? error.code : "write-failed";
-      say(`error ${code}`);
-      return 1;
     }
-  }
+    if (!branchCtx.branch || branchCtx.isDefaultBranch) {
+      say(pendingName ? "recorded pending-branch" : "skipped no-branch");
+      return 0;
+    }
 
-  const record = normalizePlanRecord({
-    documentId,
-    title: "",
-    repoTopLevel: branchCtx.repoTopLevel,
-    branch: branchCtx.branch,
-    updatedAt,
-  });
-  const fileName = record ? planFileName(record.repoTopLevel, record.branch) : null;
-  if (!record || !fileName) {
-    say("skipped no-branch");
-    return 0;
-  }
-  try {
+    const record = normalizePlanRecord({
+      documentId,
+      title: "",
+      repoTopLevel: branchCtx.repoTopLevel,
+      branch: branchCtx.branch,
+      updatedAt,
+    });
+    const fileName = record ? planFileName(record.repoTopLevel, record.branch) : null;
+    if (!record || !fileName) {
+      say(pendingName ? "recorded pending-branch" : "skipped no-branch");
+      return 0;
+    }
     await writeAtomicJson(fileName, record);
-    const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
-    if (pendingName) await rm(join(planDir, pendingName), { force: true }).catch(() => {});
     say(`recorded ${record.branch}`);
     return 0;
   } catch (error) {
@@ -187,9 +208,9 @@ async function recordPlan(documentId) {
   }
 }
 
-async function promotePendingPlan(branchCtx) {
+async function consumePendingPlan(branchCtx) {
   const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
-  if (!pendingName) return null;
+  if (!pendingName) return { documentId: null, error: null };
   const pendingPath = join(planDir, pendingName);
   try {
     const parsed = JSON.parse(await readFile(pendingPath, "utf8"));
@@ -199,27 +220,18 @@ async function promotePendingPlan(branchCtx) {
       !isDocumentId(parsed.documentId) ||
       parsed.repoTopLevel !== branchCtx.repoTopLevel
     ) {
-      return null;
+      return { documentId: null, error: null };
     }
-    const ageMs = Date.now() - Date.parse(String(parsed.updatedAt || ""));
-    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > PENDING_PLAN_MAX_AGE_MS) {
+    if (!isPlanRecordFresh(parsed.updatedAt, PENDING_PLAN_MAX_AGE_MS)) {
       await rm(pendingPath, { force: true }).catch(() => {});
-      return null;
+      return { documentId: null, error: null };
     }
-    const promoted = normalizePlanRecord({
-      documentId: parsed.documentId,
-      title: "",
-      repoTopLevel: branchCtx.repoTopLevel,
-      branch: branchCtx.branch,
-      updatedAt: new Date().toISOString(),
-    });
-    const fileName = promoted ? planFileName(promoted.repoTopLevel, promoted.branch) : null;
-    if (!promoted || !fileName) return null;
-    await writeAtomicJson(fileName, promoted);
+    await removePlansForDocument(parsed.documentId);
     await rm(pendingPath, { force: true }).catch(() => {});
-    return promoted;
-  } catch {
-    return null;
+    return { documentId: parsed.documentId, error: null };
+  } catch (error) {
+    if (error && error.code === "ENOENT") return { documentId: null, error: null };
+    return { documentId: null, error };
   }
 }
 
@@ -229,34 +241,41 @@ async function checkPlan() {
     say("missing");
     return 0;
   }
-  const fileName = planFileName(branchCtx.repoTopLevel, branchCtx.branch);
-  if (!fileName) {
-    say("missing");
-    return 0;
+  const fileName = branchCtx.branch ? planFileName(branchCtx.repoTopLevel, branchCtx.branch) : null;
+  if (fileName) {
+    const filePath = join(planDir, fileName);
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const parsed = normalizePlanRecord(JSON.parse(raw));
+      if (
+        parsed &&
+        parsed.repoTopLevel === branchCtx.repoTopLevel &&
+        parsed.branch === branchCtx.branch
+      ) {
+        if (isPlanRecordFresh(parsed.updatedAt, BRANCH_PLAN_MAX_AGE_MS)) {
+          await removePlansForDocument(parsed.documentId);
+          await rm(filePath, { force: true }).catch(() => {});
+          say(`plan ${parsed.documentId}`);
+          return 0;
+        }
+        await rm(filePath, { force: true }).catch(() => {});
+      }
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") {
+        const code = error && typeof error.code === "string" ? error.code : "read-failed";
+        say(`error ${code}`);
+        return 1;
+      }
+    }
   }
-  try {
-    const raw = await readFile(join(planDir, fileName), "utf8");
-    const parsed = normalizePlanRecord(JSON.parse(raw));
-    if (
-      !parsed ||
-      parsed.repoTopLevel !== branchCtx.repoTopLevel ||
-      parsed.branch !== branchCtx.branch
-    ) {
-      say("missing");
-      return 0;
-    }
-    say(`plan ${parsed.documentId}`);
-    return 0;
-  } catch (error) {
-    if (error && error.code === "ENOENT") {
-      const promoted = await promotePendingPlan(branchCtx);
-      say(promoted ? `plan ${promoted.documentId}` : "missing");
-      return 0;
-    }
-    const code = error && typeof error.code === "string" ? error.code : "read-failed";
+  const pending = await consumePendingPlan(branchCtx);
+  if (pending.error) {
+    const code = pending.error && typeof pending.error.code === "string" ? pending.error.code : "read-failed";
     say(`error ${code}`);
     return 1;
   }
+  say(pending.documentId ? `plan ${pending.documentId}` : "missing");
+  return 0;
 }
 
 async function forgetPlan(target) {
@@ -297,7 +316,7 @@ async function forgetPlan(target) {
 async function spliceFromStdin(url, previewUrl) {
   const validated = parseJoinLinkUrls({ url, previewUrl });
   if (!validated) {
-    process.stderr.write("plans.mjs splice: url must be an Unpaged https /join/<token> link\n");
+    process.stderr.write(`plans.mjs splice: ${describeJoinLinkError({ url, previewUrl })}\n`);
     return 1;
   }
   if (process.stdin.isTTY) {
@@ -323,7 +342,8 @@ async function spliceFromStdin(url, previewUrl) {
     process.stdout.write(splicePrPlanSection(existingBody, section));
     return 0;
   } catch (error) {
-    const reason = error && error.message ? error.message : String(error);
+    const rawReason = error && error.message ? error.message : String(error);
+    const reason = rawReason === "ambiguous_pr_plan_section" ? AMBIGUOUS_PR_SECTION_MESSAGE : rawReason;
     process.stderr.write(`plans.mjs splice: ${reason}\n`);
     return 1;
   }

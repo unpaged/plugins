@@ -842,7 +842,7 @@ describe('pull request previews for visual plans', () => {
     })
   }
 
-  test('records a visual plan per repository branch and adds context in the same turn when gh pr create or a GitHub PR tool opens a PR', async ($, on) => {
+  test('records a visual plan per repository branch, ignores cross-repo GitHub tool heads, spells out monitors/plans.mjs splice, and spends each plan once', async ($, on) => {
     const w = world(on)
     unpagedServer(on)
     gitBranch(on, w)
@@ -859,26 +859,56 @@ describe('pull request previews for visual plans', () => {
     )
     expect(w.files.size).toBe(2)
 
-    // --dry-run adds no context.
+    // --dry-run adds no context and leaves the plan unspent.
     const dry = await $.tool.call({ tool: 'Bash', command: 'gh pr create --dry-run --title "Feat"' } as never)
     expect((dry as { context?: string[] }).context).toBeUndefined()
 
-    // Real gh pr create attaches the instructions in context without submitting a separate prompt.
+    // A GitHub PR tool targeting another repository/branch (`head` != current branch) adds no context and leaves the plan unspent.
+    const wrongHead = await $.tool.call({
+      tool: 'mcp__plugin_github__create_pull_request',
+      owner: 'acme',
+      repo: 'public-docs',
+      head: 'acme:docs/rate-limit',
+      title: 'Docs',
+    } as never)
+    expect((wrongHead as { context?: string[] }).context).toBeUndefined()
+    expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(true)
+
+    // Real gh pr create attaches the instructions (with plans.mjs splice path, headRefName guard, and fit check) and spends the plan.
     const created = await $.tool.call({ tool: 'Bash', command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' } as never)
     const ctx = (created as { context?: string[] }).context ?? []
     expect(ctx).toHaveLength(1)
     expect(ctx[0]).toContain(SECOND)
     expect(ctx[0]).toContain(PR_URL)
     expect(ctx[0]).toContain('role "viewer"')
+    expect(ctx[0]).toContain('/monitors/plans.mjs" splice "<url>" "<previewUrl>"')
+    expect(ctx[0]).toContain('--json headRefName --jq .headRefName')
+    expect(ctx[0]).toContain('"feat/pr-preview"')
+    expect(ctx[0]).toContain("only if it is about this pull request's work")
     expect(w.calls.submits).toEqual([])
-
-    // GitHub connector PR tool receives the same context.
-    const mcpCreated = await $.tool.call({ tool: 'mcp__plugin_github__create_pull_request', title: 'Feat' } as never)
-    expect(((mcpCreated as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
-
-    // Deleting the plan canvas clears the branch-plan entry.
-    await $.tool.call({ tool: 'mcp__unpaged__document_delete', documentId: SECOND } as never)
     expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(false)
+
+    // Reusing `feat/pr-preview` later without a new plan gets nothing.
+    const reused = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Reused" --body "Body"' } as never)
+    expect((reused as { context?: string[] }).context).toBeUndefined()
+
+    // GitHub connector PR tool on the matching branch attaches and spends its plan too.
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'MCP PR plan', plan: true } as never)
+    const mcpCreated = await $.tool.call({
+      tool: 'mcp__plugin_github__create_pull_request',
+      head: 'feat/pr-preview',
+      title: 'Feat',
+    } as never)
+    expect(((mcpCreated as { context?: string[] }).context ?? [])[0]).toContain(DOCUMENT)
+    expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(false)
+
+    // Deleting an unspent plan canvas clears its branch-plan entry and session fallback.
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: THIRD, title: 'Deleted plan', plan: true } as never)
+    expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(true)
+    await $.tool.call({ tool: 'mcp__unpaged__document_delete', documentId: THIRD } as never)
+    expect(w.store.has('plan:/repo\nfeat/pr-preview')).toBe(false)
+    const afterDelete = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "After delete" --body "Body"' } as never)
+    expect((afterDelete as { context?: string[] }).context).toBeUndefined()
   })
 
   test('resolves git worktree .git pointer files and records on listen_arm with plan: true', async ($, on) => {
@@ -891,9 +921,10 @@ describe('pull request previews for visual plans', () => {
     )
     const created = await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
     expect(((created as { context?: string[] }).context ?? [])[0]).toContain(DOCUMENT)
+    expect(w.store.has('plan:/repo\nfeat/worktree-plan')).toBe(false)
   })
 
-  test('a plan created on main stays in session memory without polluting main and promotes onto a newly created feature branch on gh pr create', async ($, on) => {
+  test('a plan created on main stays in session memory without polluting main and spends once on a feature branch PR', async ($, on) => {
     const w = world(on)
     unpagedServer(on)
     gitBranch(on, w, 'main')
@@ -902,13 +933,11 @@ describe('pull request previews for visual plans', () => {
     await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Planned before branching', folderId: 'visual-plans' } as never)
     expect(w.store.has('plan:/repo\nmain')).toBe(false)
 
-    // Switch to a new feature branch and open the PR -> attaches and promotes onto feat/from-main.
+    // Switch to a new feature branch and open the PR -> attaches once and leaves no stale branch entry behind.
     w.files.set('/repo/.git/HEAD', 'ref: refs/heads/feat/from-main\n')
     const created = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Feat" --body "Body"' } as never)
     expect(((created as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
-    expect(w.store.get('plan:/repo\nfeat/from-main')).toEqual(
-      expect.objectContaining({ documentId: SECOND, branch: 'feat/from-main' }),
-    )
+    expect(w.store.has('plan:/repo\nfeat/from-main')).toBe(false)
     expect(w.store.has('plan:/repo\nmain')).toBe(false)
 
     // A second PR from an unrelated branch in the same session does NOT inherit the consumed session plan.
@@ -916,6 +945,47 @@ describe('pull request previews for visual plans', () => {
     const unrelated = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Fix typo" --body "Body"' } as never)
     expect((unrelated as { context?: string[] }).context).toBeUndefined()
     expect(w.store.has('plan:/repo\nfix/readme-typo')).toBe(false)
+  })
+
+  test('a plan made on claude/<folder> survives git branch -m for one PR, never crosses repositories, and expires after 14 days if unused', async ($, on) => {
+    const settings = { cwd: '/repo', keyRule: 'deny' as const }
+    const w = world(on, settings)
+    unpagedServer(on)
+    gitBranch(on, w, 'claude/session-wt')
+    w.files.set('/other-repo/.git', '')
+    w.files.set('/other-repo/.git/HEAD', 'ref: refs/heads/feat/other\n')
+
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: DOCUMENT, title: 'Renamed branch plan', plan: true } as never)
+    expect(w.store.has('plan:/repo\nclaude/session-wt')).toBe(true)
+
+    // Different repoTopLevel gets nothing and does not spend `/repo`'s plan.
+    settings.cwd = '/other-repo'
+    const otherRepoPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Other" --body "Body"' } as never)
+    expect((otherRepoPr as { context?: string[] }).context).toBeUndefined()
+    settings.cwd = '/repo'
+
+    // Rename `claude/session-wt` -> `feat/descriptive` (`git branch -m`), then open PR -> attaches once and clears old branch key too.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/feat/descriptive\n')
+    const renamedPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Descriptive" --body "Body"' } as never)
+    expect(((renamedPr as { context?: string[] }).context ?? [])[0]).toContain(DOCUMENT)
+    expect(((renamedPr as { context?: string[] }).context ?? [])[0]).toContain('"feat/descriptive"')
+    expect(w.store.has('plan:/repo\nclaude/session-wt')).toBe(false)
+    expect(w.store.has('plan:/repo\nfeat/descriptive')).toBe(false)
+
+    // A second PR from another branch gets nothing.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/fix/later\n')
+    const secondPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Later" --body "Body"' } as never)
+    expect((secondPr as { context?: string[] }).context).toBeUndefined()
+
+    // An unused branch record older than 14 days expires instead of resurfacing on a reused branch name in a later session.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/fix/typo\n')
+    await $.tool.call({ tool: 'mcp__unpaged__listen_arm', documentId: THIRD, title: 'Old typo plan', plan: true } as never)
+    expect(w.store.has('plan:/repo\nfix/typo')).toBe(true)
+    await $.classic.SessionStart({ source: 'resume' } as never)
+    await w.clock.advance(15 * 24 * 60 * 60 * 1000)
+    const expiredPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "New typo" --body "Body"' } as never)
+    expect((expiredPr as { context?: string[] }).context).toBeUndefined()
+    expect(w.store.has('plan:/repo\nfix/typo')).toBe(false)
   })
 
   test('a feature-branch plan never leaks onto a later unrelated branch and /resume clears an unpromoted session plan', async ($, on) => {
@@ -954,6 +1024,7 @@ describe('pull request previews for visual plans', () => {
 
     const firstPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "First" --body "Body"' } as never)
     expect(((firstPr as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
+    expect(((firstPr as { context?: string[] }).context ?? [])[0]).not.toContain('headRefName')
     expect([...w.store.keys()].filter(k => k.startsWith('plan:'))).toEqual([])
 
     const secondPr = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Second" --body "Body"' } as never)

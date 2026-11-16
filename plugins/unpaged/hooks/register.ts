@@ -44,11 +44,14 @@ import {
 import { runListener } from '../monitors/listen-loop.mjs'
 import { MAX_POLL_BYTES, byteLength, failure, isTerminalStatus, parseEnvelope, pollCadence, pollRequest } from '../monitors/poll-core.mjs'
 import {
+  BRANCH_PLAN_MAX_AGE_MS,
   GITHUB_PR_CREATE_TOOL,
   PR_CREATE_COMMAND,
   extractCreatedPullRequest,
   isDefaultBranchName,
+  isPlanRecordFresh,
   normalizePlanRecord,
+  normalizePullRequestHeadRef,
   parseGitHeadBranch,
   parseOriginHeadBranch,
   planStoreKey,
@@ -937,18 +940,13 @@ async function rememberBranchPlan($: Api, documentId: string, title: string | nu
   const where = await repositoryBranch($)
   if (!where) return
   const cleanTitle = (title ?? '').replace(/[\r\n\t]+/g, ' ').trim()
-  // Keep `sessionPlan` only as a one-shot fallback when the plan was made on the
-  // default branch or a detached HEAD. A plan made on a feature branch already
-  // has its own branch-keyed entry and must never spill onto a later branch's PR.
-  if (!where.branch || where.isDefaultBranch) {
-    currentSessionPlan = { repoTopLevel: where.repoTopLevel, documentId, title: cleanTitle }
-    await update($, sessionPlan, () => currentSessionPlan).catch(() => undefined)
-    return
-  }
-  if (currentSessionPlan) {
-    currentSessionPlan = null
-    await update($, sessionPlan, () => null).catch(() => undefined)
-  }
+  // Always keep the session's most recent plan for one use so renaming or
+  // switching from `claude/<folder>` or `main` to a descriptive branch before
+  // `gh pr create` still attaches it once; never persist a cross-session record
+  // keyed to the default branch.
+  currentSessionPlan = { repoTopLevel: where.repoTopLevel, documentId, title: cleanTitle }
+  await update($, sessionPlan, () => currentSessionPlan).catch(() => undefined)
+  if (!where.branch || where.isDefaultBranch) return
   const key = planStoreKey(where.repoTopLevel, where.branch)
   const record = normalizePlanRecord({
     documentId,
@@ -977,6 +975,7 @@ async function prPreviewContextForResult(
   $: Api,
   toolName: string,
   command: string,
+  rawHead: string,
   ran: { deny?: unknown; isError?: unknown; text?: unknown; result?: unknown },
 ): Promise<string | null> {
   if (ran.deny !== undefined || ran.isError === true) return null
@@ -984,34 +983,42 @@ async function prPreviewContextForResult(
   const created = extractCreatedPullRequest({ toolName, command, resultText: haystack, isError: false })
   if (!created) return null
   const where = await repositoryBranch($)
-  if (!where) return null
+  if (!where || where.isDefaultBranch) return null
+  if (GITHUB_PR_CREATE_TOOL.test(toolName) && rawHead.trim() !== '') {
+    const toolHead = normalizePullRequestHeadRef(rawHead)
+    if (!toolHead || !where.branch || toolHead !== where.branch) return null
+  }
 
+  const nowMs = await $.clock.now()
   let plan: { documentId: string; title: string } | null = null
-  if (where.branch && !where.isDefaultBranch) {
+  if (where.branch) {
     const key = planStoreKey(where.repoTopLevel, where.branch)
     const stored = key ? normalizePlanRecord(await $.store.get(key)) : null
     if (stored && stored.repoTopLevel === where.repoTopLevel && stored.branch === where.branch) {
-      plan = { documentId: stored.documentId, title: stored.title }
+      if (isPlanRecordFresh(stored.updatedAt, BRANCH_PLAN_MAX_AGE_MS, nowMs)) {
+        plan = { documentId: stored.documentId, title: stored.title }
+      } else if (key) {
+        await $.store.delete(key).catch(() => undefined)
+      }
     }
   }
   if (!plan && currentSessionPlan && currentSessionPlan.repoTopLevel === where.repoTopLevel && isDocumentId(currentSessionPlan.documentId)) {
     plan = { documentId: currentSessionPlan.documentId, title: currentSessionPlan.title }
-    currentSessionPlan = null
-    await update($, sessionPlan, () => null).catch(() => undefined)
-    if (where.branch && !where.isDefaultBranch) {
-      const key = planStoreKey(where.repoTopLevel, where.branch)
-      const promoted = normalizePlanRecord({
-        documentId: plan.documentId,
-        title: plan.title,
-        repoTopLevel: where.repoTopLevel,
-        branch: where.branch,
-        updatedAt: new Date(await $.clock.now()).toISOString(),
-      })
-      if (key && promoted) await $.store.set(key, promoted).catch(() => undefined)
-    }
   }
   if (!plan) return null
-  return prPlanAttachContext({ documentId: plan.documentId, title: plan.title, pullRequestUrl: created.url }) || null
+  // One pull request per plan: spend both the session plan and any stored
+  // branch entries for this document so a reused branch name or later unrelated
+  // pull request never inherits it.
+  await forgetBranchPlan($, plan.documentId)
+  return (
+    prPlanAttachContext({
+      documentId: plan.documentId,
+      title: plan.title,
+      pullRequestUrl: created.url,
+      branch: where.branch,
+      spliceScript: `${$.plugin.root}/monitors/plans.mjs`,
+    }) || null
+  )
 }
 
 async function loadVerdict($: Api, documentId: string): Promise<Verdict | null> {
@@ -1510,13 +1517,14 @@ export const register: Register = on => {
     const ran = await next(e)
     const command = text((e as unknown as { command?: unknown }).command)
     if (!PR_CREATE_COMMAND.test(command)) return ran
-    const line = await prPreviewContextForResult($, 'Bash', command, ran).catch(() => null)
+    const line = await prPreviewContextForResult($, 'Bash', command, '', ran).catch(() => null)
     return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
   })
 
   on('tool.call', { tool: GITHUB_PR_CREATE_TOOL }, async ($, e, next) => {
     const ran = await next(e)
-    const line = await prPreviewContextForResult($, String(e.tool), '', ran).catch(() => null)
+    const head = text((e as unknown as Record<string, unknown>).head)
+    const line = await prPreviewContextForResult($, String(e.tool), '', head, ran).catch(() => null)
     return line ? { ...ran, context: [...(ran.context ?? []), line] } : ran
   })
 

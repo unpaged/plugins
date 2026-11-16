@@ -6,6 +6,9 @@ import { isDocumentId } from "./listen-core.mjs";
 
 export const PR_SECTION_START = "<!-- unpaged-plan:start -->";
 export const PR_SECTION_END = "<!-- unpaged-plan:end -->";
+export const BRANCH_PLAN_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+export const AMBIGUOUS_PR_SECTION_MESSAGE =
+  "the pull request description has stray or duplicate Unpaged plan marker lines; fix them by hand";
 
 export const PR_CREATE_COMMAND = /(^|[\s;&|(`])gh\s+pr\s+create\b/;
 export const DRY_RUN_HEADER = /Would have created a Pull Request with:/;
@@ -63,6 +66,32 @@ export function isDefaultBranchName(branch, originDefaultBranch = null) {
     return branch === originDefaultBranch;
   }
   return COMMON_DEFAULT_BRANCHES.has(branch);
+}
+
+/**
+ * Normalizes a GitHub PR tool `head` argument (stripping any `owner:` fork
+ * prefix or `refs/heads/` prefix) to a branch name, or `null` when absent/invalid.
+ */
+export function normalizePullRequestHeadRef(rawHead) {
+  if (typeof rawHead !== "string") return null;
+  const trimmed = rawHead.trim();
+  if (!trimmed) return null;
+  const colon = trimmed.indexOf(":");
+  const candidate = colon >= 0 ? trimmed.slice(colon + 1) : trimmed;
+  const withoutRefs = candidate.startsWith("refs/heads/")
+    ? candidate.slice("refs/heads/".length)
+    : candidate;
+  return parseGitHeadBranch(`ref: refs/heads/${withoutRefs}`);
+}
+
+export function isPlanRecordFresh(updatedAt, maxAgeMs = BRANCH_PLAN_MAX_AGE_MS, nowMs = Date.now()) {
+  if (typeof updatedAt !== "string" || !updatedAt.trim()) return false;
+  const ts = Date.parse(updatedAt);
+  if (!Number.isFinite(ts) || !Number.isFinite(nowMs) || !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) {
+    return false;
+  }
+  const ageMs = nowMs - ts;
+  return ageMs >= -60_000 && ageMs <= maxAgeMs;
 }
 
 /**
@@ -217,6 +246,13 @@ export function parseJoinLinkUrls({ url, previewUrl } = {}) {
     return null;
   }
   return { url: cleanUrl, previewUrl: `${previewParsed.origin}${expectedPreviewPath}`, token };
+}
+
+export function describeJoinLinkError({ url, previewUrl } = {}) {
+  if (!parseJoinLinkUrls({ url })) {
+    return "url must be an Unpaged https /join/<token> link without query parameters";
+  }
+  return "previewUrl must be the matching https /join/<token>/preview.png link on the same Unpaged origin";
 }
 
 export function appendPreviewVersion(previewUrl, version) {
@@ -398,21 +434,35 @@ export function extractCreatedPullRequest({ toolName, command = "", resultText =
  * (or current session) has a previously built Unpaged visual plan. Never asks
  * the agent to interpolate a canvas title onto a shell command line.
  */
-export function prPlanAttachContext({ documentId, title, pullRequestUrl } = {}) {
+export function prPlanAttachContext({
+  documentId,
+  title,
+  pullRequestUrl,
+  branch = null,
+  spliceScript = "",
+} = {}) {
   if (!isDocumentId(documentId) || typeof pullRequestUrl !== "string" || !PR_URL_PATTERN.test(pullRequestUrl)) {
     return "";
   }
   const safeName = title ? `"${String(title).replace(/[\r\n\t"]+/g, " ").trim()}" ` : "";
+  const validBranch = typeof branch === "string" ? parseGitHeadBranch(`ref: refs/heads/${branch}`) : null;
+  const cleanScript = typeof spliceScript === "string" ? spliceScript.replace(/[\r\n\0"]+/g, "").trim() : "";
+  const scriptPath = cleanScript || "${CLAUDE_PLUGIN_ROOT}/monitors/plans.mjs";
+  const branchCheck = validBranch
+    ? `First verify this pull request was opened from this repository and branch by running gh pr view "${pullRequestUrl}" --json headRefName --jq .headRefName — attach nothing and leave the PR description unchanged unless it prints "${validBranch}" and the pull request belongs to this repository. `
+    : `First verify this pull request belongs to this repository (if it was opened in another repository, attach nothing and leave the PR description unchanged). `;
   return (
-    `This branch has an Unpaged visual plan (${safeName}documentId ${documentId}). ` +
-    `Attach its Can view invite link and preview to ${pullRequestUrl} now in this turn: ` +
+    `This repository has an Unpaged visual plan (${safeName}documentId ${documentId}). ` +
+    branchCheck +
+    `Attach this plan to ${pullRequestUrl} now in this turn only if it is about this pull request's work ` +
+    `(compare the plan's title — or read the canvas with document_get when the title isn't enough — against the pull request's title and changes; otherwise skip it, leave the PR description unchanged, and say in one sentence why): ` +
     `1) call document_join_link on the unpaged server with documentId "${documentId}" and role "viewer" ` +
     `(if document_join_link is unavailable on an older server, skip quietly and mention that PR previews need the current Unpaged server); ` +
-    `2) read the current PR body into a temporary file outside the repository (gh pr view "${pullRequestUrl}" --json body --jq .body > "<inFile>"), ` +
-    `splice ONLY the standalone bounded section ${PR_SECTION_START} ... ${PR_SECTION_END} containing "### Visual plan", a blank line, ` +
-    `"[![Visual plan](<previewUrl>?v=<unix-seconds>)](<url>)", a blank line, and "[Open visual plan on Unpaged (Can view)](<url>)" ` +
-    `into a second temporary file "<outFile>" (preserving any existing PR description text outside those standalone marker lines; never pass a canvas title on a shell command line; ` +
-    `if plans.mjs splice exits non-zero, leave the PR description unchanged and note in one sentence that its Unpaged section has stray or duplicate marker lines to fix by hand — never hand-splice after splice refused), ` +
-    `run gh pr edit "${pullRequestUrl}" --body-file "<outFile>", and delete both temporary files.`
+    `2) never pass a canvas title on a shell command line — when node is on PATH, write temporary files outside the repository and run ` +
+    `gh pr view "${pullRequestUrl}" --json body --jq .body > "<inFile>" && node "${scriptPath}" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "${pullRequestUrl}" --body-file "<outFile>", ` +
+    `then delete "<inFile>" and "<outFile>" (if splice exits non-zero, leave the PR description unchanged, delete the temporary files, and report in one sentence the reason splice printed on stderr — never hand-splice after splice refused); ` +
+    `only when node is not on PATH, read the current PR body with gh pr view "${pullRequestUrl}" --json body --jq .body, splice ONLY a single standalone bounded section ${PR_SECTION_START} ... ${PR_SECTION_END} containing "### Visual plan", a blank line, ` +
+    `"[![Visual plan](<previewUrl>?v=<unix-seconds>)](<url>)", a blank line, and "[Open visual plan on Unpaged (Can view)](<url>)" into "<outFile>" outside the repository (preserving all surrounding PR description text, or leaving the description unchanged if existing marker lines are unpaired or duplicated), ` +
+    `run gh pr edit "${pullRequestUrl}" --body-file "<outFile>", and delete "<outFile>".`
   );
 }

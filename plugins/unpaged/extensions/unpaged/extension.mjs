@@ -8,6 +8,7 @@ import { createCopilotStore } from "./store.mjs";
 import { createUnpagedCopilotController } from "./copilot-core.mjs";
 
 const planApprovedContextPath = fileURLToPath(new URL("../../hooks/plan-approved-context.json", import.meta.url));
+const plansScriptPath = fileURLToPath(new URL("../../monitors/plans.mjs", import.meta.url));
 
 async function loadPlanApprovedContext() {
   try {
@@ -48,6 +49,7 @@ const controller = createUnpagedCopilotController({
   store: createCopilotStore(),
   poll: (config, settings) => pollInbox(config, settings),
   planApprovedContext: await loadPlanApprovedContext(),
+  plansScriptPath,
 });
 
 session = await joinSession({

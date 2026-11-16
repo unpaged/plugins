@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPrPlanSection as renderClaudeSection } from "../../unpaged/monitors/pr-preview-core.mjs";
-import { PR_SECTION_END, PR_SECTION_START, renderPrPlanSection, splicePrPlanSection } from "./pr-preview-core.mjs";
+import {
+  AMBIGUOUS_PR_SECTION_MESSAGE,
+  PR_SECTION_END,
+  PR_SECTION_START,
+  renderPrPlanSection,
+  splicePrPlanSection,
+} from "./pr-preview-core.mjs";
 
 const PLANS_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "plans.mjs");
 const DOC_1 = "11111111-2222-3333-4444-555555555555";
@@ -65,14 +71,19 @@ test("Antigravity PR section matches Claude/Copilot format byte-for-byte and ign
   }
 });
 
-test("Antigravity plans.mjs stores mode-0600 records under ~/.gemini/unpaged/plans, promotes default-branch plans, and rejects 0-byte stdin", async () => {
+test("Antigravity plans.mjs spends mode-0600 records under ~/.gemini/unpaged/plans once, handles branch renames, expires stale entries, and prints clear splice stderr reasons", async () => {
   await withTempDir(async (dir) => {
     const home = join(dir, "home");
     const repo = join(dir, "repo");
+    const otherRepo = join(dir, "other-repo");
     await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(otherRepo, ".git"), { recursive: true });
     await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    await writeFile(join(otherRepo, ".git", "HEAD"), "ref: refs/heads/feat/other\n", "utf8");
 
     const env = { ...process.env, HOME: home, USERPROFILE: home, UNPAGED_PREVIEW_VERSION: "1763281111" };
+    const planDir = join(home, ".gemini", "unpaged", "plans");
+
     const pending = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1], {
       cwd: repo,
       env,
@@ -81,17 +92,33 @@ test("Antigravity plans.mjs stores mode-0600 records under ~/.gemini/unpaged/pla
     assert.equal(pending.status, 0);
     assert.equal(pending.stdout.trim(), "recorded pending-branch");
 
-    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/agy-pr\n", "utf8");
-    const chk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
-    assert.equal(chk.stdout.trim(), `plan ${DOC_1}`);
-
-    const planDir = join(home, ".gemini", "unpaged", "plans");
     const files = await readdir(planDir);
     assert.equal(files.length, 1);
     if (process.platform !== "win32") {
       const st = await stat(join(planDir, files[0]));
       assert.equal(st.mode & 0o777, 0o600);
     }
+
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/agy-pr\n", "utf8");
+    const chk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(chk.stdout.trim(), `plan ${DOC_1}`);
+    assert.equal((await readdir(planDir)).length, 0);
+
+    // Reusing `feat/agy-pr` after spending attaches nothing.
+    const chkAgain = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(chkAgain.stdout.trim(), "missing");
+
+    // Branch rename (`claude/<folder>` -> `feat/renamed`) attaches once and never leaks to another repository.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/claude/wt-folder\n", "utf8");
+    const recOnStart = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(recOnStart.stdout.trim(), "recorded claude/wt-folder");
+    const otherChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: otherRepo, env, encoding: "utf8" });
+    assert.equal(otherChk.stdout.trim(), "missing");
+
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/renamed\n", "utf8");
+    const renamedChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(renamedChk.stdout.trim(), `plan ${DOC_1}`);
+    assert.equal((await readdir(planDir)).length, 0);
 
     const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
       cwd: repo,
@@ -100,6 +127,15 @@ test("Antigravity plans.mjs stores mode-0600 records under ~/.gemini/unpaged/pla
       encoding: "utf8",
     });
     assert.equal(emptyStdin.status, 1);
+
+    const stray = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: `${PR_SECTION_START}\nstray\n`,
+      encoding: "utf8",
+    });
+    assert.equal(stray.status, 1);
+    assert.ok(stray.stderr.includes(AMBIGUOUS_PR_SECTION_MESSAGE));
 
     const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
       cwd: repo,

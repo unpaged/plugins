@@ -15,7 +15,9 @@ import {
   retireKeyFile,
 } from "../../monitors/listen-core.mjs";
 import {
+  BRANCH_PLAN_MAX_AGE_MS,
   isDefaultBranchName,
+  isPlanRecordFresh,
   normalizePlanRecord,
   parseGitHeadBranch,
   parseOriginHeadBranch,
@@ -263,7 +265,7 @@ export function createCopilotStore({
     return { ...record, persisted: true };
   }
 
-  async function loadBranchPlan(cwd) {
+  async function loadBranchPlan(cwd, { nowMs = Date.now() } = {}) {
     const branchCtx = await resolveRepositoryBranch(cwd);
     if (!branchCtx || !branchCtx.branch || branchCtx.isDefaultBranch) return null;
     const file = planFileFor(branchCtx.repoTopLevel, branchCtx.branch);
@@ -275,6 +277,10 @@ export function createCopilotStore({
         parsed.repoTopLevel !== branchCtx.repoTopLevel ||
         parsed.branch !== branchCtx.branch
       ) {
+        return null;
+      }
+      if (!isPlanRecordFresh(parsed.updatedAt, BRANCH_PLAN_MAX_AGE_MS, nowMs)) {
+        await fs.rm(file, { force: true }).catch(() => {});
         return null;
       }
       return parsed;

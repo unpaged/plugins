@@ -7,11 +7,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { renderPrPlanSection as renderClaudeSection } from "../../unpaged/monitors/pr-preview-core.mjs";
 import { controlInputSchema, executeControl } from "./control.mjs";
-import { PR_SECTION_END, PR_SECTION_START, renderPrPlanSection } from "./pr-preview.mjs";
+import { AMBIGUOUS_PR_SECTION_MESSAGE, PR_SECTION_END, PR_SECTION_START, renderPrPlanSection } from "./pr-preview.mjs";
 
 const PR_PREVIEW_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "pr-preview.mjs");
 const DOC_1 = "11111111-2222-3333-4444-555555555555";
+const DOC_2 = "22222222-3333-4444-8555-666666666666";
 const THREAD_1 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const THREAD_2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 const JOIN_TOKEN = "a".repeat(32);
 const JOIN_URL = `https://unpaged.io/join/${JOIN_TOKEN}`;
 const PREVIEW_URL = `${JOIN_URL}/preview.png`;
@@ -37,6 +39,22 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   });
   assert.equal(emptyStdin.status, 1);
   assert.equal(emptyStdin.stdout, "");
+
+  const badPreview = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, "https://evil.example.com/p.png"], {
+    env,
+    input: "Body\n",
+    encoding: "utf8",
+  });
+  assert.equal(badPreview.status, 1);
+  assert.ok(badPreview.stderr.includes("previewUrl must be"));
+
+  const strayMarker = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    env,
+    input: `${PR_SECTION_START}\nstray\n`,
+    encoding: "utf8",
+  });
+  assert.equal(strayMarker.status, 1);
+  assert.ok(strayMarker.stderr.includes(AMBIGUOUS_PR_SECTION_MESSAGE));
 
   // 350-line (> 14 KiB) PR body stays completely intact without passing through model context.
   const longLines = Array.from({ length: 350 }, (_, idx) => `- [x] Verification item #${idx + 1}: checked end-to-end`);
@@ -143,14 +161,17 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   const initial = await executeControl({ operation: "plan_lookup" }, context, options);
   assert.deepEqual(initial, { recorded: false });
 
-  // A Git reftable `.invalid` HEAD stub is rejected so no permanent `.invalid` branch record is ever saved.
+  // A Git reftable `.invalid` HEAD stub writes only a one-shot pending plan (never a permanent `.invalid` branch record).
   await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
   const reftableSaved = await executeControl(
     { operation: "plan_record", documentId: DOC_1, payload: { title: "codex: Reftable" } },
     context,
     options
   );
-  assert.deepEqual(reftableSaved, { recorded: false });
+  assert.deepEqual(reftableSaved, { recorded: true, documentId: DOC_1, title: "codex: Reftable", branch: null });
+  const reftableFirst = await executeControl({ operation: "plan_lookup" }, context, options);
+  assert.equal(reftableFirst.recorded, true);
+  assert.equal(reftableFirst.documentId, DOC_1);
   assert.deepEqual(await executeControl({ operation: "plan_lookup" }, context, options), { recorded: false });
   await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
 
@@ -166,17 +187,6 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
     title: "codex: Visual plan",
     branch: "main",
   });
-  const onMainLookup = await executeControl({ operation: "plan_lookup" }, context, options);
-  assert.deepEqual(onMainLookup, { recorded: false });
-
-  // Switching to a feature branch promotes the pending plan once.
-  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/codex-pr\n", "utf8");
-  const found = await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options);
-  assert.equal(found.recorded, true);
-  assert.equal(found.documentId, DOC_1);
-  assert.equal(found.title, "codex: Visual plan");
-  assert.equal(found.branch, "feat/codex-pr");
-
   const planDir = join(codexHome, "unpaged", "plans");
   const files = await readdir(planDir);
   assert.equal(files.length, 1);
@@ -184,6 +194,70 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
     const st = await stat(join(planDir, files[0]));
     assert.equal(st.mode & 0o777, 0o600);
   }
+  const onMainLookup = await executeControl({ operation: "plan_lookup" }, context, options);
+  assert.deepEqual(onMainLookup, { recorded: false });
+
+  // Another Codex task (`THREAD_2`) never consumes `THREAD_1`'s pending plan.
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/codex-pr\n", "utf8");
+  assert.deepEqual(
+    await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_2, cwd: repo }, options),
+    { recorded: false }
+  );
+
+  // `THREAD_1` consumes and spends the pending plan once.
+  const found = await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options);
+  assert.equal(found.recorded, true);
+  assert.equal(found.documentId, DOC_1);
+  assert.equal(found.title, "codex: Visual plan");
+  assert.equal(found.branch, "feat/codex-pr");
+  assert.equal((await readdir(planDir)).length, 0);
+  assert.deepEqual(await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options), {
+    recorded: false,
+  });
+
+  // Branch rename (`claude/<folder>` -> `feat/renamed`) attaches once, spends both files, and never crosses repositories.
+  const otherRepo = join(root, "other-repo");
+  await mkdir(join(otherRepo, ".git"), { recursive: true });
+  await writeFile(join(otherRepo, ".git", "HEAD"), "ref: refs/heads/feat/other\n", "utf8");
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/claude/wt-start\n", "utf8");
+  await executeControl(
+    { operation: "plan_record", documentId: DOC_2, payload: { title: "codex: Renamed" } },
+    { threadId: THREAD_1, cwd: repo },
+    options
+  );
+  assert.deepEqual(
+    await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: otherRepo }, options),
+    { recorded: false }
+  );
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/renamed\n", "utf8");
+  const renamedFound = await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options);
+  assert.equal(renamedFound.recorded, true);
+  assert.equal(renamedFound.documentId, DOC_2);
+  assert.equal((await readdir(planDir)).length, 0);
+  assert.deepEqual(
+    await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options),
+    { recorded: false }
+  );
+
+  // Unused branch record older than 14 days expires on lookup.
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/stale-typo\n", "utf8");
+  await executeControl(
+    { operation: "plan_record", documentId: DOC_2, payload: { title: "codex: Stale" } },
+    { threadId: THREAD_1, cwd: repo },
+    options
+  );
+  const staleStamp = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+  for (const f of await readdir(planDir)) {
+    const p = join(planDir, f);
+    const raw = JSON.parse(await (await import("node:fs/promises")).readFile(p, "utf8"));
+    raw.updatedAt = staleStamp;
+    await writeFile(p, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  }
+  assert.deepEqual(
+    await executeControl({ operation: "plan_lookup" }, { threadId: THREAD_1, cwd: repo }, options),
+    { recorded: false }
+  );
+  assert.equal((await readdir(planDir)).length, 0);
   // reviews.sqlite was never created by plan_record or plan_lookup.
   await assert.rejects(() => stat(join(codexHome, "unpaged", "reviews.sqlite")), { code: "ENOENT" });
 

@@ -2,6 +2,7 @@
 // key scrubbing, polling lifecycle, and hook policies independent of the
 // @github/copilot-sdk runtime so node:test exercises every path offline.
 import { hostname } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   PROTOCOL_PREAMBLE,
   extractMint,
@@ -11,9 +12,13 @@ import {
 } from "../../monitors/listen-core.mjs";
 import { runListener } from "../../monitors/listen-loop.mjs";
 import {
+  GITHUB_PR_CREATE_TOOL,
   extractCreatedPullRequest,
+  normalizePullRequestHeadRef,
   prPlanAttachContext,
 } from "../../monitors/pr-preview-core.mjs";
+
+const DEFAULT_PLANS_SCRIPT_PATH = fileURLToPath(new URL("../../monitors/plans.mjs", import.meta.url));
 
 export const FIRST_POLL_WAIT_MS = 8000;
 export const FLUSH_DELAY_MS = 50;
@@ -242,6 +247,7 @@ export function createUnpagedCopilotController({
   firstPollWaitMs = FIRST_POLL_WAIT_MS,
   flushDelayMs = FLUSH_DELAY_MS,
   planApprovedContext = "",
+  plansScriptPath = DEFAULT_PLANS_SCRIPT_PATH,
 }) {
   if (!store || typeof poll !== "function" || typeof executeTool !== "function") {
     throw new Error("invalid_copilot_controller_dependencies");
@@ -264,6 +270,22 @@ export function createUnpagedCopilotController({
 
   async function currentCwd() {
     return lastWorkingDirectory || (await getCwd());
+  }
+
+  async function rememberPlan(targetCwd, documentId, rawTitle) {
+    if (!isDocumentId(documentId) || typeof store.saveBranchPlan !== "function") return;
+    const cleanTitle = str(rawTitle).replace(/[\r\n\t]+/g, " ").trim();
+    const saved = await store
+      .saveBranchPlan({
+        cwd: targetCwd,
+        documentId,
+        title: cleanTitle,
+        updatedAt: new Date(now()).toISOString(),
+      })
+      .catch(() => null);
+    if (saved?.repoTopLevel) {
+      sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: cleanTitle };
+    }
   }
 
   function schedule(ms, fn) {
@@ -663,20 +685,8 @@ export function createUnpagedCopilotController({
       handler: async (args) => {
         const documentId = str(args?.documentId);
         const title = str(args?.title) || null;
-        if (args?.plan === true && isDocumentId(documentId) && typeof store.saveBranchPlan === "function") {
-          const saved = await store
-            .saveBranchPlan({
-              cwd: await currentCwd(),
-              documentId,
-              title: title || "",
-              updatedAt: new Date(now()).toISOString(),
-            })
-            .catch(() => null);
-          if (saved?.persisted === false && saved?.repoTopLevel) {
-            sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
-          } else if (saved?.persisted === true) {
-            sessionPlan = null;
-          }
+        if (args?.plan === true && isDocumentId(documentId)) {
+          await rememberPlan(await currentCwd(), documentId, title);
         }
         try {
           const result = await arm(documentId, title);
@@ -940,24 +950,8 @@ export function createUnpagedCopilotController({
           if (!created) return;
           documentId = created.id;
           title = created.title || str(args.title) || null;
-          if (
-            mcpTool === "document_create" &&
-            str(args.folderId) === "visual-plans" &&
-            typeof store.saveBranchPlan === "function"
-          ) {
-            const saved = await store
-              .saveBranchPlan({
-                cwd: wd || (await currentCwd()),
-                documentId,
-                title: title || "",
-                updatedAt: new Date(now()).toISOString(),
-              })
-              .catch(() => null);
-            if (saved?.persisted === false && saved?.repoTopLevel) {
-              sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
-            } else if (saved?.persisted === true) {
-              sessionPlan = null;
-            }
+          if (mcpTool === "document_create" && str(args.folderId) === "visual-plans") {
+            await rememberPlan(wd || (await currentCwd()), documentId, title);
           }
         }
         if (
@@ -981,29 +975,30 @@ export function createUnpagedCopilotController({
       });
       if (createdPr && typeof store.loadBranchPlan === "function") {
         const targetCwd = wd || (await currentCwd());
-        let plan = await store.loadBranchPlan(targetCwd);
-        if (!plan && sessionPlan && typeof store.resolveRepositoryBranch === "function") {
-          const branchCtx = await store.resolveRepositoryBranch(targetCwd);
-          if (branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
-            plan = sessionPlan;
-            sessionPlan = null;
-            if (branchCtx.branch && !branchCtx.isDefaultBranch && typeof store.saveBranchPlan === "function") {
-              await store
-                .saveBranchPlan({
-                  cwd: targetCwd,
-                  documentId: plan.documentId,
-                  title: plan.title,
-                  updatedAt: new Date(now()).toISOString(),
-                })
-                .catch(() => {});
-            }
-          }
+        const branchCtx =
+          typeof store.resolveRepositoryBranch === "function"
+            ? await store.resolveRepositoryBranch(targetCwd)
+            : null;
+        if (branchCtx?.isDefaultBranch) return;
+        if (GITHUB_PR_CREATE_TOOL.test(toolName) && str(args.head).trim() !== "") {
+          const toolHead = normalizePullRequestHeadRef(str(args.head));
+          if (!toolHead || !branchCtx?.branch || toolHead !== branchCtx.branch) return;
+        }
+        let plan = await store.loadBranchPlan(targetCwd, { nowMs: now() });
+        if (!plan && sessionPlan && branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
+          plan = sessionPlan;
         }
         if (plan) {
+          if (sessionPlan?.documentId === plan.documentId) sessionPlan = null;
+          if (typeof store.forgetBranchPlanByDocumentId === "function") {
+            await store.forgetBranchPlanByDocumentId(plan.documentId).catch(() => {});
+          }
           const context = prPlanAttachContext({
             documentId: plan.documentId,
             title: plan.title,
             pullRequestUrl: createdPr.url,
+            branch: branchCtx?.branch ?? null,
+            spliceScript: plansScriptPath,
           });
           if (context) return { additionalContext: context };
         }
