@@ -42,6 +42,13 @@ export type ArchitectureLight = {
   on: boolean
 }
 
+/** Visual plan created or armed during this session, so planning on `main` before creating a feature branch promotes onto that branch's PR. */
+export type SessionPlan = {
+  repoTopLevel: string
+  documentId: string
+  title: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     unpaged: {
@@ -54,6 +61,8 @@ declare module 'claude-code' {
       acked: string[]
       /** The architecture line; null while the working folder is no git repository. */
       architecture: ArchitectureLight | null
+      /** Most recent visual plan created or armed in this session. */
+      sessionPlan: SessionPlan | null
     }
   }
 }

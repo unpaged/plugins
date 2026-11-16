@@ -141,7 +141,7 @@ test("the preamble has the agent post the \"On it…\" reply on a mention unless
 test("the modules the in-session mod imports use no Node global", () => {
   // The mod runs where Node's globals are absent; it reaches files, processes
   // and the network through Claude Code's calls alone.
-  for (const name of ["listen-core.mjs", "listen-loop.mjs", "poll-core.mjs"]) {
+  for (const name of ["listen-core.mjs", "listen-loop.mjs", "poll-core.mjs", "pr-preview-core.mjs"]) {
     const source = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*\/\/.*$/gm, "");

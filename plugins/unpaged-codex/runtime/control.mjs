@@ -36,7 +36,12 @@ const definitions = {
   revoked: { document: "required", payload: shape({ keyId: idSchema, evidence: textSchema }) },
   reconcile: { document: "required", payload: shape({ evidence: textSchema }) },
   recover: { document: "required", event: true, payload: shape({ decision: { enum: ["retry", "interrupt", "continue", "complete"] },
-    evidence: { oneOf: [textSchema, proofSchema] } }) }
+    evidence: { oneOf: [textSchema, proofSchema] } }) },
+  plan_record: { document: "required", payload: shape({ title: { type: "string", maxLength: 500 } }, []) },
+  plan_lookup: {},
+  pr_splice: { payload: shape({ url: { type: "string", maxLength: 512 }, previewUrl: { type: "string", maxLength: 512 },
+    title: { type: "string", maxLength: 500 }, body: { type: "string", maxLength: 524288 },
+    bodyLength: { type: "integer", minimum: 0, maximum: 524288 } }, ["url", "body", "bodyLength"]) }
 };
 
 // Keep strict per-operation validation independent of the advertised schema.
@@ -99,6 +104,14 @@ function validatePayload(operation, payload, documentId, threadId) {
   else if (operation === "recover") {
     if (!["retry", "interrupt", "continue", "complete"].includes(payload.decision)) fail("invalid_recovery_decision");
     if (payload.decision === "complete") validateEvidence(payload.evidence); else boundedText(payload.evidence);
+  } else if (operation === "plan_record") {
+    if (has(payload, "title") && (typeof payload.title !== "string" || payload.title.length > 500)) fail("invalid_control_arguments");
+  } else if (operation === "pr_splice") {
+    if (typeof payload.url !== "string" || !payload.url || payload.url.length > 512 ||
+        typeof payload.body !== "string" || payload.body.length > 524288 ||
+        !Number.isSafeInteger(payload.bodyLength) || payload.bodyLength < 0 || payload.bodyLength > 524288 ||
+        (has(payload, "previewUrl") && (typeof payload.previewUrl !== "string" || payload.previewUrl.length > 512)) ||
+        (has(payload, "title") && (typeof payload.title !== "string" || payload.title.length > 500))) fail("invalid_control_arguments");
   }
 }
 
@@ -109,7 +122,8 @@ const outputFields = new Set(("documentId threadId keyId codexPath pollUrl lastS
   "id eventId nodeId commentId reason authorRole resolved createdAt state queueId evidence recoveryEvidence receivedAt " +
   "operationToken event events replyId skippedReason decision command phase at recordNodeId openTasks source " +
   "received dispatching queue_uncertain queued processing effect_uncertain completed " +
-  "setupReady action evidenceScope evidenceLimit hook enabled trustStatus currentHash dataDirectory node minimumNode minimumCodex").split(" "));
+  "setupReady action evidenceScope evidenceLimit hook enabled trustStatus currentHash dataDirectory node minimumNode minimumCodex " +
+  "recorded branch title url previewUrl section body").split(" "));
 function publicResult(value) {
   if (Array.isArray(value)) return value.map(publicResult);
   if (!object(value)) return value;

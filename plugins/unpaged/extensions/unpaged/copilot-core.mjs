@@ -2,6 +2,7 @@
 // key scrubbing, polling lifecycle, and hook policies independent of the
 // @github/copilot-sdk runtime so node:test exercises every path offline.
 import { hostname } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   PROTOCOL_PREAMBLE,
   extractMint,
@@ -10,6 +11,15 @@ import {
   printableKeyId,
 } from "../../monitors/listen-core.mjs";
 import { runListener } from "../../monitors/listen-loop.mjs";
+import {
+  GITHUB_PR_CREATE_TOOL,
+  extractCreatedPullRequest,
+  normalizePullRequestHeadRef,
+  parseGitHubToolHeadRepoSlug,
+  prPlanAttachContext,
+} from "../../monitors/pr-preview-core.mjs";
+
+const DEFAULT_PLANS_SCRIPT_PATH = fileURLToPath(new URL("../../monitors/plans.mjs", import.meta.url));
 
 export const FIRST_POLL_WAIT_MS = 8000;
 export const FLUSH_DELAY_MS = 50;
@@ -62,6 +72,16 @@ function isSuccessfulToolResult(toolResult) {
   if (toolResult.isError === true) return false;
   const rt = str(toolResult.resultType);
   return !rt || rt === "success";
+}
+
+function toolResultText(toolResult) {
+  if (!toolResult) return "";
+  if (typeof toolResult === "string") return toolResult;
+  return [
+    str(toolResult.textResultForLlm),
+    str(toolResult.sessionLog),
+    typeof toolResult.contents === "string" ? toolResult.contents : JSON.stringify(toolResult.contents ?? ""),
+  ].join("\n");
 }
 
 function shortHostName(raw) {
@@ -228,6 +248,7 @@ export function createUnpagedCopilotController({
   firstPollWaitMs = FIRST_POLL_WAIT_MS,
   flushDelayMs = FLUSH_DELAY_MS,
   planApprovedContext = "",
+  plansScriptPath = DEFAULT_PLANS_SCRIPT_PATH,
 }) {
   if (!store || typeof poll !== "function" || typeof executeTool !== "function") {
     throw new Error("invalid_copilot_controller_dependencies");
@@ -245,10 +266,27 @@ export function createUnpagedCopilotController({
   const timers = new Set();
   let cachedMetadata = null;
   let lastWorkingDirectory = null;
+  let sessionPlan = null;
   let closed = false;
 
   async function currentCwd() {
     return lastWorkingDirectory || (await getCwd());
+  }
+
+  async function rememberPlan(targetCwd, documentId, rawTitle) {
+    if (!isDocumentId(documentId) || typeof store.saveBranchPlan !== "function") return;
+    const cleanTitle = str(rawTitle).replace(/[\r\n\t]+/g, " ").trim();
+    const saved = await store
+      .saveBranchPlan({
+        cwd: targetCwd,
+        documentId,
+        title: cleanTitle,
+        updatedAt: new Date(now()).toISOString(),
+      })
+      .catch(() => null);
+    if (saved?.repoTopLevel) {
+      sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: cleanTitle };
+    }
   }
 
   function schedule(ms, fn) {
@@ -622,6 +660,7 @@ export function createUnpagedCopilotController({
 
   function shutdown() {
     closed = true;
+    sessionPlan = null;
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
     for (const loop of loops.values()) {
@@ -640,12 +679,21 @@ export function createUnpagedCopilotController({
         properties: {
           documentId: { type: "string" },
           title: { type: "string" },
+          plan: { type: "boolean" },
         },
         required: ["documentId"],
       },
       handler: async (args) => {
         const documentId = str(args?.documentId);
         const title = str(args?.title) || null;
+        if (args?.plan === true && isDocumentId(documentId)) {
+          await rememberPlan(await currentCwd(), documentId, title);
+        } else if (args?.plan === false && isDocumentId(documentId)) {
+          if (sessionPlan?.documentId === documentId) sessionPlan = null;
+          if (typeof store.forgetBranchPlanByDocumentId === "function") {
+            await store.forgetBranchPlanByDocumentId(documentId).catch(() => {});
+          }
+        }
         try {
           const result = await arm(documentId, title);
           const line = result.already
@@ -792,6 +840,9 @@ export function createUnpagedCopilotController({
 
   const hooks = {
     onSessionStart: async (input) => {
+      if (input?.source === "clear" || input?.source === "resume") {
+        sessionPlan = null;
+      }
       const wd = hookCwd(input);
       if (wd) lastWorkingDirectory = wd;
       const pointer = await store.readArchitecturePointer(await currentCwd());
@@ -884,6 +935,10 @@ export function createUnpagedCopilotController({
 
       if (mcpTool === "document_delete") {
         const documentId = str(args.documentId);
+        if (sessionPlan?.documentId === documentId) sessionPlan = null;
+        if (typeof store.forgetBranchPlanByDocumentId === "function") {
+          await store.forgetBranchPlanByDocumentId(documentId).catch(() => {});
+        }
         if (canvases.has(documentId) || arming.has(documentId)) {
           const pending = canvases.has(documentId) ? Promise.resolve() : arming.get(documentId)?.catch(() => {});
           void Promise.resolve(pending)
@@ -901,6 +956,9 @@ export function createUnpagedCopilotController({
           if (!created) return;
           documentId = created.id;
           title = created.title || str(args.title) || null;
+          if (mcpTool === "document_create" && str(args.folderId) === "visual-plans") {
+            await rememberPlan(wd || (await currentCwd()), documentId, title);
+          }
         }
         if (
           !isDocumentId(documentId) ||
@@ -913,6 +971,53 @@ export function createUnpagedCopilotController({
         }
         offered.add(documentId);
         return { additionalContext: offerLine(documentId, title) };
+      }
+
+      const createdPr = extractCreatedPullRequest({
+        toolName,
+        command: str(args.command ?? args.cmd),
+        resultText: toolResultText(input?.toolResult),
+        isError: false,
+      });
+      if (createdPr && typeof store.loadBranchPlan === "function") {
+        const targetCwd = wd || (await currentCwd());
+        const branchCtx =
+          typeof store.resolveRepositoryBranch === "function"
+            ? await store.resolveRepositoryBranch(targetCwd)
+            : null;
+        if (branchCtx?.isDefaultBranch) return;
+        if (GITHUB_PR_CREATE_TOOL.test(toolName)) {
+          if (str(args.head).trim() !== "") {
+            const toolHead = normalizePullRequestHeadRef(str(args.head));
+            if (!toolHead || !branchCtx?.branch || toolHead !== branchCtx.branch) return;
+          }
+          const callSlug = parseGitHubToolHeadRepoSlug({
+            owner: str(args.owner),
+            repo: str(args.repo),
+            head: str(args.head),
+          });
+          if (callSlug && branchCtx?.originSlug && callSlug !== branchCtx.originSlug) return;
+        }
+        let plan = await store.loadBranchPlan(targetCwd, { nowMs: now() });
+        if (!plan && sessionPlan && branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
+          plan = sessionPlan;
+        }
+        if (plan) {
+          if (sessionPlan?.documentId === plan.documentId) sessionPlan = null;
+          if (typeof store.forgetBranchPlanByDocumentId === "function") {
+            await store.forgetBranchPlanByDocumentId(plan.documentId).catch(() => {});
+          }
+          const context = prPlanAttachContext({
+            documentId: plan.documentId,
+            title: plan.title,
+            pullRequestUrl: createdPr.url,
+            repoTopLevel: branchCtx?.repoTopLevel ?? targetCwd,
+            branch: branchCtx?.branch ?? null,
+            originSlug: branchCtx?.originSlug ?? null,
+            spliceScript: plansScriptPath,
+          });
+          if (context) return { additionalContext: context };
+        }
       }
     },
 

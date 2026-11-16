@@ -1,8 +1,8 @@
 {
   "name": "unpaged",
   "displayName": "Unpaged",
-  "description": "Visual plans and whiteboards on Unpaged — render plans as interactive canvases, receive @agent comments in your session, keep an implementation Decision log, and compile as-built records for code review.",
-  "version": "0.1.2",
+  "description": "Visual plans and whiteboards on Unpaged — render plans as interactive canvases, attach Can view invite links and previews to GitHub pull requests, receive @agent comments in your session, keep an implementation Decision log, and compile as-built records for code review.",
+  "version": "0.2.0",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Unpaged",

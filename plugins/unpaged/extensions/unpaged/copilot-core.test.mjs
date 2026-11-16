@@ -642,3 +642,356 @@ test("preserves the server refusal reason when an extension-initiated mint fails
     controller.shutdown();
   });
 });
+
+test("records visual plans per git branch and injects PR preview context on gh pr create or GitHub PR tool", async () => {
+  await withTempDir(async (dir) => {
+    const copilotHome = join(dir, "copilot-home");
+    const repo = join(dir, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
+
+    const store = createCopilotStore({ copilotHome, pid: 7777 });
+    const controller = createUnpagedCopilotController({
+      executeTool: async () => ({
+        resultType: "success",
+        textResultForLlm: JSON.stringify(mintPayload(DOC_A)),
+      }),
+      getCwd: async () => repo,
+      store,
+      poll: async () => ({ events: [], nextCursor: null, cadence: {} }),
+    });
+
+    // Non-plan document_create (no folderId: "visual-plans") does not record a branch plan.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "Scratchpad" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "Scratchpad" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Visual-plan creation records the branch plan automatically.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: PR previews", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: PR previews" }),
+      },
+      workingDirectory: repo,
+    });
+    const saved = await store.loadBranchPlan(repo);
+    assert.equal(saved?.documentId, DOC_A);
+    assert.equal(saved?.branch, "feat/pr-preview");
+
+    // --dry-run produces no context.
+    const dryRun = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --dry-run --title "Feat"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "Would have created a Pull Request with:\nhttps://github.com/acme/shop/pull/1\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(dryRun, undefined);
+
+    await writeFile(join(repo, ".git", "config"), '[remote "origin"]\n\turl = git@github-work:acme/shop.git\n', "utf8");
+
+    // GitHub PR tool targeting another repository — even on an SSH host alias and with the SAME branch name `feat/pr-preview` — produces no context and leaves the plan unspent.
+    const wrongRepoSameBranch = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "acme", repo: "public-docs", head: "feat/pr-preview", title: "Docs" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/public-docs/pull/5" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(wrongRepoSameBranch, undefined);
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_A);
+
+    const wrongHead = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "acme", repo: "shop", head: "acme:docs/other", title: "Docs" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/shop/pull/6" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(wrongHead, undefined);
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_A);
+
+    await writeFile(
+      join(repo, ".git", "config"),
+      '[remote "origin"]\n\turl = https://alice:ghp_FAKETOKEN@github.com/acme/shop.git\n',
+      "utf8"
+    );
+
+    // Real gh pr create injects additionalContext (naming checkout, plans.mjs splice, pre-parsed slug without leaking origin token, and already-attached guard) and spends the plan.
+    const prCreated = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'git push -u origin feat/pr-preview && gh pr create --title "Feat" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/55\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(prCreated?.additionalContext?.includes(DOC_A));
+    assert.ok(prCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/55"));
+    assert.ok(prCreated?.additionalContext?.includes('role "viewer"'));
+    assert.ok(prCreated?.additionalContext?.includes(`checkout "${repo}"`));
+    assert.ok(!prCreated?.additionalContext?.includes("ghp_FAKETOKEN"));
+    assert.ok(!prCreated?.additionalContext?.includes("remote get-url origin"));
+    assert.ok(prCreated?.additionalContext?.includes('/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
+    assert.ok(prCreated?.additionalContext?.includes("headRepositoryOwner,headRepository,headRefName"));
+    assert.ok(prCreated?.additionalContext?.includes('"acme/shop:feat/pr-preview"'));
+    assert.ok(prCreated?.additionalContext?.includes("if this session has already attached it to another pull request"));
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Reusing `feat/pr-preview` without a new plan attaches nothing.
+    const reused = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Reused" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/56\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(reused, undefined);
+
+    // GitHub MCP PR creation tool on the matching repository and branch triggers the context and spends its plan.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: MCP PR", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "shop-api: MCP PR" }),
+      },
+      workingDirectory: repo,
+    });
+    const mcpPrCreated = await controller.hooks.onPostToolUse({
+      toolName: "github-create_pull_request",
+      toolArgs: { owner: "acme", repo: "shop", head: "feat/pr-preview", title: "Feat" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ html_url: "https://github.com/acme/shop/pull/57" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(mcpPrCreated?.additionalContext?.includes(DOC_B));
+    assert.ok(mcpPrCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/57"));
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Calling `listen_arm` with `plan: false` after an open-PR attachment spends the plan so a follow-up branch gets nothing.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Attached to open PR", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "shop-api: Attached to open PR" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_B);
+    const armTool = controller.tools.find((t) => t.name === "mcp__unpaged__listen_arm");
+    await armTool.handler({ documentId: DOC_B, title: "shop-api: Attached to open PR", plan: false });
+    assert.equal(await store.loadBranchPlan(repo), null);
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/followup\n", "utf8");
+    const followupPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Followup" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/58\n" },
+      workingDirectory: repo,
+    });
+    assert.equal(followupPr, undefined);
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
+
+    // Deleting an unspent plan canvas clears its branch-plan record.
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: To delete", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: To delete" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal((await store.loadBranchPlan(repo))?.documentId, DOC_A);
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_delete",
+      toolArgs: { documentId: DOC_A },
+      toolResult: { resultType: "success", textResultForLlm: '{"deleted":true}' },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    controller.shutdown();
+  });
+});
+
+test("plans created on the default branch stay out of persistent main storage and promote onto the feature branch on gh pr create", async () => {
+  await withTempDir(async (dir) => {
+    const copilotHome = join(dir, "copilot-home");
+    const repo = join(dir, "repo");
+    await mkdir(join(repo, ".git", "refs", "remotes", "origin"), { recursive: true });
+    await writeFile(join(repo, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/main\n", "utf8");
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+
+    const store = createCopilotStore({ copilotHome, pid: 7778 });
+    const controller = createUnpagedCopilotController({
+      executeTool: async () => ({
+        resultType: "success",
+        textResultForLlm: JSON.stringify(mintPayload(DOC_A)),
+      }),
+      getCwd: async () => repo,
+      store,
+      poll: async () => ({ events: [], nextCursor: null, cadence: {} }),
+    });
+
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Planned on main", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: Planned on main" }),
+      },
+      workingDirectory: repo,
+    });
+    // Nothing persisted under `main`.
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Checkout feature branch in the same session and create PR -> attaches once and spends the plan.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/from-main\n", "utf8");
+    const prCreated = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Feat" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/88\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(prCreated?.additionalContext?.includes(DOC_A));
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Switching back to `main` still has no persistent plan record.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Switching to a second unrelated branch in the same session attaches nothing and writes no record.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/readme-typo\n", "utf8");
+    const unrelatedPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Typo" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/89\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(unrelatedPr, undefined);
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // A plan created on a starting branch (`claude/<folder>`) survives `git branch -m` for one PR, never leaks to another repository, and is spent after that PR.
+    const otherRepo = join(dir, "other-repo");
+    await mkdir(join(otherRepo, ".git"), { recursive: true });
+    await writeFile(join(otherRepo, ".git", "HEAD"), "ref: refs/heads/feat/other\n", "utf8");
+
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/claude/wt-start\n", "utf8");
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Renamed branch plan", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_B, title: "shop-api: Renamed branch plan" }),
+      },
+      workingDirectory: repo,
+    });
+
+    // Opening a PR in `otherRepo` gets nothing and leaves `repo`'s plan unspent.
+    const crossRepoPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Other" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/other/pull/1\n" },
+      workingDirectory: otherRepo,
+    });
+    assert.equal(crossRepoPr, undefined);
+
+    // Rename `claude/wt-start` -> `feat/renamed` (`git branch -m`) and open PR -> attaches once and spends both branch files.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/renamed\n", "utf8");
+    const renamedPr = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Renamed" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/90\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(renamedPr?.additionalContext?.includes(DOC_B));
+    assert.equal(await store.loadBranchPlan(repo), null);
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/claude/wt-start\n", "utf8");
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // A second PR on another branch gets nothing.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/another-unrelated\n", "utf8");
+    const secondAfterRenamed = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Fix" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/901\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(secondAfterRenamed, undefined);
+
+    // Unused branch record older than 14 days expires on lookup.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/fix/stale-typo\n", "utf8");
+    await store.saveBranchPlan({
+      cwd: repo,
+      documentId: DOC_B,
+      title: "Stale plan",
+      updatedAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Reftable `.invalid` HEAD stub never writes a permanent `.invalid` branch plan and fires at most once (with no headRefName check).
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/.invalid\n", "utf8");
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Reftable plan", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: Reftable plan" }),
+      },
+      workingDirectory: repo,
+    });
+    assert.equal(await store.loadBranchPlan(repo), null);
+    const reftableFirst = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "First" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/91\n" },
+      workingDirectory: repo,
+    });
+    assert.ok(reftableFirst?.additionalContext?.includes(DOC_A));
+    assert.ok(!reftableFirst?.additionalContext?.includes("headRefName"));
+    assert.equal(await store.loadBranchPlan(repo), null);
+    const reftableSecond = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Second" --body "Body"' },
+      toolResult: { resultType: "success", textResultForLlm: "https://github.com/acme/shop/pull/92\n" },
+      workingDirectory: repo,
+    });
+    assert.equal(reftableSecond, undefined);
+
+    controller.shutdown();
+  });
+});

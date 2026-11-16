@@ -4,6 +4,24 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-16
+
+### Added
+
+- **Pull request invite links and previews for visual plans.** `/unpaged:visual-plan` records the plan canvas for the current git repository and branch in the plugin's private store (`$.store` in Claude Code, `~/.copilot/unpaged/plans/` in GitHub Copilot, and `~/.claude/unpaged/plans/` via `monitors/plans.mjs` on the Monitor path, mode `0600`, never writing into the git working tree). When a pull request is already open on the branch during `/unpaged:visual-plan` or `/unpaged:as-built`, or when the session opens a pull request later (`gh pr create`, excluding `--dry-run`, or a GitHub pull-request creation tool), the agent calls `document_join_link` with `role: "viewer"` and splices a bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` section containing a clickable preview picture (`?v=<unix-seconds>` cache-buster) and a **Can view** link into the pull request description while preserving surrounding PR text. Opening a pull request still submits no separate prompt and starts no architecture comparison.
+
+## [unpaged-antigravity 0.2.0] - 2026-11-16
+
+### Added
+
+- Added branch-scoped visual-plan tracking (`monitors/plans.mjs` and `monitors/pr-preview-core.mjs` under `~/.gemini/unpaged/plans/`, mode `0600`), open-PR preview attachment/refresh in `skills/visual-plan/SKILL.md` and `skills/as-built/SKILL.md`, and `gh pr create` preview attachment in `rules/AGENTS.md`, matching the bounded `<!-- unpaged-plan:start -->` **Can view** format of `plugins/unpaged`.
+
+## [unpaged-codex 0.9.0] - 2026-11-16
+
+### Added
+
+- Added host-side `plan_record`, `plan_lookup`, and `pr_splice` operations to the bundled local `unpaged_review` server (`runtime/pr-preview.mjs`, `runtime/cli.mjs`, `runtime/control.mjs`, `runtime/mcp.mjs`) storing branch plans privately under `${CODEX_HOME:-~/.codex}/unpaged/plans/` (mode `0600`) without altering `hooks/hooks.json` or existing Hook Trust, and updated `visual-plan` and `as-built` skills to attach and refresh **Can view** pull request invite links and previews.
+
 ## [1.16.0] - 2026-11-15
 
 ### Changed

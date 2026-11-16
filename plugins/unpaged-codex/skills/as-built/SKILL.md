@@ -38,13 +38,17 @@ rounds append new records instead of rewriting history.
   range contains no commits, say "Nothing to record: the range is empty" and
   stop. Do not manufacture a record from the checklist alone.
 - When available, read the current branch's PR using
-  `gh pr view --json number,url,title,body,baseRefName,headRefOid`.
+  `gh pr view --json number,url,title,body,baseRefName,headRefOid,state`.
   Its title and body are supporting evidence, not proof that code implements a
   task. If its head differs from the inspected head, state that mismatch and do
   not present it as an exact-head review. No PR is fine.
 
 Repository operations here are read-only, such as `git status`, `git rev-parse`,
-`git merge-base`, `git log`, `git diff`, `git show`, and `gh pr view`. Treat user
+`git merge-base`, `git log`, `git diff`, `git show`, and `gh pr view` (with one
+exception when an open pull request exists for the current branch: after the
+record is verified, refreshing only the bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->`
+preview section of that pull request's description via `gh pr edit --body-file`
+using a temporary file outside the repository). Treat user
 refs as data, safely quote them, reject option-shaped or ambiguous ranges, and
 read files from the resolved Git endpoints rather than a drifting working tree.
 Do not execute repository scripts. Use review-plan's discovered local
@@ -255,6 +259,20 @@ Do not manufacture an `execute` instruction just to stamp a historical record.
 Keep the existing listener and key through record completion. Inspect its live
 state before reporting it connected; use review-plan for recovery or an explicit
 stop. Do not arm a listener merely because this recording operation finished.
+When the current branch has an open GitHub pull request (`state: "OPEN"`), call
+remote `document_join_link({ documentId, role: "viewer" })` so the server
+re-renders the root preview, resolve `<plugin-root>` as two levels up from this
+`SKILL.md` file, and splice the updated standalone bounded
+`<!-- unpaged-plan:start -->` section directly through temporary files outside
+the repository (never routing the PR body through model context or passing a
+canvas title on the shell command line):
+`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
+then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
+non-zero, leave the pull request description unchanged, delete the temporary
+files, and report in one sentence the reason `pr-preview.mjs splice` printed on
+stderr — never splice by hand after `splice` refused (skipping with a
+one-sentence note if `document_join_link` is unavailable on an older server or
+`gh pr edit` is declined).
 
 Return:
 
