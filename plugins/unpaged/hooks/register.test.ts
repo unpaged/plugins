@@ -892,4 +892,23 @@ describe('pull request previews for visual plans', () => {
     const created = await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
     expect(((created as { context?: string[] }).context ?? [])[0]).toContain(DOCUMENT)
   })
+
+  test('a plan created on main stays in session memory without polluting main and promotes onto a newly created feature branch on gh pr create', async ($, on) => {
+    const w = world(on)
+    unpagedServer(on)
+    gitBranch(on, w, 'main')
+    w.files.set('/repo/.git/refs/remotes/origin/HEAD', 'ref: refs/remotes/origin/main\n')
+
+    await $.tool.call({ tool: 'mcp__unpaged__document_create', title: 'Planned before branching', folderId: 'visual-plans' } as never)
+    expect(w.store.has('plan:/repo\nmain')).toBe(false)
+
+    // Switch to a new feature branch and open the PR -> attaches and promotes onto feat/from-main.
+    w.files.set('/repo/.git/HEAD', 'ref: refs/heads/feat/from-main\n')
+    const created = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Feat" --body "Body"' } as never)
+    expect(((created as { context?: string[] }).context ?? [])[0]).toContain(SECOND)
+    expect(w.store.get('plan:/repo\nfeat/from-main')).toEqual(
+      expect.objectContaining({ documentId: SECOND, branch: 'feat/from-main' }),
+    )
+    expect(w.store.has('plan:/repo\nmain')).toBe(false)
+  })
 })

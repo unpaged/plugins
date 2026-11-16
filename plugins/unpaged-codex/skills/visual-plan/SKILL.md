@@ -138,9 +138,11 @@ the plan and append a dated partial or complete record. When opening a GitHub
 pull request during authorized implementation (`gh pr create` without `--dry-run`,
 or a GitHub pull-request tool), check `review` (`operation: "plan_lookup"`) or
 this task's current branch plan; when one is recorded for the branch, call
-remote `document_join_link({ documentId, role: "viewer" })`, splice the bounded
-`<!-- unpaged-plan:start -->` section via `review` (`operation: "pr_splice"`),
-and update that pull request via `gh pr edit --body-file` using a temporary file
+remote `document_join_link({ documentId, role: "viewer" })`, read the pull
+request's current `body` (`gh pr view "<prUrl>" --json body --jq .body`), splice
+the standalone bounded `<!-- unpaged-plan:start -->` section via `review`
+(`operation: "pr_splice"`, `payload: { url, previewUrl, title, body }`), and
+update that pull request via `gh pr edit --body-file` using a temporary file
 outside the repository.
 
 ## Hand over the review

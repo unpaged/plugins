@@ -123,6 +123,31 @@ test("splicePrPlanSection appends cleanly and replaces an existing block byte-fo
   assert.equal(updated, `${authorBody}\n\n${second}\n\n### Notes below\nKeep this footer exact.`);
   // Re-running with the same section is idempotent.
   assert.equal(splicePrPlanSection(updated, second), updated);
+
+  // Markers quoted in inline backticks or fenced code blocks are ignored, never treated as real boundaries.
+  const proseWithQuotedMarkers = [
+    "## Summary",
+    `Documents \`${PR_SECTION_START} ... ${PR_SECTION_END}\` in prose.`,
+    "",
+    "```markdown",
+    PR_SECTION_START,
+    "Example inside code fence",
+    PR_SECTION_END,
+    "```",
+  ].join("\n");
+  const appendedAfterQuoted = splicePrPlanSection(proseWithQuotedMarkers, first);
+  assert.equal(appendedAfterQuoted, `${proseWithQuotedMarkers}\n\n${first}\n`);
+  assert.equal(splicePrPlanSection(appendedAfterQuoted, second), `${proseWithQuotedMarkers}\n\n${second}\n`);
+
+  // Unpaired or reversed standalone markers throw rather than swallowing author text on refresh.
+  assert.throws(
+    () => splicePrPlanSection(`Intro\n\n${PR_SECTION_START}\nAuthor prose after stray marker`, first),
+    /ambiguous_pr_plan_section/
+  );
+  assert.throws(
+    () => splicePrPlanSection(`${PR_SECTION_END}\n\n${PR_SECTION_START}`, first),
+    /ambiguous_pr_plan_section/
+  );
 });
 
 test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ignoring --dry-run and errors", () => {
@@ -172,32 +197,44 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
 
   const ctx = prPlanAttachContext({
     documentId: DOC_1,
-    title: "shop-api: Rate limiting",
+    title: 'shop-api: `$(touch /tmp/pwn)` "Rate limiting"',
     pullRequestUrl: "https://github.com/acme/shop/pull/42",
   });
   assert.ok(ctx.includes(DOC_1));
   assert.ok(ctx.includes('role "viewer"'));
   assert.ok(ctx.includes("https://github.com/acme/shop/pull/42"));
+  assert.ok(ctx.includes("never pass a canvas title on a shell command line"));
   assert.ok(planStoreKey("/repo", "feat/x")?.startsWith("plan:/repo\nfeat/x"));
 });
 
-test("plans.mjs CLI records mode-0600 branch plans across subdirectories and worktrees, forgets, and splices PR bodies", async () => {
+test("plans.mjs CLI records mode-0600 branch plans, promotes default-branch plans, rejects 0-byte stdin, and splices PR bodies", async () => {
   await withTempDir(async (dir) => {
     const home = join(dir, "home");
     const repo = join(dir, "repo");
     const subDir = join(repo, "packages", "api");
-    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(repo, ".git", "refs", "remotes", "origin"), { recursive: true });
     await mkdir(subDir, { recursive: true });
-    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
+    await writeFile(join(repo, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/develop\n", "utf8");
 
     const env = { ...process.env, HOME: home, USERPROFILE: home, UNPAGED_PREVIEW_VERSION: "1763281234" };
-    const rec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1, "shop-api: PR previews"], {
+
+    // Planning on the remote default branch (`develop`) records a pending entry without polluting `develop`.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/develop\n", "utf8");
+    const pendingRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_1], {
       cwd: subDir,
       env,
       encoding: "utf8",
     });
-    assert.equal(rec.status, 0);
-    assert.equal(rec.stdout.trim(), "recorded feat/pr-preview");
+    assert.equal(pendingRec.status, 0);
+    assert.equal(pendingRec.stdout.trim(), "recorded pending-branch");
+    const onDefaultChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(onDefaultChk.stdout.trim(), "missing");
+
+    // Switching to a feature branch promotes the pending plan once and leaves `develop` clean.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
+    const promotedChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: subDir, env, encoding: "utf8" });
+    assert.equal(promotedChk.status, 0);
+    assert.equal(promotedChk.stdout.trim(), `plan ${DOC_1}`);
 
     const planDir = join(home, ".claude", "unpaged", "plans");
     const files = await readdir(planDir);
@@ -207,9 +244,11 @@ test("plans.mjs CLI records mode-0600 branch plans across subdirectories and wor
       assert.equal(st.mode & 0o777, 0o600);
     }
 
-    const chk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
-    assert.equal(chk.status, 0);
-    assert.equal(chk.stdout.trim(), `plan ${DOC_1}\tshop-api: PR previews`);
+    // Switching to a second unrelated feature branch does NOT inherit the consumed pending plan.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/other\n", "utf8");
+    const otherChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(otherChk.stdout.trim(), "missing");
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/pr-preview\n", "utf8");
 
     // Worktree with `.git` pointer file resolves its own branch cleanly.
     const worktree = join(dir, "wt");
@@ -219,7 +258,7 @@ test("plans.mjs CLI records mode-0600 branch plans across subdirectories and wor
     await writeFile(join(worktree, ".git"), `gitdir: ${wtGitDir}\n`, "utf8");
     await writeFile(join(wtGitDir, "HEAD"), "ref: refs/heads/feat/wt-branch\n", "utf8");
 
-    const wtRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2, "wt plan"], {
+    const wtRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
       cwd: worktree,
       env,
       encoding: "utf8",
@@ -227,11 +266,11 @@ test("plans.mjs CLI records mode-0600 branch plans across subdirectories and wor
     assert.equal(wtRec.status, 0);
     assert.equal(wtRec.stdout.trim(), "recorded feat/wt-branch");
     const wtChk = spawnSync(process.execPath, [PLANS_SCRIPT, "check"], { cwd: worktree, env, encoding: "utf8" });
-    assert.equal(wtChk.stdout.trim(), `plan ${DOC_2}\twt plan`);
+    assert.equal(wtChk.stdout.trim(), `plan ${DOC_2}`);
 
     // Detached HEAD skips without error.
     await writeFile(join(wtGitDir, "HEAD"), "0123456789abcdef0123456789abcdef01234567\n", "utf8");
-    const detachedRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2, "detached"], {
+    const detachedRec = spawnSync(process.execPath, [PLANS_SCRIPT, "record", DOC_2], {
       cwd: worktree,
       env,
       encoding: "utf8",
@@ -239,19 +278,39 @@ test("plans.mjs CLI records mode-0600 branch plans across subdirectories and wor
     assert.equal(detachedRec.status, 0);
     assert.equal(detachedRec.stdout.trim(), "skipped no-branch");
 
+    // 0-byte stdin (e.g. failed `gh pr view`) exits 1 so an existing PR description is never wiped.
+    const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: "",
+      encoding: "utf8",
+    });
+    assert.equal(emptyStdin.status, 1);
+    assert.equal(emptyStdin.stdout, "");
+
+    // Empty PR body from `gh pr view --json body --jq .body` arrives as "\n" and succeeds.
+    const newlineOnly = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: "\n",
+      encoding: "utf8",
+    });
+    assert.equal(newlineOnly.status, 0);
+    assert.ok(newlineOnly.stdout.startsWith("<!-- unpaged-plan:start -->\n"));
+
     // Splice reads stdin and preserves backticks / $variables untouched.
-    const spliced = spawnSync(
-      process.execPath,
-      [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL, "shop-api: PR previews"],
-      {
-        cwd: repo,
-        env,
-        input: "Existing PR summary with `$PATH` and `code`.\n",
-        encoding: "utf8",
-      }
-    );
+    const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+      cwd: repo,
+      env,
+      input: "Existing PR summary with `$PATH` and `<!-- unpaged-plan:start -->`.\n",
+      encoding: "utf8",
+    });
     assert.equal(spliced.status, 0);
-    assert.ok(spliced.stdout.startsWith("Existing PR summary with `$PATH` and `code`.\n\n<!-- unpaged-plan:start -->\n"));
+    assert.ok(
+      spliced.stdout.startsWith(
+        "Existing PR summary with `$PATH` and `<!-- unpaged-plan:start -->`.\n\n<!-- unpaged-plan:start -->\n"
+      )
+    );
     assert.ok(spliced.stdout.includes(`${PREVIEW_URL}?v=1763281234`));
 
     // Forget removes matching documentId only.

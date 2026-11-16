@@ -50,12 +50,12 @@ The `unpaged` MCP server ships with this plugin (`mcp_config.json`). If its tool
 
 Resolve `<plugin-root>` as two levels up from this `SKILL.md` file:
 
-1. **Record this visual plan for the current git branch** (so opening a pull request later in this session or a new session on the same branch attaches the **Can view** invite link and preview automatically):
-   `node "<plugin-root>/monitors/plans.mjs" record <documentId> "<plan title>"`
-   It writes under `~/.gemini/unpaged/plans/` (mode `0600`, `tmp` + `rename`) and prints `recorded <branch>` (or `skipped no-branch` outside a git branch). If it prints `error EACCES` or `error EPERM` in Standard Sandbox Mode, re-run once with `BypassSandbox: true`.
+1. **Record this visual plan for the current git branch** (so opening a pull request later in this session or a new session on the same branch attaches the **Can view** invite link and preview automatically; never pass a canvas title on the shell command line):
+   `node "<plugin-root>/monitors/plans.mjs" record <documentId>`
+   It writes under `~/.gemini/unpaged/plans/` (mode `0600`, `tmp` + `rename`) and prints `recorded <branch>` (or `recorded pending-branch` when planning on `main` before creating a feature branch, or `skipped no-branch` outside a git branch). If it prints `error EACCES` or `error EPERM` in Standard Sandbox Mode, re-run once with `BypassSandbox: true`.
 2. **If an open pull request already exists for the current branch** (`gh` is on `PATH` and `gh pr view --json number,url,body,state` succeeds with `state: "OPEN"`):
    - Call `document_join_link({ documentId, role: "viewer" })` on the `unpaged` server. It reuses an existing active **Can view** team link (or creates one) and refreshes the server-rendered root preview so `<previewUrl>` serves the canvas image immediately. (If `document_join_link` is missing on an older server, skip and mention in one sentence that pull request previews need the current Unpaged server.)
-   - Pipe the existing PR body on stdin to `node "<plugin-root>/monitors/plans.mjs" splice "<url>" "<previewUrl>" "<plan title>"`, write its stdout to a temporary file outside the repository, run `gh pr edit "<prUrl>" --body-file "<tmpfile>"`, and delete `<tmpfile>`. It replaces only an existing `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` block in place or appends one after a blank line, preserving all surrounding PR description text.
+   - Write the current PR body to a temporary `<inFile>` outside the repository and splice into `<outFile>`: `gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/monitors/plans.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`, then delete `<inFile>` and `<outFile>`. It replaces only a standalone `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` block outside code fences in place or appends one after a blank line, preserving all surrounding PR description text.
 
 ## Finish
 

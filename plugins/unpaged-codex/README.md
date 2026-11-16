@@ -383,7 +383,14 @@ credential is stored in the database to allow reconnection; it is not an OAuth t
 Treat database backups as credentials. Never print or attach the database.
 Status and queued prompts contain routing metadata, not comment text or keys.
 The local tool and SessionStart hook use that same default directory; the MCP
-server forwards the native `CODEX_HOME` setting. Only the legacy CLI supports
+server forwards the native `CODEX_HOME` setting. Branch-scoped visual-plan records
+live alongside it under `${CODEX_HOME:-~/.codex}/unpaged/plans/` (mode `0600`); when a
+branch with a recorded visual plan has or opens a GitHub pull request, the agent
+writes that canvas's **Can view** `/join/<token>` link and `/join/<token>/preview.png`
+image URL into the pull request description via `gh pr edit` (on public repositories,
+anyone reading the pull request can view the canvas through that link and GitHub's
+image proxy fetches the preview picture; revoking the team link in Unpaged disables
+access). Only the legacy CLI supports
 `--data` for isolated tests or explicitly approved host maintenance. The local
 tool never accepts a data-path override.
 

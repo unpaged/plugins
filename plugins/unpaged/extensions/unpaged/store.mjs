@@ -1,7 +1,8 @@
 // Local state for the GitHub Copilot session extension: per-canvas listener
-// keys and architecture verdicts under <copilotHome>/unpaged/ (mode 0700 dirs,
-// mode 0600 files written via tmp + rename), plus reading .unpaged/architecture.json
-// at the git repository root. Never writes to stdout.
+// keys, architecture verdicts, and feature-branch visual plans under
+// <copilotHome>/unpaged/ (mode 0700 dirs, mode 0600 files written via tmp +
+// rename), plus reading .unpaged/architecture.json at the git repository root.
+// Never writes to stdout.
 import { access, link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
@@ -14,9 +15,12 @@ import {
   retireKeyFile,
 } from "../../monitors/listen-core.mjs";
 import {
+  isDefaultBranchName,
   normalizePlanRecord,
   parseGitHeadBranch,
+  parseOriginHeadBranch,
   planStoreKey,
+  resolveCommonGitDir,
   resolveGitDirPointer,
 } from "../../monitors/pr-preview-core.mjs";
 
@@ -181,17 +185,41 @@ export function createCopilotStore({
     }
   }
 
+  async function readOriginDefaultBranch(gitDir) {
+    const candidates = [join(gitDir, "refs", "remotes", "origin", "HEAD")];
+    try {
+      const commonRaw = await fs.readFile(join(gitDir, "commondir"), "utf8");
+      const commonDir = resolveCommonGitDir(commonRaw, gitDir);
+      if (commonDir && commonDir !== gitDir) {
+        candidates.push(join(commonDir, "refs", "remotes", "origin", "HEAD"));
+      }
+    } catch {
+      // Standard .git directory has no commondir file.
+    }
+    for (const candidate of candidates) {
+      try {
+        const parsed = parseOriginHeadBranch(await fs.readFile(candidate, "utf8"));
+        if (parsed) return parsed;
+      } catch {
+        // Try next candidate.
+      }
+    }
+    return null;
+  }
+
   async function resolveRepositoryBranch(startDir) {
     const repoTopLevel = await findRepositoryRoot(startDir);
     if (!repoTopLevel) return null;
+    let gitDir = join(repoTopLevel, ".git");
     let headRaw = null;
     try {
-      headRaw = await fs.readFile(join(repoTopLevel, ".git", "HEAD"), "utf8");
+      headRaw = await fs.readFile(join(gitDir, "HEAD"), "utf8");
     } catch {
       try {
-        const dotGitRaw = await fs.readFile(join(repoTopLevel, ".git"), "utf8");
-        const gitDir = resolveGitDirPointer(dotGitRaw, repoTopLevel);
-        if (gitDir) {
+        const dotGitRaw = await fs.readFile(gitDir, "utf8");
+        const resolved = resolveGitDirPointer(dotGitRaw, repoTopLevel);
+        if (resolved) {
+          gitDir = resolved;
           headRaw = await fs.readFile(join(gitDir, "HEAD"), "utf8");
         }
       } catch {
@@ -199,13 +227,29 @@ export function createCopilotStore({
       }
     }
     const branch = parseGitHeadBranch(headRaw);
-    return branch ? { repoTopLevel, branch } : null;
+    if (!branch) return { repoTopLevel, branch: null, isDefaultBranch: false };
+    const defaultBranch = await readOriginDefaultBranch(gitDir);
+    return {
+      repoTopLevel,
+      branch,
+      isDefaultBranch: isDefaultBranchName(branch, defaultBranch),
+    };
   }
 
   async function saveBranchPlan({ cwd, documentId, title = "", updatedAt = "" } = {}) {
     if (!isDocumentId(documentId)) return null;
     const branchCtx = await resolveRepositoryBranch(cwd);
     if (!branchCtx) return null;
+    if (!branchCtx.branch || branchCtx.isDefaultBranch) {
+      // Never persist a cross-session plan record keyed to the default branch.
+      return {
+        persisted: false,
+        documentId,
+        title: typeof title === "string" ? title.replace(/[\r\n\t]+/g, " ").trim() : "",
+        repoTopLevel: branchCtx.repoTopLevel,
+        branch: branchCtx.branch,
+      };
+    }
     const record = normalizePlanRecord({
       documentId,
       title,
@@ -216,12 +260,12 @@ export function createCopilotStore({
     const file = record ? planFileFor(record.repoTopLevel, record.branch) : null;
     if (!record || !file) return null;
     await writeAtomicJson(planDir, file, record);
-    return record;
+    return { ...record, persisted: true };
   }
 
   async function loadBranchPlan(cwd) {
     const branchCtx = await resolveRepositoryBranch(cwd);
-    if (!branchCtx) return null;
+    if (!branchCtx || !branchCtx.branch || branchCtx.isDefaultBranch) return null;
     const file = planFileFor(branchCtx.repoTopLevel, branchCtx.branch);
     if (!file) return null;
     try {

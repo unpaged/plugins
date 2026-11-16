@@ -2,14 +2,16 @@
 // Unpaged for Codex. Produces the exact same bounded Markdown section as the
 // Claude Code, GitHub Copilot, and Antigravity plugins.
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { UUID } from "./protocol.mjs";
 
 export const PR_SECTION_START = "<!-- unpaged-plan:start -->";
 export const PR_SECTION_END = "<!-- unpaged-plan:end -->";
+export const PENDING_PLAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const JOIN_PATH_PATTERN = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
+const COMMON_DEFAULT_BRANCHES = new Set(["main", "master", "trunk"]);
 
 export function parseGitHeadBranch(rawHead) {
   if (typeof rawHead !== "string") return null;
@@ -31,6 +33,21 @@ export function parseGitHeadBranch(rawHead) {
   return branch;
 }
 
+export function parseOriginHeadBranch(rawOriginHead) {
+  if (typeof rawOriginHead !== "string") return null;
+  const match = rawOriginHead.trim().match(/^ref:\s*refs\/remotes\/[^/\s]+\/(.+)$/);
+  if (!match) return null;
+  return parseGitHeadBranch(`ref: refs/heads/${match[1]}`);
+}
+
+export function isDefaultBranchName(branch, originDefaultBranch = null) {
+  if (typeof branch !== "string" || !branch) return false;
+  if (typeof originDefaultBranch === "string" && originDefaultBranch) {
+    return branch === originDefaultBranch;
+  }
+  return COMMON_DEFAULT_BRANCHES.has(branch);
+}
+
 export function resolveGitDirPointer(rawDotGit, repoTopLevel) {
   if (typeof rawDotGit !== "string" || typeof repoTopLevel !== "string" || !repoTopLevel) {
     return null;
@@ -40,6 +57,14 @@ export function resolveGitDirPointer(rawDotGit, repoTopLevel) {
   const target = firstLine.slice("gitdir:".length).trim();
   if (!target || /[\0\r\n]/.test(target)) return null;
   return resolve(repoTopLevel, target);
+}
+
+export function resolveCommonGitDir(rawCommonDir, gitDir) {
+  if (typeof gitDir !== "string" || !gitDir) return null;
+  if (typeof rawCommonDir !== "string" || !rawCommonDir.trim()) return gitDir;
+  const target = rawCommonDir.split(/\r?\n/, 1)[0].trim();
+  if (!target || /[\0\r\n]/.test(target)) return gitDir;
+  return resolve(gitDir, target);
 }
 
 export function planStoreKey(repoTopLevel, branch) {
@@ -53,6 +78,13 @@ export function planStoreKey(repoTopLevel, branch) {
     return null;
   }
   return `plan:${repoTopLevel.replace(/[\\/]+$/, "")}\n${branch}`;
+}
+
+export function pendingPlanStoreKey(repoTopLevel) {
+  if (typeof repoTopLevel !== "string" || !repoTopLevel.trim() || /[\0\r\n]/.test(repoTopLevel)) {
+    return null;
+  }
+  return `pending:${repoTopLevel.replace(/[\\/]+$/, "")}`;
 }
 
 export function escapeMarkdownText(rawTitle) {
@@ -128,6 +160,47 @@ export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
   ].join("\n");
 }
 
+function findStandaloneMarkers(body) {
+  const starts = [];
+  const ends = [];
+  let fenceChar = null;
+  let fenceLen = 0;
+  let offset = 0;
+
+  while (offset <= body.length) {
+    const nl = body.indexOf("\n", offset);
+    const lineEnd = nl === -1 ? body.length : nl;
+    const contentEnd = lineEnd > offset && body[lineEnd - 1] === "\r" ? lineEnd - 1 : lineEnd;
+    const line = body.slice(offset, contentEnd);
+
+    if (fenceChar !== null) {
+      const closeMatch = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closeMatch && closeMatch[1][0] === fenceChar && closeMatch[1].length >= fenceLen) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
+    } else {
+      const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
+        fenceChar = openMatch[1][0];
+        fenceLen = openMatch[1].length;
+      } else {
+        const trimmed = line.trim();
+        if (trimmed === PR_SECTION_START) {
+          starts.push({ start: offset, end: contentEnd });
+        } else if (trimmed === PR_SECTION_END) {
+          ends.push({ start: offset, end: contentEnd });
+        }
+      }
+    }
+
+    if (nl === -1) break;
+    offset = nl + 1;
+  }
+
+  return { starts, ends };
+}
+
 export function splicePrPlanSection(existingBody, section) {
   if (
     typeof section !== "string" ||
@@ -137,16 +210,43 @@ export function splicePrPlanSection(existingBody, section) {
     throw new Error("invalid_pr_plan_section");
   }
   const body = typeof existingBody === "string" ? existingBody : "";
-  const startIdx = body.indexOf(PR_SECTION_START);
-  const endIdx = startIdx >= 0 ? body.indexOf(PR_SECTION_END, startIdx + PR_SECTION_START.length) : -1;
-  if (startIdx >= 0 && endIdx >= 0) {
-    const before = body.slice(0, startIdx);
-    const after = body.slice(endIdx + PR_SECTION_END.length);
+  const { starts, ends } = findStandaloneMarkers(body);
+
+  if (starts.length === 0 && ends.length === 0) {
+    if (!body.trim()) return `${section}\n`;
+    const withoutTrailingNewlines = body.replace(/(?:\r?\n)+$/, "");
+    return `${withoutTrailingNewlines}\n\n${section}\n`;
+  }
+
+  if (starts.length === 1 && ends.length === 1 && starts[0].start < ends[0].start) {
+    const before = body.slice(0, starts[0].start);
+    const after = body.slice(ends[0].end);
     return `${before}${section}${after}`;
   }
-  if (!body.trim()) return `${section}\n`;
-  const withoutTrailingNewlines = body.replace(/(?:\r?\n)+$/, "");
-  return `${withoutTrailingNewlines}\n\n${section}\n`;
+
+  throw new Error("ambiguous_pr_plan_section");
+}
+
+async function readOriginDefaultBranch(gitDir) {
+  const candidates = [join(gitDir, "refs", "remotes", "origin", "HEAD")];
+  try {
+    const commonRaw = await readFile(join(gitDir, "commondir"), "utf8");
+    const commonDir = resolveCommonGitDir(commonRaw, gitDir);
+    if (commonDir && commonDir !== gitDir) {
+      candidates.push(join(commonDir, "refs", "remotes", "origin", "HEAD"));
+    }
+  } catch {
+    // Normal .git directory has no commondir file.
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = parseOriginHeadBranch(await readFile(candidate, "utf8"));
+      if (parsed) return parsed;
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null;
 }
 
 export async function resolveRepositoryBranch(startDir) {
@@ -165,7 +265,13 @@ export async function resolveRepositoryBranch(startDir) {
       if (!gitDir) return null;
       const headRaw = await readFile(join(gitDir, "HEAD"), "utf8");
       const branch = parseGitHeadBranch(headRaw);
-      return branch ? { repoTopLevel: folder, branch } : null;
+      if (!branch) return null;
+      const defaultBranch = await readOriginDefaultBranch(gitDir);
+      return {
+        repoTopLevel: folder,
+        branch,
+        isDefaultBranch: isDefaultBranchName(branch, defaultBranch),
+      };
     } catch {
       // Walk upward.
     }
@@ -183,31 +289,100 @@ function planFileFor(dataDir, repoTopLevel, branch) {
   return join(dataDir, "plans", `${hash}.json`);
 }
 
+function pendingPlanFileFor(dataDir, repoTopLevel) {
+  const key = pendingPlanStoreKey(repoTopLevel);
+  if (!key) return null;
+  const hash = createHash("sha256").update(key).digest("hex");
+  return join(dataDir, "plans", `${hash}.json`);
+}
+
+async function writeAtomicPlanFile(dataDir, file, value) {
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  await mkdir(join(dataDir, "plans"), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(tmp, file);
+}
+
 export async function recordBranchPlan({ dataDir, cwd, documentId, title = "" }) {
   if (!UUID.test(documentId || "")) throw new Error("invalid_document_id");
   const branchCtx = await resolveRepositoryBranch(cwd);
   if (!branchCtx) return { recorded: false };
+  const cleanTitle = typeof title === "string" ? title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 500) : "";
+  const updatedAt = new Date().toISOString();
+
+  if (branchCtx.isDefaultBranch) {
+    const pendingFile = pendingPlanFileFor(dataDir, branchCtx.repoTopLevel);
+    if (!pendingFile) return { recorded: false };
+    await writeAtomicPlanFile(dataDir, pendingFile, {
+      documentId,
+      title: cleanTitle,
+      repoTopLevel: branchCtx.repoTopLevel,
+      updatedAt,
+    });
+    return { recorded: true, documentId, title: cleanTitle, branch: branchCtx.branch };
+  }
+
   const file = planFileFor(dataDir, branchCtx.repoTopLevel, branchCtx.branch);
   if (!file) return { recorded: false };
-  const cleanTitle = typeof title === "string" ? title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 500) : "";
   const record = {
     documentId,
     title: cleanTitle,
     repoTopLevel: branchCtx.repoTopLevel,
     branch: branchCtx.branch,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   };
-  await mkdir(dataDir, { recursive: true, mode: 0o700 });
-  await mkdir(join(dataDir, "plans"), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  await rename(tmp, file);
+  await writeAtomicPlanFile(dataDir, file, record);
+  const pendingFile = pendingPlanFileFor(dataDir, branchCtx.repoTopLevel);
+  if (pendingFile) await rm(pendingFile, { force: true }).catch(() => {});
   return { recorded: true, documentId, title: cleanTitle, branch: branchCtx.branch };
+}
+
+async function promotePendingBranchPlan(dataDir, branchCtx) {
+  const pendingFile = pendingPlanFileFor(dataDir, branchCtx.repoTopLevel);
+  const targetFile = planFileFor(dataDir, branchCtx.repoTopLevel, branchCtx.branch);
+  if (!pendingFile || !targetFile) return null;
+  try {
+    const parsed = JSON.parse(await readFile(pendingFile, "utf8"));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !UUID.test(parsed.documentId || "") ||
+      parsed.repoTopLevel !== branchCtx.repoTopLevel
+    ) {
+      return null;
+    }
+    const ageMs = Date.now() - Date.parse(String(parsed.updatedAt || ""));
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > PENDING_PLAN_MAX_AGE_MS) {
+      await rm(pendingFile, { force: true }).catch(() => {});
+      return null;
+    }
+    const cleanTitle = typeof parsed.title === "string" ? parsed.title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 500) : "";
+    const updatedAt = new Date().toISOString();
+    const record = {
+      documentId: parsed.documentId,
+      title: cleanTitle,
+      repoTopLevel: branchCtx.repoTopLevel,
+      branch: branchCtx.branch,
+      updatedAt,
+    };
+    await writeAtomicPlanFile(dataDir, targetFile, record);
+    await rm(pendingFile, { force: true }).catch(() => {});
+    return {
+      recorded: true,
+      documentId: record.documentId,
+      title: cleanTitle,
+      branch: record.branch,
+      updatedAt,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function lookupBranchPlan({ dataDir, cwd }) {
   const branchCtx = await resolveRepositoryBranch(cwd);
-  if (!branchCtx) return { recorded: false };
+  if (!branchCtx || branchCtx.isDefaultBranch) return { recorded: false };
   const file = planFileFor(dataDir, branchCtx.repoTopLevel, branchCtx.branch);
   if (!file) return { recorded: false };
   try {
@@ -229,12 +404,16 @@ export async function lookupBranchPlan({ dataDir, cwd }) {
       branch: parsed.branch,
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
     };
-  } catch {
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return (await promotePendingBranchPlan(dataDir, branchCtx)) ?? { recorded: false };
+    }
     return { recorded: false };
   }
 }
 
-export function buildSplicedPrBody({ url, previewUrl, title = "", body = "", version } = {}) {
+export function buildSplicedPrBody({ url, previewUrl, title = "", body, version } = {}) {
+  if (typeof body !== "string") throw new Error("invalid_pr_body");
   const validated = parseJoinLinkUrls({ url, previewUrl });
   if (!validated) throw new Error("invalid_join_link_url");
   const resolvedVersion =

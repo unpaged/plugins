@@ -737,3 +737,58 @@ test("records visual plans per git branch and injects PR preview context on gh p
     controller.shutdown();
   });
 });
+
+test("plans created on the default branch stay out of persistent main storage and promote onto the feature branch on gh pr create", async () => {
+  await withTempDir(async (dir) => {
+    const copilotHome = join(dir, "copilot-home");
+    const repo = join(dir, "repo");
+    await mkdir(join(repo, ".git", "refs", "remotes", "origin"), { recursive: true });
+    await writeFile(join(repo, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/main\n", "utf8");
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+
+    const store = createCopilotStore({ copilotHome, pid: 7778 });
+    const controller = createUnpagedCopilotController({
+      executeTool: async () => ({
+        resultType: "success",
+        textResultForLlm: JSON.stringify(mintPayload(DOC_A)),
+      }),
+      getCwd: async () => repo,
+      store,
+      poll: async () => ({ events: [], nextCursor: null, cadence: {} }),
+    });
+
+    await controller.hooks.onPostToolUse({
+      toolName: "unpaged-document_create",
+      toolArgs: { title: "shop-api: Planned on main", folderId: "visual-plans" },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: JSON.stringify({ id: DOC_A, title: "shop-api: Planned on main" }),
+      },
+      workingDirectory: repo,
+    });
+    // Nothing persisted under `main`.
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    // Checkout feature branch in the same session and create PR -> attaches and promotes to `feat/from-main`.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feat/from-main\n", "utf8");
+    const prCreated = await controller.hooks.onPostToolUse({
+      toolName: "bash",
+      toolArgs: { command: 'gh pr create --title "Feat" --body "Body"' },
+      toolResult: {
+        resultType: "success",
+        textResultForLlm: "https://github.com/acme/shop/pull/88\n",
+      },
+      workingDirectory: repo,
+    });
+    assert.ok(prCreated?.additionalContext?.includes(DOC_A));
+    const promoted = await store.loadBranchPlan(repo);
+    assert.equal(promoted?.documentId, DOC_A);
+    assert.equal(promoted?.branch, "feat/from-main");
+
+    // Switching back to `main` still has no persistent plan record.
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    assert.equal(await store.loadBranchPlan(repo), null);
+
+    controller.shutdown();
+  });
+});

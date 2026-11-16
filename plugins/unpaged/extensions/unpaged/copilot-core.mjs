@@ -259,6 +259,7 @@ export function createUnpagedCopilotController({
   const timers = new Set();
   let cachedMetadata = null;
   let lastWorkingDirectory = null;
+  let sessionPlan = null;
   let closed = false;
 
   async function currentCwd() {
@@ -636,6 +637,7 @@ export function createUnpagedCopilotController({
 
   function shutdown() {
     closed = true;
+    sessionPlan = null;
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
     for (const loop of loops.values()) {
@@ -662,14 +664,17 @@ export function createUnpagedCopilotController({
         const documentId = str(args?.documentId);
         const title = str(args?.title) || null;
         if (args?.plan === true && isDocumentId(documentId) && typeof store.saveBranchPlan === "function") {
-          await store
+          const saved = await store
             .saveBranchPlan({
               cwd: await currentCwd(),
               documentId,
               title: title || "",
               updatedAt: new Date(now()).toISOString(),
             })
-            .catch(() => {});
+            .catch(() => null);
+          if (saved?.repoTopLevel) {
+            sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
+          }
         }
         try {
           const result = await arm(documentId, title);
@@ -909,6 +914,7 @@ export function createUnpagedCopilotController({
 
       if (mcpTool === "document_delete") {
         const documentId = str(args.documentId);
+        if (sessionPlan?.documentId === documentId) sessionPlan = null;
         if (typeof store.forgetBranchPlanByDocumentId === "function") {
           await store.forgetBranchPlanByDocumentId(documentId).catch(() => {});
         }
@@ -934,14 +940,17 @@ export function createUnpagedCopilotController({
             str(args.folderId) === "visual-plans" &&
             typeof store.saveBranchPlan === "function"
           ) {
-            await store
+            const saved = await store
               .saveBranchPlan({
                 cwd: wd || (await currentCwd()),
                 documentId,
                 title: title || "",
                 updatedAt: new Date(now()).toISOString(),
               })
-              .catch(() => {});
+              .catch(() => null);
+            if (saved?.repoTopLevel) {
+              sessionPlan = { repoTopLevel: saved.repoTopLevel, documentId, title: title || "" };
+            }
           }
         }
         if (
@@ -964,7 +973,24 @@ export function createUnpagedCopilotController({
         isError: false,
       });
       if (createdPr && typeof store.loadBranchPlan === "function") {
-        const plan = await store.loadBranchPlan(wd || (await currentCwd()));
+        const targetCwd = wd || (await currentCwd());
+        let plan = await store.loadBranchPlan(targetCwd);
+        if (!plan && sessionPlan && typeof store.resolveRepositoryBranch === "function") {
+          const branchCtx = await store.resolveRepositoryBranch(targetCwd);
+          if (branchCtx && branchCtx.repoTopLevel === sessionPlan.repoTopLevel) {
+            plan = sessionPlan;
+            if (branchCtx.branch && !branchCtx.isDefaultBranch && typeof store.saveBranchPlan === "function") {
+              await store
+                .saveBranchPlan({
+                  cwd: targetCwd,
+                  documentId: plan.documentId,
+                  title: plan.title,
+                  updatedAt: new Date(now()).toISOString(),
+                })
+                .catch(() => {});
+            }
+          }
+        }
         if (plan) {
           const context = prPlanAttachContext({
             documentId: plan.documentId,

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Branch-scoped visual-plan records and bounded PR-body splicing for the
-// Unpaged plugin — plain named CLI verbs so commands never run inline `node -e`:
+// Unpaged plugin — plain named CLI verbs so commands never run inline `node -e`
+// and never pass collaborator-editable titles on argv:
 //
-//   node plans.mjs record <documentId> [title]       recorded <branch> | skipped no-branch
-//   node plans.mjs check                             plan <documentId>\t<title> | missing
-//   node plans.mjs forget <documentId>|all           forgotten <count>
-//   node plans.mjs splice <url> [previewUrl] [title] reads PR body on stdin → writes spliced body on stdout
+//   node plans.mjs record <documentId>       recorded <branch>|pending-branch | skipped no-branch
+//   node plans.mjs check                     plan <documentId> | missing
+//   node plans.mjs forget <documentId>|all   forgotten <count>
+//   node plans.mjs splice <url> [previewUrl] reads non-empty PR body on stdin → writes spliced body on stdout
 //
 // Stores records under ~/.claude/unpaged/plans/<sha256>.json (mode 0600,
 // atomic tmp + rename) and never writes inside the git working tree. Plain Node ≥ 22.
@@ -16,16 +17,21 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDocumentId } from "./listen-core.mjs";
 import {
+  isDefaultBranchName,
   normalizePlanRecord,
   parseGitHeadBranch,
   parseJoinLinkUrls,
+  parseOriginHeadBranch,
+  pendingPlanStoreKey,
   planStoreKey,
   renderPrPlanSection,
+  resolveCommonGitDir,
   resolveGitDirPointer,
   splicePrPlanSection,
 } from "./pr-preview-core.mjs";
 
 export const PLAN_DIR_RELATIVE = ".claude/unpaged/plans";
+export const PENDING_PLAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const home = homedir();
 const planDir = join(home, PLAN_DIR_RELATIVE);
@@ -53,6 +59,35 @@ export function planFileName(repoTopLevel, branch) {
   return `${hash}.json`;
 }
 
+export function pendingPlanFileName(repoTopLevel) {
+  const key = pendingPlanStoreKey(repoTopLevel);
+  if (!key) return null;
+  const hash = createHash("sha256").update(key).digest("hex");
+  return `${hash}.json`;
+}
+
+async function readOriginDefaultBranch(gitDir, fs) {
+  const candidates = [join(gitDir, "refs", "remotes", "origin", "HEAD")];
+  try {
+    const commonRaw = await fs.readFile(join(gitDir, "commondir"), "utf8");
+    const commonDir = resolveCommonGitDir(commonRaw, gitDir);
+    if (commonDir && commonDir !== gitDir) {
+      candidates.push(join(commonDir, "refs", "remotes", "origin", "HEAD"));
+    }
+  } catch {
+    // Normal .git directory has no commondir file.
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = parseOriginHeadBranch(await fs.readFile(candidate, "utf8"));
+      if (parsed) return parsed;
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null;
+}
+
 export async function resolveRepositoryBranch(startDir, fs = { readFile, stat }) {
   if (typeof startDir !== "string" || !startDir) return null;
   let folder = resolve(startDir);
@@ -69,7 +104,13 @@ export async function resolveRepositoryBranch(startDir, fs = { readFile, stat })
       if (!gitDir) return null;
       const headRaw = await fs.readFile(join(gitDir, "HEAD"), "utf8");
       const branch = parseGitHeadBranch(headRaw);
-      return branch ? { repoTopLevel: folder, branch } : null;
+      if (!branch) return null;
+      const defaultBranch = await readOriginDefaultBranch(gitDir, fs);
+      return {
+        repoTopLevel: folder,
+        branch,
+        isDefaultBranch: isDefaultBranchName(branch, defaultBranch),
+      };
     } catch {
       // Keep walking upward until filesystem root.
     }
@@ -80,18 +121,16 @@ export async function resolveRepositoryBranch(startDir, fs = { readFile, stat })
   return null;
 }
 
-async function writeAtomicPlan(record) {
-  const fileName = planFileName(record.repoTopLevel, record.branch);
-  if (!fileName) throw new Error("invalid_branch_plan");
+async function writeAtomicJson(fileName, value) {
   await mkdir(join(home, ".claude", "unpaged"), { recursive: true, mode: 0o700 });
   await mkdir(planDir, { recursive: true, mode: 0o700 });
   const target = join(planDir, fileName);
   const tmp = `${target}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await rename(tmp, target);
 }
 
-async function recordPlan(documentId, titleArg) {
+async function recordPlan(documentId) {
   if (!isDocumentId(documentId)) {
     say("error not a document id");
     return 1;
@@ -101,25 +140,80 @@ async function recordPlan(documentId, titleArg) {
     say("skipped no-branch");
     return 0;
   }
+  const updatedAt = new Date().toISOString();
+  if (branchCtx.isDefaultBranch) {
+    const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
+    if (!pendingName) {
+      say("skipped no-branch");
+      return 0;
+    }
+    await writeAtomicJson(pendingName, {
+      documentId,
+      repoTopLevel: branchCtx.repoTopLevel,
+      updatedAt,
+    });
+    say("recorded pending-branch");
+    return 0;
+  }
+
   const record = normalizePlanRecord({
     documentId,
-    title: typeof titleArg === "string" ? titleArg : "",
+    title: "",
     repoTopLevel: branchCtx.repoTopLevel,
     branch: branchCtx.branch,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   });
-  if (!record) {
+  const fileName = record ? planFileName(record.repoTopLevel, record.branch) : null;
+  if (!record || !fileName) {
     say("skipped no-branch");
     return 0;
   }
-  await writeAtomicPlan(record);
+  await writeAtomicJson(fileName, record);
+  const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
+  if (pendingName) await rm(join(planDir, pendingName), { force: true }).catch(() => {});
   say(`recorded ${record.branch}`);
   return 0;
 }
 
+async function promotePendingPlan(branchCtx) {
+  const pendingName = pendingPlanFileName(branchCtx.repoTopLevel);
+  if (!pendingName) return null;
+  const pendingPath = join(planDir, pendingName);
+  try {
+    const parsed = JSON.parse(await readFile(pendingPath, "utf8"));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !isDocumentId(parsed.documentId) ||
+      parsed.repoTopLevel !== branchCtx.repoTopLevel
+    ) {
+      return null;
+    }
+    const ageMs = Date.now() - Date.parse(String(parsed.updatedAt || ""));
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > PENDING_PLAN_MAX_AGE_MS) {
+      await rm(pendingPath, { force: true }).catch(() => {});
+      return null;
+    }
+    const promoted = normalizePlanRecord({
+      documentId: parsed.documentId,
+      title: "",
+      repoTopLevel: branchCtx.repoTopLevel,
+      branch: branchCtx.branch,
+      updatedAt: new Date().toISOString(),
+    });
+    const fileName = promoted ? planFileName(promoted.repoTopLevel, promoted.branch) : null;
+    if (!promoted || !fileName) return null;
+    await writeAtomicJson(fileName, promoted);
+    await rm(pendingPath, { force: true }).catch(() => {});
+    return promoted;
+  } catch {
+    return null;
+  }
+}
+
 async function checkPlan() {
   const branchCtx = await resolveRepositoryBranch(process.cwd());
-  if (!branchCtx) {
+  if (!branchCtx || branchCtx.isDefaultBranch) {
     say("missing");
     return 0;
   }
@@ -139,12 +233,12 @@ async function checkPlan() {
       say("missing");
       return 0;
     }
-    const cleanTitle = parsed.title.replace(/[\t\r\n]+/g, " ").trim();
-    say(cleanTitle ? `plan ${parsed.documentId}\t${cleanTitle}` : `plan ${parsed.documentId}`);
+    say(`plan ${parsed.documentId}`);
     return 0;
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      say("missing");
+      const promoted = await promotePendingPlan(branchCtx);
+      say(promoted ? `plan ${promoted.documentId}` : "missing");
       return 0;
     }
     const code = error && typeof error.code === "string" ? error.code : "read-failed";
@@ -175,8 +269,8 @@ async function forgetPlan(target) {
     }
     if (!name.endsWith(".json")) continue;
     try {
-      const parsed = normalizePlanRecord(JSON.parse(await readFile(full, "utf8")));
-      if (parsed && parsed.documentId === target) {
+      const parsed = JSON.parse(await readFile(full, "utf8"));
+      if (parsed && typeof parsed === "object" && parsed.documentId === target) {
         await rm(full, { force: true });
         count += 1;
       }
@@ -188,47 +282,54 @@ async function forgetPlan(target) {
   return 0;
 }
 
-async function spliceFromStdin(url, previewUrlArg, titleArg) {
-  // Allow 2-arg form `splice <url> <title>` when the 2nd arg is not an https:// URL.
-  let previewUrl = previewUrlArg;
-  let title = titleArg;
-  if (typeof previewUrlArg === "string" && previewUrlArg && !previewUrlArg.startsWith("https://") && titleArg === undefined) {
-    previewUrl = undefined;
-    title = previewUrlArg;
-  }
+async function spliceFromStdin(url, previewUrl) {
   const validated = parseJoinLinkUrls({ url, previewUrl });
   if (!validated) {
     process.stderr.write("plans.mjs splice: url must be an Unpaged https /join/<token> link\n");
     return 1;
   }
-  const existingBody = process.stdin.isTTY ? "" : await readStdin();
+  if (process.stdin.isTTY) {
+    process.stderr.write("plans.mjs splice: expected existing PR body on stdin (stdin is a TTY)\n");
+    return 1;
+  }
+  const existingBody = await readStdin();
+  if (existingBody.length === 0) {
+    process.stderr.write(
+      "plans.mjs splice: expected existing PR body on stdin (0 bytes received; check that gh pr view succeeded)\n"
+    );
+    return 1;
+  }
   const envVersion = process.env.UNPAGED_PREVIEW_VERSION ? Number(process.env.UNPAGED_PREVIEW_VERSION) : 0;
   const version = Number.isSafeInteger(envVersion) && envVersion > 0 ? envVersion : Math.floor(Date.now() / 1000);
-  const section = renderPrPlanSection({
-    title: typeof title === "string" ? title : "",
-    url: validated.url,
-    previewUrl: validated.previewUrl,
-    version,
-  });
-  process.stdout.write(splicePrPlanSection(existingBody, section));
-  return 0;
+  try {
+    const section = renderPrPlanSection({
+      title: "",
+      url: validated.url,
+      previewUrl: validated.previewUrl,
+      version,
+    });
+    process.stdout.write(splicePrPlanSection(existingBody, section));
+    return 0;
+  } catch (error) {
+    const reason = error && error.message ? error.message : String(error);
+    process.stderr.write(`plans.mjs splice: ${reason}\n`);
+    return 1;
+  }
 }
 
 async function main() {
-  const [verb, first, second, third] = process.argv.slice(2);
+  const [verb, first, second] = process.argv.slice(2);
   switch (verb) {
     case "record":
-      return recordPlan(first, second);
+      return recordPlan(first);
     case "check":
       return checkPlan();
     case "forget":
       return forgetPlan(first);
     case "splice":
-      return spliceFromStdin(first, second, third);
+      return spliceFromStdin(first, second);
     default:
-      say(
-        "usage: plans.mjs record <documentId> [title] | check | forget <documentId>|all | splice <url> [previewUrl] [title]"
-      );
+      say("usage: plans.mjs record <documentId> | check | forget <documentId>|all | splice <url> [previewUrl]");
       return 1;
   }
 }

@@ -31,7 +31,7 @@
 // script that older clients keep using; this file is its host.
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
-import type { ArchitectureLight, ArmedCanvas } from '../types'
+import type { ArchitectureLight, ArmedCanvas, SessionPlan } from '../types'
 import {
   ACK_TEXT,
   PROTOCOL_PREAMBLE,
@@ -47,10 +47,13 @@ import {
   GITHUB_PR_CREATE_TOOL,
   PR_CREATE_COMMAND,
   extractCreatedPullRequest,
+  isDefaultBranchName,
   normalizePlanRecord,
   parseGitHeadBranch,
+  parseOriginHeadBranch,
   planStoreKey,
   prPlanAttachContext,
+  resolveCommonGitDir,
   resolveGitDirPointer,
 } from '../monitors/pr-preview-core.mjs'
 import {
@@ -143,11 +146,13 @@ const armed = atom({ plugin: 'unpaged', key: 'armed' } as const, [] as ArmedCanv
 const replying = atom({ plugin: 'unpaged', key: 'replying' } as const, [] as string[])
 const armedOnce = atom({ plugin: 'unpaged', key: 'armedOnce' } as const, [] as string[])
 const acked = atom({ plugin: 'unpaged', key: 'acked' } as const, [] as string[])
+const sessionPlan = atom({ plugin: 'unpaged', key: 'sessionPlan' } as const, null as SessionPlan | null)
 
 // Module records: the truth for what this module runs. The atoms are the
 // band's view of them, rewritten on every change; after a hot reload the
 // atoms are what is left, and the loops are started again from them.
 const canvases = new Map<string, ArmedCanvas>()
+let currentSessionPlan: SessionPlan | null = null
 const loops = new Map<string, Loop>()
 /** Arms in flight, so two calls for one canvas mint one key, not two. */
 const arming = new Map<string, Promise<ArmResult>>()
@@ -331,6 +336,7 @@ async function sync($: Api) {
   await update($, armed, () => list)
   await update($, armedOnce, () => [...armedBefore])
   await update($, acked, () => [...ackedEvents])
+  await update($, sessionPlan, () => currentSessionPlan)
 }
 
 function record(documentId: string, changes: Partial<ArmedCanvas>) {
@@ -800,6 +806,8 @@ async function statusText($: Api) {
 async function restoreAfterReload($: Api) {
   for (const documentId of await read($, armedOnce)) armedBefore.add(documentId)
   for (const id of await read($, acked)) ackedEvents.add(id)
+  const keptPlan = await read($, sessionPlan)
+  if (keptPlan && !currentSessionPlan) currentSessionPlan = keptPlan
   const kept = await read($, armed)
   for (const canvas of kept) {
     armedBefore.add(canvas.documentId)
@@ -869,26 +877,56 @@ async function isRepository($: Api) {
   return (await repositoryRoot($)) !== null
 }
 
+async function originDefaultBranch($: Api, gitDir: string): Promise<string | null> {
+  const candidates = [`${gitDir}/refs/remotes/origin/HEAD`]
+  try {
+    const commonDirFile = `${gitDir}/commondir`
+    if (await $.fs.exists(commonDirFile)) {
+      const commonDir = resolveCommonGitDir(await $.fs.read(commonDirFile), gitDir)
+      if (commonDir && commonDir !== gitDir) {
+        candidates.push(`${commonDir}/refs/remotes/origin/HEAD`)
+      }
+    }
+  } catch {
+    // Normal .git directory has no commondir file.
+  }
+  for (const candidate of candidates) {
+    try {
+      if (await $.fs.exists(candidate)) {
+        const parsed = parseOriginHeadBranch(await $.fs.read(candidate))
+        if (parsed) return parsed
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null
+}
+
 /**
- * The repository's top level and current named branch (`refs/heads/...`), read
- * from `.git/HEAD` or a worktree's `gitdir:` pointer; null outside a repository
- * or on a detached HEAD.
+ * The repository's top level, current named branch (`refs/heads/...`, or `null`
+ * on detached HEAD), and whether that branch is the default branch (`origin/HEAD`,
+ * falling back to `main`/`master`/`trunk`). Returns `null` outside a repository.
  */
-async function repositoryBranch($: Api): Promise<{ repoTopLevel: string; branch: string } | null> {
+async function repositoryBranch($: Api): Promise<{ repoTopLevel: string; branch: string | null; isDefaultBranch: boolean } | null> {
   const root = await repositoryRoot($)
   if (!root) return null
   try {
-    const directHead = `${root}/.git/HEAD`
+    let gitDir = `${root}/.git`
+    const directHead = `${gitDir}/HEAD`
+    let headRaw: string | null = null
     if (await $.fs.exists(directHead)) {
-      const branch = parseGitHeadBranch(await $.fs.read(directHead))
-      return branch ? { repoTopLevel: root, branch } : null
+      headRaw = await $.fs.read(directHead)
+    } else {
+      const resolved = resolveGitDirPointer(await $.fs.read(gitDir), root)
+      if (!resolved || !(await $.fs.exists(`${resolved}/HEAD`))) return null
+      gitDir = resolved
+      headRaw = await $.fs.read(`${gitDir}/HEAD`)
     }
-    const gitDir = resolveGitDirPointer(await $.fs.read(`${root}/.git`), root)
-    if (!gitDir) return null
-    const worktreeHead = `${gitDir}/HEAD`
-    if (!(await $.fs.exists(worktreeHead))) return null
-    const branch = parseGitHeadBranch(await $.fs.read(worktreeHead))
-    return branch ? { repoTopLevel: root, branch } : null
+    const branch = parseGitHeadBranch(headRaw)
+    if (!branch) return { repoTopLevel: root, branch: null, isDefaultBranch: false }
+    const defaultBranch = await originDefaultBranch($, gitDir)
+    return { repoTopLevel: root, branch, isDefaultBranch: isDefaultBranchName(branch, defaultBranch) }
   } catch {
     return null
   }
@@ -898,10 +936,15 @@ async function rememberBranchPlan($: Api, documentId: string, title: string | nu
   if (!isDocumentId(documentId)) return
   const where = await repositoryBranch($)
   if (!where) return
+  const cleanTitle = (title ?? '').replace(/[\r\n\t]+/g, ' ').trim()
+  currentSessionPlan = { repoTopLevel: where.repoTopLevel, documentId, title: cleanTitle }
+  await update($, sessionPlan, () => currentSessionPlan).catch(() => undefined)
+  // Never persist a cross-session plan entry keyed to `main` / `origin/HEAD`.
+  if (!where.branch || where.isDefaultBranch) return
   const key = planStoreKey(where.repoTopLevel, where.branch)
   const record = normalizePlanRecord({
     documentId,
-    title: title ?? '',
+    title: cleanTitle,
     repoTopLevel: where.repoTopLevel,
     branch: where.branch,
     updatedAt: new Date(await $.clock.now()).toISOString(),
@@ -911,6 +954,10 @@ async function rememberBranchPlan($: Api, documentId: string, title: string | nu
 
 async function forgetBranchPlan($: Api, documentId: string) {
   if (!isDocumentId(documentId)) return
+  if (currentSessionPlan?.documentId === documentId) {
+    currentSessionPlan = null
+    await update($, sessionPlan, () => null).catch(() => undefined)
+  }
   for (const name of await $.store.keys()) {
     if (!name.startsWith('plan:')) continue
     const record = normalizePlanRecord(await $.store.get(name))
@@ -930,10 +977,30 @@ async function prPreviewContextForResult(
   if (!created) return null
   const where = await repositoryBranch($)
   if (!where) return null
-  const key = planStoreKey(where.repoTopLevel, where.branch)
-  if (!key) return null
-  const plan = normalizePlanRecord(await $.store.get(key))
-  if (!plan || plan.repoTopLevel !== where.repoTopLevel || plan.branch !== where.branch) return null
+
+  let plan: { documentId: string; title: string } | null = null
+  if (where.branch && !where.isDefaultBranch) {
+    const key = planStoreKey(where.repoTopLevel, where.branch)
+    const stored = key ? normalizePlanRecord(await $.store.get(key)) : null
+    if (stored && stored.repoTopLevel === where.repoTopLevel && stored.branch === where.branch) {
+      plan = { documentId: stored.documentId, title: stored.title }
+    }
+  }
+  if (!plan && currentSessionPlan && currentSessionPlan.repoTopLevel === where.repoTopLevel && isDocumentId(currentSessionPlan.documentId)) {
+    plan = { documentId: currentSessionPlan.documentId, title: currentSessionPlan.title }
+    if (where.branch && !where.isDefaultBranch) {
+      const key = planStoreKey(where.repoTopLevel, where.branch)
+      const promoted = normalizePlanRecord({
+        documentId: plan.documentId,
+        title: plan.title,
+        repoTopLevel: where.repoTopLevel,
+        branch: where.branch,
+        updatedAt: new Date(await $.clock.now()).toISOString(),
+      })
+      if (key && promoted) await $.store.set(key, promoted).catch(() => undefined)
+    }
+  }
+  if (!plan) return null
   return prPlanAttachContext({ documentId: plan.documentId, title: plan.title, pullRequestUrl: created.url }) || null
 }
 
@@ -1293,6 +1360,7 @@ export const register: Register = on => {
 
   // /clear and /resume reset the atoms but not this module: rebuild the view.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+    if (e.source === 'clear') currentSessionPlan = null
     await sync($)
     await redrawArchitecture($, String(e.source))
     return next(e)
@@ -1591,6 +1659,7 @@ export const register: Register = on => {
 
   on('session.end', async ($, e, next) => {
     if (ENDING_REASONS.has(e.reason)) {
+      currentSessionPlan = null
       for (const loop of loops.values()) loop.controller.abort()
       // /clear and /resume end no comparison: its turn goes on, and the redraw keeps it blinking.
       stopArchitecture()
