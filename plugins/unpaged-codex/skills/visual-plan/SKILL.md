@@ -153,8 +153,9 @@ each phase canvas once it exists, so a refused picture never costs the phase its
 tasks. A mock goes on the canvas of the phase whose tasks build the screen or part
 it shows; when several phases build it, the first of them; when none clearly
 does, the first phase. A small plan without phase children puts them on the root
-the same way, to the right of or below its task list, never beside the
-`📝 Decision log` rectangle, where as-built puts its record links. Place each as
+the same way, to the right of or below its task list, never level with the
+`📝 Decision log` rectangle anywhere across the canvas: as-built puts its record
+links along that row, one after another. Place each as
 an `image` element (`pictureKey`, `naturalWidth` and `naturalHeight` exactly as
 answered; `width` alone, so the height follows, never wider than its natural
 width; `description` saying what it shows) to the right of the checklist and
