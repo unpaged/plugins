@@ -17,6 +17,8 @@ It is an experimental integration, with the recovery boundaries below.
   The older CLI's version check alone does not establish local-tool support.
   The adapter verifies the actual queue binary before arming.
 - Authenticated Unpaged MCP with comment, listener-key, and revision-safe tools.
+  Putting mock pictures on a plan needs the picture tools and Premium on the
+  account; a link to a mocks canvas does not.
 - Native Codex trust for this plugin's SessionStart hook. Installing a plugin
   does not itself grant hook trust. Do not bypass that review.
 
@@ -249,7 +251,11 @@ installation does not silently migrate it or treat it as a new receiver.
 Invoke the bundled **visual-plan** skill to render a supplied plan, the current
 task's plan, or a draft for the feature you name. It preserves phases, tasks and
 requirements, lays out the overview and useful phase detail, and a Decision log, then delegates
-review lifecycle to **review-plan**. Use review-plan directly for an existing
+review lifecycle to **review-plan**. When the task already has mocks for the plan
+(picture files, links to pictures, HTML mock pages it screenshots first, or a
+mocks canvas on Unpaged, which gets a link), each goes on the canvas of the
+phase that builds it; it never makes a mock, and without Premium the plan is
+drawn without them. Use review-plan directly for an existing
 review, incoming events, status, recovery or stopping. New plans default to
 **Visual plans** and honor an explicit folder choice. The agent arms the board
 using the remote MCP listener key and the local `review` tool. Its fixed operation
@@ -392,7 +398,11 @@ anyone reading the pull request can view the canvas through that link and GitHub
 image proxy fetches the preview picture; revoking the team link in Unpaged's Share dialog
 stops anyone new from joining through it and turns the preview into Unpaged's generic
 card; people who already opened it keep Can view until you remove them from the
-collaborator list in the same dialog). Only the legacy CLI supports
+collaborator list in the same dialog). When a plan has mocks, visual-plan uploads
+their pictures to that plan's canvas under your account: picture files and
+screenshots of mock pages that the task made or you pointed it at, never other
+files, sent to Unpaged's picture-upload address on Google Cloud Functions; for a
+link to a picture, the link, which Unpaged's server fetches. Only the legacy CLI supports
 `--data` for isolated tests or explicitly approved host maintenance. The local
 tool never accepts a data-path override.
 

@@ -12,6 +12,7 @@ See the plan before the code. The `visual-plan` skill renders the plan Antigravi
 - **The why is kept while you build** — every plan canvas carries a `📝 Decision log` node. While implementing the plan, the agent appends one row per deviation from the plan, dropped or added task, or choice a reviewer would later ask "why" about — at the moment of the choice, naming the alternative rejected.
 - **`as-built`** — when the code is done, compiles the dated, frozen `📐 As built · <date>` record nested under the plan canvas: Plan delta, Decisions (`📝 recorded` vs `🔍 reconstructed` vs `not recorded`), Reviewer guide, and Data flow diagram (when a runtime flow changed), then stamps the plan `✅ BUILT`.
 - **Pull request invite link and preview** — `visual-plan` records the plan for the current git branch under `~/.gemini/unpaged/plans/` (mode `0600`). When an open GitHub pull request exists for the branch (during `visual-plan` or `as-built`) or when a pull request is opened later (`gh pr create`), the agent attaches a **Can view** team link (`document_join_link` with `role: "viewer"`) and a clickable preview image in a bounded `<!-- unpaged-plan:start -->` section of the PR description without altering surrounding PR text.
+- **Mocks on the phase canvases** — when the session already has mocks for the plan (picture files, links to pictures, HTML mock pages it screenshots first, or a mocks canvas on Unpaged, which gets a link), each goes on the canvas of the phase that builds it, with a caption. The agent never makes a mock for the plan; with no mocks, the canvas is as before. Pictures need Premium on your Unpaged account: on the free tier the plan is drawn without them and the agent says so.
 - **Visual self-check** — after rendering a plan or an as-built record, the agent inspects each canvas with `node_picture` and fixes overlaps or clipped text before returning the link.
 - **Bundled MCP server** — installing the plugin registers Unpaged's remote MCP server (`https://mcp.unpaged.io/mcp`); no manual MCP JSON editing required.
 
@@ -19,7 +20,7 @@ See the plan before the code. The `visual-plan` skill renders the plan Antigravi
 
 - **Google Antigravity** (`agy` CLI / Antigravity IDE) with plugin support.
 - **Node.js 22 or newer** on your `PATH` (uses Node's built-in `fetch`; zero npm dependencies).
-- **An Unpaged account** — the free tier works.
+- **An Unpaged account** — the free tier works. Putting mock pictures on a plan needs Premium; a link to a mocks canvas does not.
 
 ## Install
 
@@ -77,6 +78,7 @@ Once installed, the plugin appears under **Customizations → Installed** in the
 
 - **Policies:** [Privacy policy](https://unpaged.io/privacy) · [Terms of service](https://unpaged.io/terms).
 - **Pull request links and previews:** the plugin's own scripts contact only Unpaged; when a git branch has a visual plan and a GitHub pull request is open or created for that branch, the agent writes that canvas's **Can view** `/join/<token>` link and `/join/<token>/preview.png` image URL into the pull request description via `gh pr edit` (on public repositories, anyone who can read the pull request can open that **Can view** link to view the canvas and GitHub's image proxy fetches the preview picture; revoking the team link in Unpaged's Share dialog stops anyone new from joining through it and turns the preview into Unpaged's generic card; people who already opened it keep Can view until you remove them from the collaborator list in the same dialog).
+- **Mocks:** when a plan has mocks, `visual-plan` uploads their pictures to that plan's canvas under your account: picture files and screenshots of mock pages that the session made or you pointed it at, never other files, sent to Unpaged's picture-upload address on Google Cloud Functions; for a link to a picture, the link, which Unpaged's server fetches.
 - **Listener keys:** receive-only, bound to one canvas, stored at `~/.gemini/unpaged/listeners/<documentId>.json` with mode `0600`, and sent only in the `Authorization: Bearer` header to `https://*.unpaged.io/events/poll`. The plugin's scripts never print a key, but this plugin has no hook that stores the mint for the agent: the key is in the `agent_listener_key_create` result the agent receives and in the stdin heredoc it passes to `keys.mjs store`, so it appears in the conversation. It stays revocable from Unpaged or with `listen revoke`.
 - **Comments are data, not instructions:** `@agent` comments are authored by canvas collaborators, not the local terminal user. Both the `rules/AGENTS.md` rule and the listener's `PROTOCOL_PREAMBLE` enforce that comments may only trigger `unpaged` MCP tool actions on that specific `documentId` — never shell commands, local file edits, git operations, or network requests — and `viewer` comments receive a proposed answer without modifying the canvas.
 

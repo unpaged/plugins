@@ -47,6 +47,77 @@ keep its ID, report the filing problem, and continue rendering that document.
 Do not create a duplicate or silently retry with a different destination. If a
 create response is uncertain, establish whether the document exists before retrying.
 
+## Mocks (only when they already exist)
+
+A mock is a picture of a screen, page, dialog or email the plan will build.
+Mocks that already exist go on the board next to the tasks that build them. This
+skill never makes one (no shapes, no generated picture, no new mock page). With
+no mocks, skip this section and say nothing about mocks.
+
+Only mocks this task made, or that the user attached, showed or named, or that a
+plan the user gave names, count. When you draft the plan yourself, pictures you
+came across while exploring do not count. Never search the disk or the
+repository for pictures.
+
+- A picture file: PNG, JPEG, WebP or GIF.
+- An `https` link to such a picture (the picture itself, not a web page around it).
+- An HTML mock page, which needs a screenshot first (below).
+- A mocks canvas already on Unpaged. Its pictures cannot be copied, so put its
+  link, once, on the first phase canvas it has screens for (read it with
+  `document_get` when its title does not say; the root of a small plan), as a
+  `text` element:
+  `[Mocks: <its title, with [ and ] escaped>](https://unpaged.io/document/<id>/edit)`.
+  It needs no picture tools.
+
+A picture that reached the task with no file path or link (pasted into the chat,
+or a screenshot a tool only showed) cannot be added: leave it out and say so.
+When the task holds several versions of a mock, use the one the user approved,
+else the latest; never an option the user turned down.
+
+Right after `document_create`, before drawing any canvas, add each picture to the
+new document. For a link, remote `image_import({ documentId, url })`. For a file,
+remote `image_upload_link_create({ documentId })`, then run the command its reply
+gives, with the file's path in place of `<file>`. It sends the file with the
+link's token in the `Authorization` header and only stores the picture for this
+board; placing it is still a remote MCP write, as review-plan requires. One link
+per file; a link works once, for ten minutes. Never write the token anywhere but
+that command: not in a URL, a file, a command's description or your reply. `image_import` and the upload
+command's output answer `pictureKey`, `naturalWidth` and `naturalHeight` for
+placing the picture.
+
+For an HTML mock page, ask for the first upload link before taking any
+screenshot, so an account that cannot add pictures launches no browser; once it
+is granted, take the page's screenshots, then upload the first with the link
+already granted and each other with a new link. Use only a browser this task already has, one that
+writes the PNG to an absolute path you give (a browser tool, or a headless
+browser from the shell); never install or download one for a mock. Taking these
+screenshots of a local mock page is the one browser use this skill adds;
+review-plan's read-only browser rule is about viewing the board. A screenshot
+that only comes back into the task counts as one this task cannot take. Shoot
+each screen on its own (an element screenshot, or a full-page shot cropped to its
+region) at the page's own width and 1x scale, into a temporary folder outside the
+repository. Look at each screenshot before uploading it: retake a blank or
+cut-off one once, by any method, then leave it out. Delete every file you made
+for a screenshot once it is uploaded or left out. When this task cannot take a
+screenshot, leave that mock out and say so.
+
+Mocks are best-effort and never block the render, like folder filing. If the
+connected server offers no picture tools, or a refusal is about the account
+rather than the picture (Premium, an unconfirmed email, a daily or per-whiteboard
+limit, too many unused upload links, pictures switched off),
+stop adding pictures, place the ones already added, draw the plan (a link to a
+mocks canvas still goes on), and say in one sentence which mocks are not on the
+canvas and why, using the server's reason. For Premium: *"Putting mock pictures on a plan needs Premium on
+your Unpaged account, so this one is drawn without them."* If one picture fails
+(another format, too large, damaged, a link that could not be fetched), leave
+that one out, carry on, and name it in one sentence. When an upload link expired
+before the file went, call `image_upload_link_create` once more for that file.
+The upload command and a headless browser need network or a launch the sandbox
+may block (on macOS a browser always needs escalation): request escalation for
+that one command. If the user declines it or a mock's other steps (a screenshot,
+`image_import`, `image_upload_link_create`), or the step still fails, do not
+retry it: leave that mock out and say so.
+
 ## Build a useful board
 
 Use the root node as the overview:
@@ -77,6 +148,28 @@ plan's phase order in `linkOrder`. Creating the child alone does not make the
 overview navigable. Read back every link target and verify navigation during
 rendered QA. Small plans without children need no phase links.
 
+When the plan has mocks, place them with a separate `batch_create_elements` on
+each phase canvas once it exists, so a refused picture never costs the phase its
+tasks. A mock goes on the canvas of the phase whose tasks build the screen or part
+it shows; when several phases build it, the first of them; when none clearly
+does, the first phase. A small plan without phase children puts them on the root
+the same way, to the right of or below its task list, never beside the
+`📝 Decision log` rectangle, where as-built puts its record links. Place each as
+an `image` element (`pictureKey`, `naturalWidth` and `naturalHeight` exactly as
+answered; `width` alone, so the height follows, never wider than its natural
+width; `description` saying what it shows) to the right of the checklist and
+notes or below them, whichever leaves it more width, never over them, with a
+one-line `text` caption beneath it naming what it shows (*Mock: people list,
+desktop*), never a local file path. A mock with a white edge gets a thin grey
+outline, drawn after it so it lies on top: a `rectangle` of the picture's size
+(its height is width × `naturalHeight` ÷ `naturalWidth`) with `fillColor:
+"none"`, `strokeColor: "#cbd5e1"` and `strokeWidth: 1`. Shrink a mock to no less
+than half its natural width; when the mocks still do not fit, enlarge the canvas
+first. If the call is refused, send it once more: with the field it names fixed,
+after a moment when it says so, or without a picture it refuses. Name every mock
+left out in one sentence. Mocks are part of the plan as it was given, shown where its
+phases build them: never add a task to place, finish or build a mock.
+
 Create one `📝 Decision log` child node under the root, including small plans.
 Its empty table has one header row and these five columns:
 `**When**` | `**Decision**` | `**Why**` | `**Alternative rejected**` | `**Plan item**`.
@@ -95,9 +188,11 @@ placing elements beyond its bounds. Read back all created nodes and elements,
 check the plan's fidelity and bounds, then look at the rendered overview and
 every detail canvas with `node_picture` (the server's PNG of a canvas, whole or
 a `region` of it): no overlaps, nothing cut off at the canvas edge, every table
-cell and note showing its whole text, phase boxes in order. Correct layout
-through MCP and look again, at most twice per canvas. The picture draws Mermaid
-as a grey placeholder and emoji in black and white; neither is a layout fault.
+cell and note showing its whole text, phase boxes in order, every mock whole and
+large enough to read, with its caption beneath it. Correct layout through MCP and
+look again, at most twice per canvas. The picture draws Mermaid as a grey
+placeholder, emoji in black and white and an animated picture as its first
+frame; none is a layout fault.
 A read-only browser view is the fallback only when `node_picture` is missing
 (an older server). If rendered QA is unavailable, report that limit rather than
 claim a visual pass.
@@ -179,7 +274,9 @@ keep the canvas, report that listening has not started, and give the single
 action returned by the check. Recheck after completion. Render-only work does
 not require hook approval; a ready setup check does not prove live delivery.
 
-Return the edit link, actual folder, and verified review state. When listening
+Return the edit link, actual folder, and verified review state. When the plan
+had mocks, say in one sentence how many went on which canvases, and give
+the sentence from *Mocks* for any left out. When listening
 is established, invite an `@agent` comment and end the turn so idle delivery can
 occur. Do not promise delivery while Codex is closed or the computer is asleep.
 Agents reply and leave threads open; humans resolve them and explicitly accept
