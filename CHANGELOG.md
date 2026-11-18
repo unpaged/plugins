@@ -4,6 +4,24 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-11-17
+
+### Added
+
+- **Mocks on visual plans.** When the session already has mocks for the plan — picture files (PNG, JPEG, WebP, GIF), `https` links to pictures, HTML mock pages (one screenshot per screen, taken only once an upload link was granted, looked at before upload and deleted after), or a mocks canvas on Unpaged (linked once, since its pictures cannot be copied) — `/unpaged:visual-plan` adds them to the plan's document (`image_import`, or `image_upload_link_create` and its upload command for a file) and places each, in its own `batch_create_elements` after the phase canvas exists, on the canvas of the phase that builds the screen it shows, beside the checklist with a caption; a small single-phase plan puts them on the root, off the Decision log row. The agent never makes a mock, never searches the disk or repository for one, and adds no task for one. Mocks are best-effort: when the server offers no picture tools or refuses for the account (Premium, the day's limit, the whiteboard's picture limit and the like), the plan is drawn without them and the reply gives the reason in one sentence; a picture that fails is left out and named. The README says that mocks need Premium and what is sent where.
+
+## [unpaged-antigravity 0.3.0] - 2026-11-17
+
+### Added
+
+- `skills/visual-plan/SKILL.md` puts the session's existing mocks on the phase canvases as in 1.18.0, re-running the upload command or a headless browser once with `BypassSandbox: true` when Standard Sandbox Mode blocks it. The README says that mocks need Premium and what is sent where.
+
+## [unpaged-codex 0.10.0] - 2026-11-17
+
+### Added
+
+- `skills/visual-plan/SKILL.md` puts the task's existing mocks on the phase canvases as in 1.18.0, asking for sandbox escalation for the upload command and a headless browser, and saying that the upload only stores the picture while placing it stays a remote MCP write. The README says what is sent where.
+
 ## [1.17.0] - 2026-11-16
 
 ### Added
