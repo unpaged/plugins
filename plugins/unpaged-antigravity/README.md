@@ -1,6 +1,6 @@
 # Unpaged for Google Antigravity
 
-See the plan before the code. The `visual-plan` skill renders the plan Antigravity just made as an interactive whiteboard canvas on [Unpaged](https://unpaged.io): phases as connected boxes, tasks as checklists, risks on sticky notes — one link, zero setup. After the code is written, `as-built` compiles the record of what shipped and why, nested under the plan canvas.
+See the plan before the code. The `visual-plan` skill renders the plan Antigravity just made as an interactive whiteboard canvas on [Unpaged](https://unpaged.io): goal and outcome cards up front, phases as connected clickable cards, tasks as checklists, risks on structured cards — one link, zero setup. After the code is written, `as-built` compiles the record of what shipped and why, nested under the plan canvas.
 
 ![A plan rendered as a canvas: four phase boxes joined by arrows, a goal note and a risks note](../../docs/images/visual-plan-overview.png)
 

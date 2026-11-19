@@ -118,35 +118,100 @@ that one command. If the user declines it or a mock's other steps (a screenshot,
 `image_import`, `image_upload_link_create`), or the step still fails, do not
 retry it: leave that mock out and say so.
 
-## Build a useful board
+## Build a useful board (Warm Paper design & navigation)
 
-Use the root node as the overview:
+Use the **Warm Paper** visual system so reviewers immediately grasp **what the
+plan is about**, **what it wants to achieve**, and **how to navigate it** with
+minimal cognitive load:
 
-- A readable title and concise goal.
-- One phase or major step per rectangle, arranged in the plan's execution order.
-  Use anchored connectors for actual dependencies; do not invent dependencies.
-  Give every rectangle, and any other basic shape (`triangle`, `diamond`,
-  `hexagon`, `ellipse`, `block-arrow`), both a `fillColor` and a
-  `strokeColor`: the server refuses a basic shape that lacks either, and the
-  whole batch with it.
-- Notes for stated risks, assumptions, and open decisions.
-- One dedicated root text element, kept separate from plan content, beginning
-  exactly `**Status:**`. Let review-plan initialize `**Status:** 📋 PROPOSED`
-  and the phrase `@agent I accept this plan`. Verified owner acceptance on the
-  canvas or explicit user approval in this Codex task changes it to ACCEPTED.
-  Only an explicit implementation instruction in this task starts EXECUTING.
-  Even a plan approved before the canvas existed needs a verified baseline and
-  the trusted lifecycle transitions described by review-plan.
+- **Canvas:** set `backgroundColor: "#f6efe3"` on the root (`node_update`, title
+  `Overview`, `1920×1080`, plain-English 1–2 sentence `content`) and on every
+  child canvas (`node_create_with_elements`, `1920×1080`, plain-English `content`;
+  enlarge via `node_update` only when content genuinely needs room).
+- **Typography:** `Outfit, sans-serif` for canvas titles (`28`–`30` bold) and
+  card headings (`17`–`20` bold); `Inter, sans-serif` for eyebrows (`11`–`12`
+  bold uppercase), body prose (`14`–`15`), pills, tables (`13`), and checklists
+  (`14`).
+- **Surfaces & inks (no `uml-note` sticky notes, no rainbow phase borders, no
+  decorative emoji):** backdrop `#f6efe3`; elevated cards and tables `#fffaf1`
+  with `#ded0ba` border (`cornerRadius: 12`, subtle lift via an offset `+2, +4`
+  `#ddd0ba` shadow rectangle with `strokeColor: "#ddd0ba", strokeWidth: 0,
+  opacity: 0.65` placed behind the card); recessed secondary surfaces (status pill, scaffolding dock, quiet
+  nav pills) `#efe6d6` with `#cbb99f` border. Inks: `#3b2a1e` headings/tables,
+  `#4a3a2d` body, `#786554` muted metadata/hints.
+- **Three functional accents only:** Unpaged Blue (`#1d4ed8`, `strokeWidth: 2`
+  on primary clickable phase cards; `#93b4f5` `1.5` on reference cards; `#e6effc`
+  pill fill for `Next →`) exclusively for clickable navigation; Warm Sage
+  (`#2f7d57` 4px left bar, `#226142` ink, `#f4f9f5` fill, `#c3decb` border,
+  `checkboxColor: "#2f7d57"`) for goals, outcomes, and exit criteria; Warm Amber
+  (`#c26a1b` left bar, `#9a4e10` ink, `#fdf6ea` fill, `#e6cfa8` border) for
+  risks, non-goals, and open decisions.
+- **Whole-document navigation & zero dead clicks:** use short parallel titles
+  (`Overview`, `Phase 1 · …`, optional `Context · …` / `Decisions · …`,
+  `📝 Decision log`); group every multi-element clickable card (shadow + linked
+  `rectangle` with top-level `isLink: true, linkTarget` + interior `text`) with
+  `group` / `group_elements` so clicking anywhere on the card navigates; keep
+  the top-right `48×48` corner of every linked card clear for Unpaged's live
+  numbered badge (`1`–`9`); create child nodes first and root links in strict
+  `1`–`9` reading order (Phases `1..k`, optional reference canvases, then
+  `📝 Decision log` last); put grouped top-right walking pills on every child
+  canvas (link `1`: `Next → <next title>`, link `2`: `← <prev title>` or
+  `← Overview`).
 
-For a small plan, keep its task checklist and verification criteria on the root.
-For a larger plan, use `node_create_with_elements` for phase child nodes with
-task checklists, the relevant requirement IDs, and stated verification criteria.
-Keep overview wording concise while preserving complete task detail in those nodes.
-Make each root phase rectangle a navigable link to its phase child, using
-top-level `isLink: true` and `linkTarget: <phase node ID>` and preserving the
-plan's phase order in `linkOrder`. Creating the child alone does not make the
-overview navigable. Read back every link target and verify navigation during
-rendered QA. Small plans without children need no phase links.
+Use the root node as the reviewer-first overview:
+
+- **Header bar:** project eyebrow + `Outfit` title on the left; on the right, a
+  recessed `#efe6d6` status pill holding one dedicated root text element, kept
+  separate from plan content, beginning exactly `**Status:**`. Let review-plan
+  initialize `**Status:** 📋 PROPOSED` and the phrase `@agent I accept this plan`.
+  Verified owner acceptance on the canvas or explicit user approval in this
+  Codex task changes it to ACCEPTED. Only an explicit implementation instruction
+  in this task starts EXECUTING. Even a plan approved before the canvas existed
+  needs a verified baseline and the trusted lifecycle transitions described by
+  review-plan.
+- **Hero band (above the phases):** two side-by-side cards — **WHAT THIS IS
+  ABOUT** (`#fffaf1` elevated card, 2–3 plain-English sentences taken from what
+  the plan itself says about the problem or feature and its stated reason; when
+  the plan gives no reason, leave the why out rather than invent one) and
+  **WHAT IT WANTS TO ACHIEVE** (sage `#f4f9f5` card with the concrete end-state
+  outcome stated by the plan and, when the plan describes a 3–5 step
+  user/system flow, a compact horizontal flow strip of pills joined by
+  `connector` arrows).
+- **Phases band:** one grouped clickable card per phase (`#fffaf1`, `#1d4ed8`
+  stroke `2`, `PHASE 01` eyebrow + bold `Outfit` title + 1–2 line summary drawn
+  strictly from the phase's stated scope/tasks without inventing rationale,
+  top-level `isLink: true` and `linkTarget: <phase node ID>`, created in exact
+  `1..k` `linkOrder`). Use anchored `connector` arrows (`startMarker: "none"`,
+  `endMarker: "arrow"`, `#8c7a66`) for actual dependencies; never use `line`
+  with `endMarker: "arrow"` and do not invent dependencies. Give every
+  rectangle, and any other basic shape (`triangle`, `diamond`, `hexagon`,
+  `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`: older
+  servers refuse a basic shape that lacks either, and the whole batch with it.
+- **Guardrails & reference band:** amber **RISKS & OUT OF SCOPE** card plus
+  either compact clickable reference cards (`#93b4f5` border, linking to
+  optional `Context · …` / `Decisions · …` child canvases) or an amber **OPEN
+  DECISIONS** card.
+- **Bottom scaffolding dock:** recessed `#efe6d6` strip holding the grouped
+  `📝 Decision log` link card (created last in root link order), open space to
+  its right for future `📐 As built · <date>` links, and a muted right-aligned
+  shortcut hint (`Press 1–N to jump · Backspace for overview · G for map`).
+
+For a small plan, keep its task checklist and sage verification card on the
+root (above the bottom scaffolding dock). For a larger plan, use
+`node_create_with_elements` for phase child nodes (`Phase N · <short action>`,
+`backgroundColor: "#f6efe3"`, plain-English `content`) carrying a phase progress
+header, a compact sage **WHAT THIS PHASE ACHIEVES** banner (1–2 sentences taken
+from what the plan itself says for this phase; omit the banner if the plan
+states no phase outcome rather than invent one), the unchecked task `checklist`
+(`#fffaf1`, `#ded0ba` border, `checkboxColor: "#2f7d57"`, with relevant
+requirement IDs), and a sage **EXIT CRITERIA / VERIFICATION** card. Once every
+child node exists, add each child's grouped top-right walking pills (`Next →`
+link `1`, `← Prev` / `← Overview` link `2`) in a separate
+`batch_create_elements` per child so every pill has a real `linkTarget`. Keep
+overview wording concise while preserving complete task detail in those nodes.
+Creating the child alone does not make the overview navigable: read back every
+link target and verify navigation during rendered QA. Small plans without
+children need no phase links.
 
 When the plan has mocks, place them with a separate `batch_create_elements` on
 each phase canvas once it exists, so a refused picture never costs the phase its
@@ -154,12 +219,12 @@ tasks. A mock goes on the canvas of the phase whose tasks build the screen or pa
 it shows; when several phases build it, the first of them; when none clearly
 does, the first phase. A small plan without phase children puts them on the root
 the same way, to the right of or below its task list, never level with the
-`📝 Decision log` rectangle anywhere across the canvas: as-built puts its record
-links along that row, one after another. Place each as
+bottom `📝 Decision log` scaffolding dock anywhere across the canvas: as-built
+puts its record links along that row, one after another. Place each as
 an `image` element (`pictureKey`, `naturalWidth` and `naturalHeight` exactly as
 answered; `width` alone, so the height follows, never wider than its natural
 width; `description` saying what it shows) to the right of the checklist and
-notes or below them, whichever leaves it more width, never over them, with a
+cards or below them, whichever leaves it more width, never over them, with a
 one-line `text` caption beneath it naming what it shows (*Mock: people list,
 desktop*), never a local file path. A mock with a white edge gets a thin grey
 outline, drawn after it so it lies on top: a `rectangle` of the picture's size
@@ -171,29 +236,39 @@ after a moment when it says so, or without a picture it refuses. Name every mock
 left out in one sentence. Mocks are part of the plan as it was given, shown where its
 phases build them: never add a task to place, finish or build a mock.
 
-Create one `📝 Decision log` child node under the root, including small plans.
-Its empty table has one header row and these five columns:
+Create one `📝 Decision log` child node under the root (`backgroundColor:
+"#f6efe3"`, `1920×1080`, plain-English `content`), including small plans. Include
+an `Outfit` header, a grouped top-right `← Overview` pill (link `1`), and a
+quiet one-line rule subtitle (`Inter` 13 `#786554`) explaining: one row per
+deviation, dropped or added task, or choice a reviewer would ask why about;
+append at the moment of the choice, name the alternative rejected, never
+backfill, and never rewrite earlier rows. Below it, place a full-width Warm
+Paper `table` (`x: 60`, `width: 1800`, `backgroundColor: "#fffaf1"`,
+`borderColor: "#d6c7b0"`, `textColor: "#3b2a1e"`, `fontFamily: "Inter,
+sans-serif"`, `fontSize: 13`, `textAlign: "left"`, `verticalAlign: "top"`,
+`columnWidths: [12, 26, 28, 22, 12]`; retry without `columnWidths` if an older
+server refuses it) with one header row and these five columns:
 `**When**` | `**Decision**` | `**Why**` | `**Alternative rejected**` | `**Plan item**`.
-Add a note explaining: one row per deviation, dropped or added task, or choice
-a reviewer would ask why about; append at the moment of the choice, name the
-alternative rejected, never backfill, and never rewrite earlier rows. Link it
-from a `📝 Decision log` rectangle below and separate from the phase row, using
-top-level `isLink` and `linkTarget` fields. This is review scaffolding, not an
-added implementation task. Its content is still included in the full document
-digest: only the binding's immutable designated status-element IDs are excluded.
-Do not invent decisions when rendering the plan.
+Link it from the `📝 Decision log` card on the root's bottom scaffolding dock,
+using top-level `isLink` and `linkTarget` fields, created last in root
+`linkOrder`. This is review scaffolding, not an added implementation task. Its
+content is still included in the full document digest: only the binding's
+immutable designated status-element IDs are excluded. Do not invent decisions
+when rendering the plan.
 
 Use the discovered schemas for `batch_create_elements`, connectors, checklists,
-and node creation. Space content without overlaps and enlarge the canvas before
-placing elements beyond its bounds. Read back all created nodes and elements,
-check the plan's fidelity and bounds, then look at the rendered overview and
-every detail canvas with `node_picture` (the server's PNG of a canvas, whole or
-a `region` of it): no overlaps, nothing cut off at the canvas edge, every table
-cell and note showing its whole text, phase boxes in order, every mock whole and
-large enough to read, with its caption beneath it. Correct layout through MCP and
-look again, at most twice per canvas. The picture draws Mermaid as a grey
-placeholder, emoji in black and white and an animated picture as its first
-frame; none is a layout fault.
+grouping, and node creation. Avoid starting a standalone text line with `2. `
+(CommonMark renumbers ordered lists to `1.` — use `02 · ` or `2\. `). Space
+content without overlaps and enlarge the canvas before placing elements beyond
+its bounds. Read back all created nodes and elements, check the plan's fidelity
+and bounds, then look at the rendered overview and every detail canvas with
+`node_picture` (and `document_picture` when available): no overlaps, nothing cut
+off at the canvas edge, top-right corners of linked cards clear for numbered
+badges, every table cell and card showing its whole text, phase cards in order
+with clean arrows, every mock whole and large enough to read with its caption
+beneath it. Correct layout through MCP and look again, at most twice per canvas.
+The picture draws Mermaid as a grey placeholder, emoji in black and white and an
+animated picture as its first frame; none is a layout fault.
 A read-only browser view is the fallback only when `node_picture` is missing
 (an older server). If rendered QA is unavailable, report that limit rather than
 claim a visual pass.

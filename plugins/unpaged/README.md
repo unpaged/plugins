@@ -1,6 +1,6 @@
 # unpaged — visual plans for Claude Code and GitHub Copilot
 
-See the plan before the code. `/unpaged:visual-plan` renders the plan your agent just made in Claude Code or GitHub Copilot as a whiteboard on [Unpaged](https://unpaged.io): phases as connected shapes, tasks as checklists, risks on sticky notes — one link, zero setup. After the code, `/unpaged:as-built` writes the record of what shipped and why, nested under the plan. And `/unpaged:architecture` draws the repository's architecture from its code and keeps it in step: when you ask, the agent checks whether the document still holds (in Claude Code, a line above the prompt shows its status and has the button that starts the check).
+See the plan before the code. `/unpaged:visual-plan` renders the plan your agent just made in Claude Code or GitHub Copilot as a whiteboard on [Unpaged](https://unpaged.io): goal and outcome cards up front, phases as connected clickable cards, tasks as checklists, risks on structured cards — one link, zero setup. After the code, `/unpaged:as-built` writes the record of what shipped and why, nested under the plan. And `/unpaged:architecture` draws the repository's architecture from its code and keeps it in step: when you ask, the agent checks whether the document still holds (in Claude Code, a line above the prompt shows its status and has the button that starts the check).
 
 ![A plan rendered as a canvas: four phase boxes joined by arrows, a goal note and a risks note](../../docs/images/visual-plan-overview.png)
 
