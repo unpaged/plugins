@@ -68,10 +68,13 @@ review-plan's recovery instructions rather than substituting a local document.
    or ACCEPTED. Only for an unbound canvas discover the root status text by its
    `**Status:**` prefix; if absent or ambiguous, report that limitation without
    inventing a status. Never create a replacement status element or exclusion
-   set to handle an older canvas. Also identify phase rectangles
-   in `linkOrder`, the phase checklists and stable task IDs, Decision log tables,
-   and every earlier as-built record. A phase link excludes `📝 Decision log`
-   and `📐 As built · …` links: those are supporting records, not plan tasks.
+   set to handle an older canvas. Also identify phase links in `linkOrder`
+   (root `rectangle`s with `isLink: true` whose target node carries a plan task
+   `checklist`), the phase checklists and stable task IDs, Decision log tables,
+   and every earlier as-built record. A phase link excludes `📝 Decision log`,
+   `📐 As built · …` links, and optional `Context · …` / `Decisions · …`
+   reference canvases that hold no task checklist: those are supporting
+   records, not plan tasks.
    For a small plan with no phase nodes, use its root checklist as one phase
    with no phase box to label. If neither place contains tasks, say "No plan
    tasks on that canvas" and stop. Incomplete document reads cannot support
@@ -159,57 +162,84 @@ append ` (2)`, then ` (3)`, and so on. A rerun appends a new record and never
 renames or changes an earlier record. During this run the newly created record
 may be completed over several calls; it freezes only after final readback.
 
-1. Create the record with `node_create_with_elements`, parent = plan root, at
-   least 1920 wide and about 1620 tall; grow it for tables. Use two full-width
-   tables (x 60, width 1820), stacked below the notes, without overlaps.
-   Include:
-   - Title text `## 📐 As built · <date> — <plan title>`.
-   - Stamp `**As built:** <date> · [PR #<n>](<url>) · <base>..<head> · frozen`,
+1. Create the record with `node_create_with_elements`, parent = plan root,
+   `backgroundColor: "#f6efe3"` (Warm Paper), at least `1920` wide and `1620`
+   tall (grow it for tables), and a 1–2 sentence plain-English `content`
+   summary. Use two full-width Warm Paper tables (`x: 60, width: 1800`,
+   `backgroundColor: "#fffaf1"`, `borderColor: "#d6c7b0"`, `textColor:
+   "#3b2a1e"`, `fontFamily: "Inter, sans-serif"`, `fontSize: 13`,
+   `textAlign: "left"`, `verticalAlign: "top"`), stacked below the Summary and
+   Follow-ups cards, without overlaps. Retry without `columnWidths` if an older
+   server refuses it. Include:
+   - Header: eyebrow (`AS-BUILT RECORD`, `#786554` Inter 12 bold) + title text
+     `## 📐 As built · <date> — <plan title>` (`Outfit, sans-serif` 28 bold
+     `#3b2a1e`).
+   - Recessed stamp pill (`#efe6d6`, `#cbb99f` border) holding
+     `**As built:** <date> · [PR #<n>](<url>) · <base>..<head> · frozen`,
      omitting the PR when absent. Short SHAs may appear on this stamp, but a
-     provenance note must include the full base/head SHAs, repository identity,
-     inspected PR head/mismatch, and verification limits.
-   - A yellow Summary note of at most five sentences: what was implemented,
+     provenance card or section must include the full base/head SHAs,
+     repository identity, inspected PR head/mismatch, and verification limits.
+   - A sage **Summary** card (`#f4f9f5`, `#c3decb` border, `#2f7d57` 4px left
+     bar — no `uml-note`) of at most five sentences: what was implemented,
      largest deviation, whether runtime flow changed, and what remains for a
      partial record. Do not say deployed unless that was separately verified.
-   - Plan delta table: `**Plan item**` | `**Outcome**` | `**Why**`, tasks in plan
-     order followed by added work. Keep stable task IDs and all outcomes. At
-     more than 20 rows, create continuation tables rather than hide tasks in a
-     summary that later records cannot reconcile.
-   - Decisions table: `**When**` | `**Decision**` | `**Why**` |
-     `**Alternative rejected**` | `**Source**`. Include Decision log rows marked
-     recorded, followed by material reconstructed decisions with their sources.
-     Use continuation tables after 20 rows; never truncate decision history.
-   - A peach Follow-ups note: open tasks, known gaps, and every `not recorded`
-     why. The author may supply the missing reason in a comment.
-2. Create a `🔍 Reviewer guide` child under the record. Include a Reading order
-   table (`**File**` | `**Why start here**`, at most 15 rows), a sky Seams and
-   risks note, and a Test map table (`**Area**` | `**Covered by**` |
-   `**Not covered**`). Tie file references to the resolved commit; distinguish
-   inspected tests from verified runs and say plainly what is untested.
-3. Only if runtime flow changed, create a `🔀 Data flow` child under the record.
-   Put a fenced Mermaid `flowchart TB` in a text element, with `Before` and
-   `After` subgraphs each declaring `direction LR`. Quote node labels and keep
-   labels simple. Leave about 900 px below the element for rendered expansion.
-   Include only call paths supported by inspected code at the two exact SHAs.
-4. Add root links inside the record to Reviewer guide and, when created, Data
-   flow. Use rectangles with top-level `isLink: true` and `linkTarget`, never
-   fields nested under `properties`.
-5. Add a link to the new record on the plan root, on the row of the Decision log
-   link and to its right, or after the latest existing record. For a legacy
-   canvas without that row, start below all root content. Enlarge the canvas
-   before placing a rectangle past an edge; never overlap content or make a
-   record look like a phase.
+   - An amber **Follow-ups** card (`#fdf6ea`, `#e6cfa8` border, `#c26a1b` 4px
+     left bar): open tasks, known gaps, provenance details, and every
+     `not recorded` why. The author may supply the missing reason in a comment.
+   - Plan delta table (`columnWidths: [28, 12, 60]`): `**Plan item**` |
+     `**Outcome**` | `**Why**`, tasks in plan order followed by added work.
+     Keep stable task IDs and all outcomes. At more than 20 rows, create
+     continuation tables rather than hide tasks in a summary that later records
+     cannot reconcile.
+   - Decisions table (`columnWidths: [12, 26, 28, 22, 12]`): `**When**` |
+     `**Decision**` | `**Why**` | `**Alternative rejected**` | `**Source**`.
+     Include Decision log rows marked recorded, followed by material
+     reconstructed decisions with their sources. Use continuation tables after
+     20 rows; never truncate decision history.
+2. Create a `🔍 Reviewer guide` child under the record (`backgroundColor:
+   "#f6efe3"`, plain-English `content`). Include an `Outfit` header, grouped
+   top-right walking pills (`← As built` link `1`, `← Plan overview` link `2`),
+   a Warm Paper Reading order table (`**File**` | `**Why start here**`,
+   `columnWidths: [36, 64]`, at most 15 rows), an amber **Seams and risks**
+   card (`#fdf6ea`, `#e6cfa8` border, `#c26a1b` left bar — no `uml-note`), and
+   a Warm Paper Test map table (`**Area**` | `**Covered by**` |
+   `**Not covered**`, `columnWidths: [22, 44, 34]`). Tie file references to the
+   resolved commit; distinguish inspected tests from verified runs and say
+   plainly what is untested.
+3. Only if runtime flow changed, create a `🔀 Data flow` child under the record
+   (`backgroundColor: "#f6efe3"`, plain-English `content`, header + grouped
+   `← As built` link `1` and `← Plan overview` link `2` pills). Put a fenced
+   Mermaid `flowchart TB` in a text element, with `Before` and `After`
+   subgraphs each declaring `direction LR`. Quote node labels and keep labels
+   simple. Leave about 900 px below the element for rendered expansion. Include
+   only call paths supported by inspected code at the two exact SHAs.
+4. Add grouped navigation links inside the record (`group`, top-right `48×48`
+   corner clear for live badges, strict `1`–`3` link order) to Reviewer guide
+   (link `1`), Data flow when created (link `2`), and `← Plan overview` (last).
+   Use rectangles with top-level `isLink: true` and `linkTarget`, never fields
+   nested under `properties`.
+5. Add a link card to the new record on the plan root, on the bottom
+   scaffolding dock row right of `📝 Decision log`, or after the latest
+   existing record (styled in Warm Paper `#fffaf1` / `#1d4ed8` on `#f6efe3`
+   roots, or matching the existing root palette on older white roots). For a
+   legacy canvas without that row, start below all root content. Enlarge the
+   canvas before placing a rectangle past an edge; never overlap content or
+   make a record look like a phase.
 6. Mark done/changed checklist items checked using `checklist_toggle_item` and
    stable IDs; dropped tasks stay unchecked. Preserve unresolved/open items.
    A partial record leaves phase labels unchanged. It keeps an executing
    status; a pre-execution binding follows the submission rule below.
-   For a complete record on an active bound executing plan, prefix each phase label
-   with its final outcome (✅, 🔀, or ⛔) using fresh `expectedRevision` values;
-   preserve the rest of each label. Never double-prefix existing labels or
-   relabel phases on a canvas already stamped BUILT. A complete record for an
-   unbound, proposed, or accepted canvas leaves phase labels alone: recording
-   historical code is not an execution transition.
-7. Look at each new canvas with `node_picture` and fix clipped cells, notes
+   For a complete record on an active bound executing plan, prefix each phase
+   label with its final outcome (✅, 🔀, or ⛔) using fresh `expectedRevision`
+   values; preserve the rest of each label. If the linked phase `rectangle`
+   carries its own `text` label, prefix `rectangle.properties.text`; if it has
+   empty `text` and belongs to a `groupId` (Warm Paper grouped phase card),
+   prefix the phase title `text` element in that same `groupId`. Never
+   double-prefix existing labels or relabel phases on a canvas already stamped
+   BUILT. A complete record for an unbound, proposed, or accepted canvas leaves
+   phase labels alone: recording historical code is not an execution
+   transition.
+7. Look at each new canvas with `node_picture` and fix clipped cells, cards
    that run past their edge or overlapping boxes through MCP before stamping
    anything (the Data flow canvas holds a Mermaid fence, which the picture
    draws as a grey placeholder, so it is not checked this way). Then read back
@@ -220,16 +250,18 @@ may be completed over several calls; it freezes only after final readback.
    that limit. After an uncertain create, locate the existing node before any
    retry; never create duplicate records merely because a response was lost.
 
-Keep every element inside its canvas, text dark (`#0f172a` on white), and table
-rows at most 20 per table. On `text`, `fillColor` is text color. Give every
-rectangle, and any other basic shape (`triangle`, `diamond`, `hexagon`,
-`ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`: the server
-refuses a basic shape that lacks either, and the whole batch with it. Give notes both
-their `colorVariant` and explicit fill (yellow `#FFE066`, peach `#FFB4A2`, sky
-`#A8D8F0`). Use CommonMark prose, one idea per cell, and only short paths or
-identifiers as code; the Data flow diagram is the deliberate code-block
-exception. Use current revisions and discovered tool schemas. Stop and explain
-a permission rejection; do not bypass it or blindly repeat a refused write.
+Keep every element inside its canvas, text in high-contrast Warm Paper inks
+(`#3b2a1e`, `#4a3a2d`, `#786554`, `#1d4ed8`, `#226142`, `#9a4e10` on light
+surfaces), and table rows at most 20 per table. On `text`, `fillColor` is text
+color. Give every rectangle, and any other basic shape (`triangle`, `diamond`,
+`hexagon`, `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`
+(unless `strokeWidth: 0`): the server refuses a basic shape that lacks them,
+and the whole batch with it. Use structured Warm Paper cards instead of
+`uml-note` sticky notes. Use CommonMark prose, one idea per cell, and only
+short paths or identifiers as code; the Data flow diagram is the deliberate
+code-block exception. Use current revisions and discovered tool schemas. Stop
+and explain a permission rejection; do not bypass it or blindly repeat a
+refused write.
 
 ## Complete the lifecycle and report
 
