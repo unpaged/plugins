@@ -1,6 +1,6 @@
 # Antigravity Plugin Marketplace submission pack
 
-Reference answers for submitting `plugins/unpaged-antigravity` to the Google Antigravity Plugin Marketplace (submission form linked from https://antigravity.google/docs/marketplace and https://antigravity.google/docs/build-plugins). Keep this file free of credentials: any reviewer test account is provided only in the submission form.
+Reference answers for submitting `plugins/unpaged-antigravity` to the Google Antigravity Plugin Marketplace via the [Antigravity Marketplace partner intake form](https://forms.gle/2EX5RFYPoJe1UgxR9) (linked from https://antigravity.google/docs/build-plugins#publish-to-the-antigravity-marketplace). Keep this file free of credentials: any reviewer test account is provided only in the submission form.
 
 ## Identity
 

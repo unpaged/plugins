@@ -2,7 +2,7 @@
 
 See the plan before the code. `/unpaged:visual-plan` renders the plan your agent just made in Claude Code or GitHub Copilot as a whiteboard on [Unpaged](https://unpaged.io): goal and outcome cards up front, phases as connected clickable cards, tasks as checklists, risks on structured cards — one link, zero setup. After the code, `/unpaged:as-built` writes the record of what shipped and why, nested under the plan. And `/unpaged:architecture` draws the repository's architecture from its code and keeps it in step: when you ask, the agent checks whether the document still holds (in Claude Code, a line above the prompt shows its status and has the button that starts the check).
 
-![A plan rendered as a canvas: four phase boxes joined by arrows, a goal note and a risks note](../../docs/images/visual-plan-overview.png)
+![A plan rendered as a Warm Paper canvas: what it is about and what it wants to achieve above four connected clickable phase cards, risks, out-of-scope card, and Decision log dock](../../docs/images/visual-plan-overview.png)
 
 ![Demo: on the plan canvas, a right-click on the open-question note adds an @agent comment; the reply lands in the thread, a new task appears in the checklist beside it, and the status stamp flips to EXECUTING](https://github.com/unpaged/plugins/releases/download/v0.5.1/visual-plan-demo.gif)
 
@@ -28,7 +28,7 @@ The demo above was recorded with an earlier transport; current delivery uses the
 
 Each phase box opens into its own canvas: the checklist, the task detail, and the exit criteria.
 
-![A phase canvas: a task checklist, numbered task detail, and an exit-criteria note](../../docs/images/visual-plan-phase.png)
+![A Warm Paper phase canvas: top walking pills, phase outcome banner, task checklist, numbered task detail card, and exit criteria card](../../docs/images/visual-plan-phase.png)
 
 Live example: [shop-api: Rate limiting for the public API](https://unpaged.io/share/f93886b9-50cc-4815-9577-271501f816d6) — a sample plan rendered by the plugin, open to anyone.
 
