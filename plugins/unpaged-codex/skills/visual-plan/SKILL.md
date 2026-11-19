@@ -135,8 +135,8 @@ minimal cognitive load:
 - **Surfaces & inks (no `uml-note` sticky notes, no rainbow phase borders, no
   decorative emoji):** backdrop `#f6efe3`; elevated cards and tables `#fffaf1`
   with `#ded0ba` border (`cornerRadius: 12`, subtle lift via an offset `+2, +4`
-  `#ddd0ba` shadow rectangle with `strokeWidth: 0, opacity: 0.65` placed behind
-  the card); recessed secondary surfaces (status pill, scaffolding dock, quiet
+  `#ddd0ba` shadow rectangle with `strokeColor: "#ddd0ba", strokeWidth: 0,
+  opacity: 0.65` placed behind the card); recessed secondary surfaces (status pill, scaffolding dock, quiet
   nav pills) `#efe6d6` with `#cbb99f` border. Inks: `#3b2a1e` headings/tables,
   `#4a3a2d` body, `#786554` muted metadata/hints.
 - **Three functional accents only:** Unpaged Blue (`#1d4ed8`, `strokeWidth: 2`
@@ -170,20 +170,23 @@ Use the root node as the reviewer-first overview:
   needs a verified baseline and the trusted lifecycle transitions described by
   review-plan.
 - **Hero band (above the phases):** two side-by-side cards — **WHAT THIS IS
-  ABOUT** (`#fffaf1` elevated card, 2–3 plain-English sentences) and **WHAT IT
-  WANTS TO ACHIEVE** (sage `#f4f9f5` card with concrete end-state outcome and,
-  when the plan describes a 3–5 step user/system flow, a compact horizontal
-  flow strip of pills joined by `connector` arrows).
+  ABOUT** (`#fffaf1` elevated card, 2–3 plain-English sentences taken from what
+  the plan itself says about the problem or feature and its stated reason; when
+  the plan gives no reason, leave the why out rather than invent one) and
+  **WHAT IT WANTS TO ACHIEVE** (sage `#f4f9f5` card with the concrete end-state
+  outcome stated by the plan and, when the plan describes a 3–5 step
+  user/system flow, a compact horizontal flow strip of pills joined by
+  `connector` arrows).
 - **Phases band:** one grouped clickable card per phase (`#fffaf1`, `#1d4ed8`
-  stroke `2`, `PHASE 01` eyebrow + bold `Outfit` title + 1–2 line plain-English
-  summary, top-level `isLink: true` and `linkTarget: <phase node ID>`, created
-  in exact `1..k` `linkOrder`). Use anchored `connector` arrows (`startMarker:
-  "none"`, `endMarker: "arrow"`, `#8c7a66`) for actual dependencies; never use
-  `line` with `endMarker: "arrow"` and do not invent dependencies. Give every
+  stroke `2`, `PHASE 01` eyebrow + bold `Outfit` title + 1–2 line summary drawn
+  strictly from the phase's stated scope/tasks without inventing rationale,
+  top-level `isLink: true` and `linkTarget: <phase node ID>`, created in exact
+  `1..k` `linkOrder`). Use anchored `connector` arrows (`startMarker: "none"`,
+  `endMarker: "arrow"`, `#8c7a66`) for actual dependencies; never use `line`
+  with `endMarker: "arrow"` and do not invent dependencies. Give every
   rectangle, and any other basic shape (`triangle`, `diamond`, `hexagon`,
-  `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor` (unless
-  `strokeWidth: 0`): the server refuses a basic shape that lacks them, and the
-  whole batch with it.
+  `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`: older
+  servers refuse a basic shape that lacks either, and the whole batch with it.
 - **Guardrails & reference band:** amber **RISKS & OUT OF SCOPE** card plus
   either compact clickable reference cards (`#93b4f5` border, linking to
   optional `Context · …` / `Decisions · …` child canvases) or an amber **OPEN
@@ -197,13 +200,17 @@ For a small plan, keep its task checklist and sage verification card on the
 root (above the bottom scaffolding dock). For a larger plan, use
 `node_create_with_elements` for phase child nodes (`Phase N · <short action>`,
 `backgroundColor: "#f6efe3"`, plain-English `content`) carrying a phase progress
-header, top-right walking pills (`Next →` link `1`, `← Prev` / `← Overview`
-link `2`), a compact sage **WHAT THIS PHASE ACHIEVES** banner, the unchecked
-task `checklist` (`#fffaf1`, `#ded0ba` border, `checkboxColor: "#2f7d57"`, with
-relevant requirement IDs), and a sage **EXIT CRITERIA / VERIFICATION** card.
-Keep overview wording concise while preserving complete task detail in those
-nodes. Creating the child alone does not make the overview navigable: read back
-every link target and verify navigation during rendered QA. Small plans without
+header, a compact sage **WHAT THIS PHASE ACHIEVES** banner (1–2 sentences taken
+from what the plan itself says for this phase; omit the banner if the plan
+states no phase outcome rather than invent one), the unchecked task `checklist`
+(`#fffaf1`, `#ded0ba` border, `checkboxColor: "#2f7d57"`, with relevant
+requirement IDs), and a sage **EXIT CRITERIA / VERIFICATION** card. Once every
+child node exists, add each child's grouped top-right walking pills (`Next →`
+link `1`, `← Prev` / `← Overview` link `2`) in a separate
+`batch_create_elements` per child so every pill has a real `linkTarget`. Keep
+overview wording concise while preserving complete task detail in those nodes.
+Creating the child alone does not make the overview navigable: read back every
+link target and verify navigation during rendered QA. Small plans without
 children need no phase links.
 
 When the plan has mocks, place them with a separate `batch_create_elements` on

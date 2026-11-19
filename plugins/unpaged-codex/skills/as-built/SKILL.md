@@ -254,9 +254,8 @@ Keep every element inside its canvas, text in high-contrast Warm Paper inks
 (`#3b2a1e`, `#4a3a2d`, `#786554`, `#1d4ed8`, `#226142`, `#9a4e10` on light
 surfaces), and table rows at most 20 per table. On `text`, `fillColor` is text
 color. Give every rectangle, and any other basic shape (`triangle`, `diamond`,
-`hexagon`, `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`
-(unless `strokeWidth: 0`): the server refuses a basic shape that lacks them,
-and the whole batch with it. Use structured Warm Paper cards instead of
+`hexagon`, `ellipse`, `block-arrow`), both a `fillColor` and a `strokeColor`:
+older servers refuse a basic shape that lacks either, and the whole batch with it. Use structured Warm Paper cards instead of
 `uml-note` sticky notes. Use CommonMark prose, one idea per cell, and only
 short paths or identifiers as code; the Data flow diagram is the deliberate
 code-block exception. Use current revisions and discovered tool schemas. Stop

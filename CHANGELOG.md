@@ -4,6 +4,10 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+
+- **Warm Paper design and guided navigation for `visual-plan` and `as-built` across `unpaged`, `unpaged-antigravity`, and `unpaged-codex`.** Plan and as-built canvases now use Unpaged's Warm Paper palette (`#f6efe3` backdrop, `#fffaf1` elevated cards, `#efe6d6` bottom scaffolding dock, `Outfit` headings and `Inter` body/tables, with blue reserved for clickable cards, sage for outcomes/exit criteria, and amber for risks/open decisions — retiring `uml-note` sticky notes and decorative emoji). Overviews lead with *What this is about* and *What it wants to achieve* cards above grouped clickable phase cards created in strict `1`–`9` link order; every inner canvas adds grouped `Next →` / `← Prev` walking pills and a plain-English `content` summary; Decision log and as-built tables set proportional `columnWidths` (retrying without them on older servers); and `as-built` detects phase canvases by their task checklists and stamps outcomes on both grouped phase cards and legacy single-rectangle phase boxes.
+
 ## [1.18.0] - 2026-11-17
 
 ### Added
