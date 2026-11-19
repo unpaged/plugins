@@ -85,6 +85,6 @@ Once installed, the plugin appears under **Customizations → Installed** in the
 ## Developing
 
 ```sh
-agy plugin validate plugins/unpaged-antigravity
+agy plugin validate --strict plugins/unpaged-antigravity
 node --test plugins/unpaged-antigravity/monitors/*.test.mjs
 ```

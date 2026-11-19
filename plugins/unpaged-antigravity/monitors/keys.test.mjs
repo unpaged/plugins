@@ -38,6 +38,7 @@ const MCP_CONFIG = fileURLToPath(new URL("../mcp_config.json", import.meta.url))
 test("the Antigravity plugin manifest and bundled MCP config point at the production Unpaged endpoint", () => {
   const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
   const allowedKeys = new Set([
+    "$schema",
     "name",
     "displayName",
     "description",
@@ -46,12 +47,15 @@ test("the Antigravity plugin manifest and bundled MCP config point at the produc
     "author",
     "homepage",
     "repository",
+    "license",
+    "keywords",
     "suggestedPrompts",
     "disabled"
   ]);
   for (const key of Object.keys(manifest)) {
     assert.ok(allowedKeys.has(key), `unexpected top-level plugin.json field: ${key}`);
   }
+  assert.equal(manifest.$schema, "https://antigravity.google/schemas/v1/plugin.json");
   assert.equal(manifest.name, "unpaged");
   assert.equal(manifest.displayName, "Unpaged");
   assert.equal(manifest.logo, "assets/logo.svg");
@@ -59,11 +63,51 @@ test("the Antigravity plugin manifest and bundled MCP config point at the produc
   assert.deepEqual(manifest.author, { name: "Unpaged", url: "https://unpaged.io" });
   assert.equal(manifest.homepage, "https://unpaged.io");
   assert.equal(manifest.repository, "https://github.com/unpaged/plugins");
+  assert.equal(manifest.license, "MIT");
+  assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
   assert.ok(Array.isArray(manifest.suggestedPrompts) && manifest.suggestedPrompts.length <= 3);
   const mcp = JSON.parse(readFileSync(MCP_CONFIG, "utf8"));
   assert.deepEqual(Object.keys(mcp.mcpServers), ["unpaged"]);
   assert.equal(mcp.mcpServers.unpaged.serverUrl, "https://mcp.unpaged.io/mcp");
   assert.equal(mcp.mcpServers.unpaged.url, "https://mcp.unpaged.io/mcp");
+});
+
+test("every Antigravity skill body and rule fits within the 24,000-byte loader limit and referenced files exist", () => {
+  const MAX_BYTES = 24000;
+  const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+  const rulesText = readFileSync(`${pluginRoot}/rules/AGENTS.md`, "utf8");
+  assert.ok(
+    Buffer.byteLength(rulesText, "utf8") <= MAX_BYTES,
+    `rules/AGENTS.md exceeds ${MAX_BYTES} bytes`
+  );
+
+  const skillsRoot = join(pluginRoot, "skills");
+  const skills = readdirSync(skillsRoot).filter((entry) =>
+    statSync(join(skillsRoot, entry)).isDirectory()
+  );
+  assert.ok(skills.length >= 3, "expected at least 3 Antigravity skills");
+
+  for (const skill of skills) {
+    const skillDir = join(skillsRoot, skill);
+    const raw = readFileSync(join(skillDir, "SKILL.md"), "utf8");
+    const match = raw.match(/^---\n[\s\S]*?\n---\n/);
+    assert.ok(match, `skills/${skill}/SKILL.md is missing YAML frontmatter`);
+    const body = raw.slice(match[0].length);
+    const bodyBytes = Buffer.byteLength(body, "utf8");
+    assert.ok(
+      bodyBytes <= MAX_BYTES,
+      `skills/${skill}/SKILL.md body is ${bodyBytes} bytes (limit ${MAX_BYTES})`
+    );
+    for (const refMatch of body.matchAll(/references\/[a-z0-9._-]+\.md/g)) {
+      const refPath = join(skillDir, refMatch[0]);
+      assert.ok(existsSync(refPath), `missing referenced file: skills/${skill}/${refMatch[0]}`);
+      const refBytes = Buffer.byteLength(readFileSync(refPath, "utf8"), "utf8");
+      assert.ok(
+        refBytes <= MAX_BYTES,
+        `skills/${skill}/${refMatch[0]} is ${refBytes} bytes (limit ${MAX_BYTES})`
+      );
+    }
+  }
 });
 
 test("printableKeyId prints a plain token and nothing else", () => {
