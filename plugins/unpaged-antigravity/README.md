@@ -2,7 +2,7 @@
 
 See the plan before the code. The `visual-plan` skill renders the plan Antigravity just made as an interactive whiteboard canvas on [Unpaged](https://unpaged.io): goal and outcome cards up front, phases as connected clickable cards, tasks as checklists, risks on structured cards — one link, zero setup. After the code is written, `as-built` compiles the record of what shipped and why, nested under the plan canvas.
 
-![A plan rendered as a Warm Paper canvas: what it is about and what it wants to achieve above four connected clickable phase cards, risks, out-of-scope card, and Decision log dock](../../docs/images/visual-plan-overview.png)
+![A plan rendered as a Warm Paper canvas: what it is about and what it wants to achieve above four connected clickable phase cards, risks, out-of-scope card, and Decision log dock](https://raw.githubusercontent.com/unpaged/plugins/main/docs/images/visual-plan-overview.png)
 
 ## What you get
 
