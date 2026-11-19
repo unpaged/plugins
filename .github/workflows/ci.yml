@@ -71,8 +71,17 @@ jobs:
               if (!m || !/^name: \S/m.test(m[1]) || !/^description: \S/m.test(m[1])) {
                 console.error("missing skill frontmatter:", skill); process.exit(1);
               }
-              console.log("ok skill", skill);
+              const bodyBytes = Buffer.byteLength(s.slice(m[0].length), "utf8");
+              if (bodyBytes > 24000) {
+                console.error("Antigravity skill body exceeds 24000 bytes:", skill, bodyBytes); process.exit(1);
+              }
+              console.log("ok skill", skill, bodyBytes + "B");
             }
+            const ruleBytes = Buffer.byteLength(fs.readFileSync("plugins/unpaged-antigravity/rules/AGENTS.md", "utf8"), "utf8");
+            if (ruleBytes > 24000) {
+              console.error("Antigravity rules/AGENTS.md exceeds 24000 bytes:", ruleBytes); process.exit(1);
+            }
+            console.log("ok antigravity rules", ruleBytes + "B");
           '
 
       - name: Command headers read as strict YAML, every value a string

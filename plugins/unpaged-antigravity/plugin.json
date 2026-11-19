@@ -1,8 +1,9 @@
 {
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "unpaged",
   "displayName": "Unpaged",
   "description": "Visual plans and whiteboards on Unpaged — render plans as interactive canvases, attach Can view invite links and previews to GitHub pull requests, receive @agent comments in your session, keep an implementation Decision log, and compile as-built records for code review.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Unpaged",
@@ -10,6 +11,16 @@
   },
   "homepage": "https://unpaged.io",
   "repository": "https://github.com/unpaged/plugins",
+  "license": "MIT",
+  "keywords": [
+    "unpaged",
+    "whiteboard",
+    "visual-plan",
+    "as-built",
+    "planning",
+    "diagrams",
+    "mcp"
+  ],
   "suggestedPrompts": [
     "Create a visual plan on Unpaged for this feature",
     "Compile the as-built record on Unpaged for this branch",

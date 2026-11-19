@@ -4,6 +4,12 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [unpaged-antigravity 0.4.1] - 2026-11-19
+
+### Fixed
+
+- Moved the `visual-plan` mock-picture rules and post-render PR-preview / `@agent` listener instructions into on-demand reference files (`skills/visual-plan/references/mocks.md` and `skills/visual-plan/references/listener-and-pr.md`) so `skills/visual-plan/SKILL.md` stays comfortably below Antigravity's 24,000-byte loader ceiling and passes `agy plugin validate --strict` without truncating the listener-arming steps. Added `$schema`, `license`, and `keywords` to `plugins/unpaged-antigravity/plugin.json` and enforced the 24,000-byte limit in tests and CI.
+
 ## [1.19.0] - 2026-11-19
 
 ### Changed
