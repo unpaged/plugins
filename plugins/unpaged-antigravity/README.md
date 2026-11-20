@@ -18,37 +18,16 @@ See the plan before the code. The `visual-plan` skill renders the plan Antigravi
 
 ## Requirements
 
-- **Google Antigravity** (`agy` CLI / Antigravity IDE) with plugin support.
+- **Google Antigravity** (`agy` CLI / Antigravity IDE) with plugin support, and the `agy` CLI on your `PATH` to install the plugin.
 - **Node.js 22 or newer** on your `PATH` (uses Node's built-in `fetch`; zero npm dependencies).
 - **An Unpaged account** — the free tier works. Putting mock pictures on a plan needs Premium; a link to a mocks canvas does not.
 
 ## Install
 
-### With the `agy` CLI
-
-Install directly from GitHub or a local checkout with the `agy` CLI:
+Install with the `agy` CLI:
 
 ```sh
 agy plugin install https://github.com/unpaged/plugins/tree/main/plugins/unpaged-antigravity
-```
-
-Or from a local clone of this repository:
-
-```sh
-agy plugin install ./plugins/unpaged-antigravity
-```
-
-### Antigravity Desktop App (without the `agy` CLI)
-
-If you use the Antigravity Desktop App without the `agy` CLI on your `PATH`, copy `plugins/unpaged-antigravity` into Antigravity's global plugins directory (`~/.gemini/config/plugins/unpaged`) and restart the app:
-
-```sh
-tmp="$(mktemp -d)" && \
-  git clone --depth 1 https://github.com/unpaged/plugins.git "$tmp" && \
-  mkdir -p ~/.gemini/config/plugins && \
-  rm -rf ~/.gemini/config/plugins/unpaged && \
-  cp -R "$tmp/plugins/unpaged-antigravity" ~/.gemini/config/plugins/unpaged && \
-  rm -rf "$tmp"
 ```
 
 Once installed, the plugin appears under **Customizations → Installed** in the Antigravity app. On first use, authenticate the **unpaged** MCP server in Antigravity with your Unpaged account.
