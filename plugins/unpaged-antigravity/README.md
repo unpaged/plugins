@@ -18,7 +18,7 @@ See the plan before the code. The `visual-plan` skill renders the plan Antigravi
 
 ## Requirements
 
-- **Google Antigravity** (`agy` CLI / Antigravity IDE) with plugin support.
+- **Google Antigravity** (`agy` CLI / Antigravity IDE) with plugin support, and the `agy` CLI on your `PATH` to install the plugin.
 - **Node.js 22 or newer** on your `PATH` (uses Node's built-in `fetch`; zero npm dependencies).
 - **An Unpaged account** — the free tier works. Putting mock pictures on a plan needs Premium; a link to a mocks canvas does not.
 
