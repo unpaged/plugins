@@ -1,0 +1,11 @@
+{
+  "unpaged-architecture-notice": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./monitors/session-start.mjs",
+        "timeout": 5
+      }
+    ]
+  }
+}

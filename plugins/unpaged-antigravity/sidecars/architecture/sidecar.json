@@ -1,0 +1,20 @@
+{
+  "command": "node",
+  "args": [
+    "server.mjs"
+  ],
+  "description": "Architecture status light and one-click Compare, Update, and Create actions for Unpaged",
+  "display_name": "Unpaged Architecture",
+  "has_web_ui": true,
+  "restart_policy": "always",
+  "ui_config": {
+    "display_name": "Unpaged Architecture",
+    "views": [
+      {
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "path": "/",
+        "title": "Unpaged Architecture"
+      }
+    ]
+  }
+}

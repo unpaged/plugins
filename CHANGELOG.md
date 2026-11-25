@@ -4,6 +4,14 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [unpaged-antigravity 0.5.0] - 2026-11-25
+
+### Added
+
+- **Architecture document sync (`skills/architecture/`):** Create, compare, and update repository architecture canvases on Unpaged (`create`, `compare`, and `update` modes split across `SKILL.md`, `references/create.md`, and `references/compare-and-update.md` under Antigravity's 24,000-byte loader limit), backed by a pure state module (`monitors/architecture-core.mjs`) and mode-`0600` local verdict/run CLI (`monitors/architecture.mjs`).
+- **Native auxiliary side-pane panel (`sidecars/architecture/`):** Theme-aware UI panel showing the repository's green/yellow/red/grey architecture status light (pulsing yellow while a run is active) with elapsed time since the canvas fell behind or was checked, canvas link, multi-repo workspace switcher, and one-click **Compare**, **Update**, **Create**, and **Sync status** actions (backed by the deterministic `monitors/architecture.mjs report-document` parser) that run in your currently open chat without spawning background chats or sidebar projects.
+- **Attention-only `SessionStart` notice (`hooks.json`, `monitors/session-start.mjs`):** Zero-token user-only banner with a one-click `[Unpaged Architecture](sidecar://unpaged/architecture/)` pill shown at session start only when the repo's architecture canvas is behind, stale (> 90 days), or unreachable, staying silent when current or unchecked.
+
 ## [unpaged-antigravity 0.4.1] - 2026-11-19
 
 ### Fixed
