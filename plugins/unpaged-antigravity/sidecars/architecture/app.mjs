@@ -1,6 +1,6 @@
 // HTTP server for the Unpaged Architecture auxiliary side-pane panel.
 // Binds strictly to 127.0.0.1, requires X-Sidecar-Token (or ?token=) on all
-// non-GET requests when configured, serves panel assets plus Antigravity's
+// POST requests (fails closed when no token is configured), serves panel assets plus Antigravity's
 // /preload.js bridge, implements /_sidecar/* via execFile (never shell: true),
 // and delegates repo status/run bookkeeping to monitors/architecture.mjs.
 // Never writes external network requests and never handles Unpaged OAuth tokens.
@@ -310,7 +310,8 @@ export function createArchitectureSidecarServer({
     ["/preload.js", { body: preloadJs, contentType: "application/javascript; charset=utf-8" }],
   ]);
 
-  const expectedTokenBuf = token ? Buffer.from(token, "utf8") : null;
+  const cleanToken = typeof token === "string" ? token.trim() : "";
+  const expectedTokenBuf = cleanToken ? Buffer.from(cleanToken, "utf8") : null;
 
   function extractProvidedToken(req, url) {
     const header = req.headers["x-sidecar-token"];
@@ -320,7 +321,8 @@ export function createArchitectureSidecarServer({
   }
 
   function validateToken(req, url) {
-    if (!expectedTokenBuf) return true;
+    // Fail closed: without Antigravity's token, every POST route (new-conversation included) is open to any web page.
+    if (!expectedTokenBuf) return false;
     const provided = extractProvidedToken(req, url);
     if (!provided) return false;
     const providedBuf = Buffer.from(provided, "utf8");

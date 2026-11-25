@@ -28,6 +28,7 @@ import {
   normalizeVerdict,
   parseArchitecturePointer,
   sanitizeMarkdownLabel,
+  sanitizeRepoPath,
   shownState,
   syncChatTitle,
   validCommit,
@@ -394,6 +395,73 @@ test("actionPrompt strips control characters, quotes, and backticks from repoNam
 
   const fallbackPrompt = actionPrompt("update", { repoName: '"\n\t`', documentId: DOC_1 });
   assert.ok(fallbackPrompt.includes("for this repository."));
+
+  const longRoot = `/tmp/${"nested-dir/".repeat(12)}demo`;
+  assert.equal(sanitizeRepoPath(`${longRoot}\n\`bad`), `${longRoot}bad`);
+  const rooted = actionPrompt("compare", {
+    repoName: "demo",
+    repoRoot: `${longRoot}\r\n\`bad`,
+    documentId: DOC_1,
+  });
+  assert.ok(rooted.includes(`at \`${longRoot}bad\` (use this exact path as \`<top level>\`)`));
+});
+
+test("recordRunStart embeds canonical repoRoot in all four action prompts", async () => {
+  await withTempDir(async (dir) => {
+    const homeDir = join(dir, "home");
+    const repo = join(dir, "same-name");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(repo, ".unpaged"), { recursive: true });
+    await writeFile(join(repo, POINTER_RELATIVE), JSON.stringify({ documentId: DOC_1, title: "same-name" }), "utf8");
+
+    const started = await recordRunStart(repo, "compare", { homeDir });
+    assert.equal(started.ok, true);
+    assert.ok(started.prompt.includes(await import("node:fs/promises").then((m) => m.realpath(repo))));
+    for (const action of ["compare", "update", "create", "sync"]) {
+      const res = await recordRunStart(repo, action, { homeDir });
+      assert.equal(res.ok, true);
+      assert.ok(res.prompt.includes("use this exact path as `<top level>`"));
+    }
+  });
+});
+
+test("elapsedDays and dayLabel match local-timezone dates west and east of UTC", () => {
+  const coreUrl = new URL("./architecture-core.mjs", import.meta.url).href;
+  const laScript = `
+    import { elapsedDays, dayLabel, describeStatus } from ${JSON.stringify(coreUrl)};
+    import assert from "node:assert/strict";
+    // 2026-11-25T01:00:00Z is 2026-11-24 17:00 in America/Los_Angeles.
+    const eveningLa = Date.parse("2026-11-25T01:00:00Z");
+    assert.equal(elapsedDays("2026-11-24", eveningLa), 0);
+    assert.equal(describeStatus({ shown: "current", verdict: { checkedAt: "2026-11-24" } }, eveningLa).headline, "Checked today");
+    assert.equal(describeStatus({ shown: "behind", verdict: { behindSince: "2026-11-24", checkedAt: "2026-11-24" } }, eveningLa).headline, "Behind since today");
+    // 2027-01-01T03:00:00Z is 2026-12-31 19:00 in America/Los_Angeles.
+    const nyeLa = Date.parse("2027-01-01T03:00:00Z");
+    assert.equal(dayLabel("2026-12-31", nyeLa), "31 Dec");
+  `;
+  const laRes = spawnSync(process.execPath, ["--input-type=module", "-e", laScript], {
+    env: { ...process.env, TZ: "America/Los_Angeles" },
+    encoding: "utf8",
+  });
+  assert.equal(laRes.status, 0, laRes.stderr);
+
+  const tokyoScript = `
+    import { elapsedDays, dayLabel, describeStatus } from ${JSON.stringify(coreUrl)};
+    import assert from "node:assert/strict";
+    // 2026-11-24T16:00:00Z is 2026-11-25 01:00 in Asia/Tokyo.
+    const morningTokyo = Date.parse("2026-11-24T16:00:00Z");
+    assert.equal(elapsedDays("2026-11-24", morningTokyo), 1);
+    assert.equal(describeStatus({ shown: "current", verdict: { checkedAt: "2026-11-24" } }, morningTokyo).headline, "Checked yesterday");
+    assert.equal(describeStatus({ shown: "behind", verdict: { behindSince: "2026-11-24", checkedAt: "2026-11-24" } }, morningTokyo).headline, "1 day behind");
+    // 2026-12-31T16:00:00Z is 2027-01-01 01:00 in Asia/Tokyo.
+    const newYearTokyo = Date.parse("2026-12-31T16:00:00Z");
+    assert.equal(dayLabel("2026-12-31", newYearTokyo), "31 Dec 2026");
+  `;
+  const tokyoRes = spawnSync(process.execPath, ["--input-type=module", "-e", tokyoScript], {
+    env: { ...process.env, TZ: "Asia/Tokyo" },
+    encoding: "utf8",
+  });
+  assert.equal(tokyoRes.status, 0, tokyoRes.stderr);
 });
 
 test("runKeyForRepo resolves symlinks to match the canonical repository path", async (t) => {

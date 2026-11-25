@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { POINTER_RELATIVE, SYNC_COOLDOWN_MS } from "../../monitors/architecture-core.mjs";
-import { saveVerdictForRepo } from "../../monitors/architecture.mjs";
+import { canonicalPath, saveVerdictForRepo } from "../../monitors/architecture.mjs";
 import {
   createArchitectureSidecarServer,
   createDefaultAgentApi,
@@ -409,6 +409,96 @@ test("/api/sync-status auto-syncs unknown repos once, deduplicates concurrent ca
       ).json();
       assert.equal(afterCooldown.started, true);
       assert.equal(startCalls.length, 4);
+      assert.ok(startCalls[3].message.includes(canonicalPath(repoUnknown)));
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test("sidecar POST routes fail closed with 401 when no token is configured, without calling agentApi", async () => {
+  await withTempDir(async (dir) => {
+    const homeDir = join(dir, "home");
+    const repo = join(dir, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    let agentCalls = 0;
+    const mockAgentApi = {
+      async sendMessage() {
+        agentCalls++;
+        return { success: true };
+      },
+      async startConversation() {
+        agentCalls++;
+        return { conversationId: "should-not-start" };
+      },
+      async getConversationMetadata() {
+        agentCalls++;
+        return {};
+      },
+    };
+
+    for (const badToken of ["", "   "]) {
+      const app = createArchitectureSidecarServer({
+        port: 0,
+        token: badToken,
+        preloadJs: "// preload\n",
+        agentApi: mockAgentApi,
+        homeDir,
+      });
+      const boundPort = await app.listen();
+      const base = `http://127.0.0.1:${boundPort}`;
+      try {
+        assert.equal((await fetch(`${base}/`)).status, 200);
+        for (const [route, payload] of [
+          ["/api/status", { workspaceUris: [pathToFileURL(repo).href] }],
+          ["/api/start-run", { repoRoot: repo, action: "compare", workspaceUris: [pathToFileURL(repo).href] }],
+          ["/api/sync-status", { repoRoot: repo, workspaceUris: [pathToFileURL(repo).href] }],
+          ["/_sidecar/new-conversation", { message: "ATTACKER PROMPT" }],
+        ]) {
+          const res = await fetch(`${base}${route}`, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify(payload),
+          });
+          assert.equal(res.status, 401, `${route} should fail closed for empty token`);
+        }
+      } finally {
+        await app.close();
+      }
+    }
+    assert.equal(agentCalls, 0);
+  });
+});
+
+test("/api/start-run distinguishes workspace repos sharing the same folder name by full path", async () => {
+  await withTempDir(async (dir) => {
+    const homeDir = join(dir, "home");
+    const repoA = join(dir, "team-a", "app");
+    const repoB = join(dir, "team-b", "app");
+    for (const r of [repoA, repoB]) {
+      await mkdir(join(r, ".git"), { recursive: true });
+      await mkdir(join(r, ".unpaged"), { recursive: true });
+      await writeFile(join(r, POINTER_RELATIVE), JSON.stringify({ documentId: DOC_1, title: "app" }), "utf8");
+    }
+    const workspaceUris = [pathToFileURL(repoA).href, pathToFileURL(repoB).href];
+    const app = createArchitectureSidecarServer({
+      port: 0,
+      token: "secret-token",
+      preloadJs: "// preload\n",
+      homeDir,
+    });
+    const boundPort = await app.listen();
+    const base = `http://127.0.0.1:${boundPort}`;
+    try {
+      const startB = await fetch(`${base}/api/start-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sidecar-Token": "secret-token" },
+        body: JSON.stringify({ repoRoot: repoB, action: "compare", workspaceUris }),
+      });
+      assert.equal(startB.status, 200);
+      const dataB = await startB.json();
+      assert.ok(dataB.prompt.includes(canonicalPath(repoB)));
+      assert.ok(!dataB.prompt.includes(canonicalPath(repoA)));
     } finally {
       await app.close();
     }

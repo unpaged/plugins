@@ -380,8 +380,10 @@ export async function recordRunStart(
     pid,
   });
   const after = await readRepositoryStatus(repoRoot, { homeDir, fs, now });
+  const canonicalRoot = canonicalPath(repoRoot);
   const prompt = actionPrompt(cleanAction, {
     repoName: before.repoName || basename(repoRoot),
+    repoRoot: canonicalRoot,
     documentId: before.documentId,
   });
   return { ok: true, record, status: after, prompt };

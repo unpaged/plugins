@@ -255,7 +255,7 @@ export function dayLabel(isoDay, nowMs = Date.now()) {
   if (ms === null) return null;
   const d = new Date(ms);
   const label = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
-  return d.getUTCFullYear() === new Date(nowMs).getUTCFullYear()
+  return d.getUTCFullYear() === new Date(nowMs).getFullYear()
     ? label
     : `${label} ${d.getUTCFullYear()}`;
 }
@@ -264,8 +264,9 @@ export function elapsedDays(isoDay, nowMs = Date.now()) {
   const ms = dayMs(isoDay);
   if (ms === null || !Number.isFinite(nowMs)) return null;
   const d = new Date(nowMs);
-  const todayUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.max(0, Math.floor((todayUtc - ms) / (24 * 60 * 60 * 1000)));
+  // The skill writes the note's day in the local time zone, so count from today's local date.
+  const todayLocal = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.max(0, Math.floor((todayLocal - ms) / (24 * 60 * 60 * 1000)));
 }
 
 export function durationLabel(days) {
@@ -409,14 +410,21 @@ export function sanitizeRepoLabel(value) {
     .trim();
 }
 
+export function sanitizeRepoPath(value) {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\r\n\t\x00-\x1f\x7f`]+/g, "").trim();
+}
+
 export function syncChatTitle(repoName) {
   const clean = sanitizeRepoLabel(repoName);
   return clean ? `Unpaged Architecture · ${clean}`.slice(0, 120) : "Unpaged Architecture";
 }
 
-export function actionPrompt(action, { repoName = "", documentId = null } = {}) {
+export function actionPrompt(action, { repoName = "", repoRoot = "", documentId = null } = {}) {
   const cleanName = sanitizeRepoLabel(repoName);
-  const target = cleanName ? `repository "${cleanName}"` : "this repository";
+  const cleanRoot = sanitizeRepoPath(repoRoot);
+  const rootClause = cleanRoot ? ` at \`${cleanRoot}\` (use this exact path as \`<top level>\`)` : "";
+  const target = `${cleanName ? `repository "${cleanName}"` : "this repository"}${rootClause}`;
   if (action === "sync") {
     const idClause = isDocumentId(documentId) ? ` (canvas id ${documentId})` : "";
     return `Automatic status sync from the Unpaged Architecture side panel for ${target}${idClause}. Run the \`architecture\` skill in \`sync\` mode now: do NOT run git or read codebase files, and do NOT edit the canvas or post comments. Call ONLY \`document_get\` on the \`unpaged\` MCP server for the canvas in \`.unpaged/architecture.json\`, pass its output file (or JSON on stdin) to \`monitors/architecture.mjs report-document\` (or \`clear-run\` if Unpaged sign-in is missing, a network error occurred, or the canvas has no date note yet; report \`lost\` only when Unpaged confirms the canvas is not found or inaccessible), then reply in one short sentence.`;

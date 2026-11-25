@@ -23,7 +23,7 @@ It is built from the code alone — not from any document in the repository, whi
 ## Preconditions
 
 - The `unpaged` MCP server ships with this plugin (`mcp_config.json`). If its tools (e.g. `document_get`) are missing or return an authentication error, tell the user to open the plugin's settings (or `/mcp`), sign in to the **unpaged** MCP server with their Unpaged account (free tier works), and retry.
-- The working folder must be inside a git repository: `git rev-parse --show-toplevel` succeeds, and the folder it names is **the top level**: run every `git` step from there (`git -C <top level> …`), whatever folder the session runs in, and read paths relative to it so a session started in a subfolder of a monorepo sees the whole repository.
+- When invoked from the side panel for a specific repository, the prompt names its exact path — use that path as **the top level** (for Sync, never run `git`; for multi-repo workspaces, this picks the repository chosen in the panel rather than the chat's current folder). Otherwise, the working folder must be inside a git repository: `git rev-parse --show-toplevel` succeeds, and the folder it names is **the top level**. Run every `git` step from `<top level>` (`git -C <top level> …`), and read paths relative to it so a session started in a subfolder of a monorepo sees the whole repository.
 - Every shell step in Sync, Compare, and Update is read-only (`git` in Compare/Update, reading files, and saving the local verdict), except writing `.unpaged/architecture.json` in Create.
 
 ## Pointer file and date note contract
