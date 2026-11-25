@@ -47,6 +47,10 @@ import {
 } from "./architecture.mjs";
 import { buildSessionStartOutput } from "./session-start.mjs";
 
+// Fixtures use fixed noon-UTC instants; pin the zone so local-date counts match on every machine.
+// The time-zone test below sets its own TZ in child processes.
+process.env.TZ = "UTC";
+
 const DOC_1 = "21655eba-fa32-4a7d-8249-4ee28c8f1157";
 const DOC_2 = "2a12a251-35ae-47d1-9426-4ab7e4b0dc9b";
 const CLI_PATH = fileURLToPath(new URL("./architecture.mjs", import.meta.url));
