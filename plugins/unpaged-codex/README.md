@@ -307,7 +307,7 @@ clickable preview image inside a bounded `<!-- unpaged-plan:start -->` section.
 The agent makes the plan public first (`document_update` with `isPublic: true`)
 and tells you it did, so a reviewer opens the plan without an account.
 `visual-plan` leaves alone a plan that is not about the open pull request, and
-`as-built` asks before it makes a plan public unless the same task already did.
+`as-built` asks each time before it makes the plan public.
 
 The accepted digest remains an approval receipt as the current canvas digest
 advances through log entries, checklist progress and as-built records. Changes
