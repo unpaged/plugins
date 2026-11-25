@@ -12,7 +12,7 @@ let workspaceUris = [];
 let repos = [];
 let selectedRepoRoot = null;
 let lastError = null;
-let pendingSubmit = false;
+let pendingAction = null;
 let pollTimer = null;
 let refreshInFlight = false;
 
@@ -151,9 +151,9 @@ function renderPanel() {
           : isPrimary
             ? "btn btn-primary"
             : "btn btn-secondary";
-      const btn = el("button", toneClass, pendingSubmit ? "Starting…" : label);
+      const btn = el("button", toneClass, pendingAction === action ? "Starting…" : label);
       btn.type = "button";
-      btn.disabled = pendingSubmit;
+      btn.disabled = pendingAction !== null;
       btn.addEventListener("click", () => handleAction(repo, action));
       actionsWrap.appendChild(btn);
     });
@@ -218,8 +218,8 @@ async function refreshStatus() {
 }
 
 async function handleAction(repo, action) {
-  if (pendingSubmit) return;
-  pendingSubmit = true;
+  if (pendingAction) return;
+  pendingAction = action;
   lastError = null;
   renderPanel();
 
@@ -260,7 +260,7 @@ async function handleAction(repo, action) {
     }).catch(() => {});
     await refreshStatus();
   } finally {
-    pendingSubmit = false;
+    pendingAction = null;
     renderPanel();
   }
 }

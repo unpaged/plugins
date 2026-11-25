@@ -54,8 +54,17 @@ function readStdin() {
   });
 }
 
+export function canonicalPath(pathStr) {
+  const resolved = resolve(String(pathStr || ""));
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export function runKeyForRepo(repoRoot) {
-  return createHash("sha256").update(resolve(repoRoot)).digest("hex");
+  return createHash("sha256").update(canonicalPath(repoRoot)).digest("hex");
 }
 
 export async function findRepositoryRoot(startDir, fs = { access }) {

@@ -251,8 +251,20 @@ export function availableActions(shown) {
   return ["compare", "update"];
 }
 
-export function actionPrompt(action, { repoName = "this repository", documentId = null } = {}) {
-  const target = repoName ? `repository "${repoName}"` : "this repository";
+export function sanitizeRepoLabel(value) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/[\r\n\t\x00-\x1f\x7f]+/g, " ")
+    .replace(/["`]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120)
+    .trim();
+}
+
+export function actionPrompt(action, { repoName = "", documentId = null } = {}) {
+  const cleanName = sanitizeRepoLabel(repoName);
+  const target = cleanName ? `repository "${cleanName}"` : "this repository";
   if (action === "compare") {
     return `The user clicked Compare in the Unpaged Architecture side panel for ${target}. Run the \`architecture\` skill in \`compare\` mode now: run a clean-slate check in a separate helper, mark the canvas without rewriting cards, and finish by saving the verdict with \`monitors/architecture.mjs report\`.`;
   }

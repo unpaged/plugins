@@ -6,13 +6,15 @@
 // Never writes external network requests and never handles Unpaged OAuth tokens.
 
 import { execFile } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUN_ACTIONS } from "../../monitors/architecture-core.mjs";
 import {
+  canonicalPath,
   clearRunState,
   findRepositoryRoot,
   readRepositoryStatus,
@@ -257,10 +259,21 @@ export function createArchitectureSidecarServer({
     ["/preload.js", { body: preloadJs, contentType: "application/javascript; charset=utf-8" }],
   ]);
 
+  const expectedTokenBuf = token ? Buffer.from(token, "utf8") : null;
+
   function validateToken(req, url) {
-    if (!token) return true;
+    if (!expectedTokenBuf) return true;
     const provided = req.headers["x-sidecar-token"] || url.searchParams.get("token");
-    return provided === token;
+    if (typeof provided !== "string") return false;
+    const providedBuf = Buffer.from(provided, "utf8");
+    if (providedBuf.length !== expectedTokenBuf.length) return false;
+    return timingSafeEqual(providedBuf, expectedTokenBuf);
+  }
+
+  function findAuthorizedRepoRoot(rawRepoRoot, workspaceRoots) {
+    if (typeof rawRepoRoot !== "string" || !rawRepoRoot.trim()) return null;
+    const targetCanonical = canonicalPath(rawRepoRoot);
+    return workspaceRoots.find((root) => canonicalPath(root) === targetCanonical) ?? null;
   }
 
   const server = createServer(async (req, res) => {
@@ -338,12 +351,12 @@ export function createArchitectureSidecarServer({
             return;
           }
           const roots = await resolveWorkspaceRepoRoots(body.workspaceUris);
-          const targetRoot = typeof body.repoRoot === "string" ? resolve(body.repoRoot) : "";
-          if (!targetRoot || !roots.includes(targetRoot)) {
+          const authorizedRoot = findAuthorizedRepoRoot(body.repoRoot, roots);
+          if (!authorizedRoot) {
             sendJson(res, 403, { error: "repoRoot must match an active workspace repository" });
             return;
           }
-          const started = await recordRunStart(targetRoot, action, { homeDir, now });
+          const started = await recordRunStart(authorizedRoot, action, { homeDir, now });
           if (!started.ok) {
             sendJson(res, 400, { error: started.error });
             return;
@@ -353,13 +366,13 @@ export function createArchitectureSidecarServer({
         }
         case "/api/clear-run": {
           const roots = await resolveWorkspaceRepoRoots(body.workspaceUris);
-          const targetRoot = typeof body.repoRoot === "string" ? resolve(body.repoRoot) : "";
-          if (!targetRoot || !roots.includes(targetRoot)) {
+          const authorizedRoot = findAuthorizedRepoRoot(body.repoRoot, roots);
+          if (!authorizedRoot) {
             sendJson(res, 403, { error: "repoRoot must match an active workspace repository" });
             return;
           }
-          await clearRunState(targetRoot, { homeDir });
-          const status = await readRepositoryStatus(targetRoot, { homeDir, now });
+          await clearRunState(authorizedRoot, { homeDir });
+          const status = await readRepositoryStatus(authorizedRoot, { homeDir, now });
           sendJson(res, 200, { ok: true, status });
           return;
         }

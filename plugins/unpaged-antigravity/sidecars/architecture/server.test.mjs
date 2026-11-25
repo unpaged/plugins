@@ -86,13 +86,27 @@ test("sidecar HTTP server enforces loopback token auth, serves assets, tracks re
       assert.equal(preloadRes.status, 200);
       assert.equal(await preloadRes.text(), "// test preload\n");
 
-      // Token enforced on all POST routes.
+      // Token enforced on all POST routes (missing, short, and identical-length wrong tokens).
       const unauth = await fetch(`${base}/api/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceUris: [] }),
       });
       assert.equal(unauth.status, 401);
+
+      const shortWrong = await fetch(`${base}/api/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sidecar-Token": "short" },
+        body: JSON.stringify({ workspaceUris: [] }),
+      });
+      assert.equal(shortWrong.status, 401);
+
+      const equalLenWrong = await fetch(`${base}/api/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sidecar-Token": "wrong-token!" },
+        body: JSON.stringify({ workspaceUris: [] }),
+      });
+      assert.equal(equalLenWrong.status, 401);
 
       // Oversized payload returns 413.
       const tooBig = await fetch(`${base}/api/status`, {
