@@ -275,7 +275,11 @@ claim a visual pass.
 Use current revisions for subsequent edits, as required by review-plan.
 
 If an open GitHub pull request already exists for the current branch
-(`gh pr view --json number,url,state` returns `state: "OPEN"`), call remote
+(`gh pr view --json number,url,title,state` returns `state: "OPEN"`) and the
+plan is about that pull request's work (compare the plan with the pull
+request's title and changes; when it is not, leave the pull request description
+unchanged, do not make the plan public, say why in one sentence, and record the
+plan for a future pull request as below), call remote
 `document_update({ documentId, isPublic: true })`. It makes the plan public —
 anyone with its link can read it without an account, and copy it once signed
 in — and redraws the link-preview picture from the root canvas. The plan's

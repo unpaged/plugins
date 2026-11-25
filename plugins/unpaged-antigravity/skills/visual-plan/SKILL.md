@@ -90,7 +90,7 @@ Every plan board uses the **Warm Paper** design system so reviewers immediately 
 
 Right after rendering and checking the canvas pictures — before replying to the user — read `references/listener-and-pr.md` in this skill folder and follow every step:
 
-1. Record the visual plan for the current git branch (`monitors/plans.mjs record <documentId>`) and, if an open pull request exists for the branch, make the plan public and attach its link and preview (`document_update` with `isPublic: true` + `monitors/plans.mjs splice`). Never pass a canvas title on the shell command line, and never splice by hand if `plans.mjs splice` refuses.
+1. Record the visual plan for the current git branch (`monitors/plans.mjs record <documentId>`) and, if an open pull request exists for the branch and the plan is about that pull request's work, make the plan public and attach its link and preview (`document_update` with `isPublic: true` + `monitors/plans.mjs splice`). Never pass a canvas title on the shell command line, and never splice by hand if `plans.mjs splice` refuses.
 2. Arm `@agent` comment push for this canvas (`monitors/keys.mjs check` / `store` + `agent_listener_key_create` + background `monitors/listen.mjs --once <documentId>` with `WaitMsBeforeAsync: 500`, `IsDaemon: false`, and `BypassSandbox: true` if Standard Sandbox Mode blocks `~/.gemini/unpaged` or network). The mint result is a credential: pass it to `keys.mjs store` only on stdin via a quoted heredoc (`<<'EOF'`), never on the command line or with `echo`; never `cat` a key file or repeat the key in a reply; if the store fails, revoke the key right away with `agent_listener_key_revoke`.
 
 ## Finish

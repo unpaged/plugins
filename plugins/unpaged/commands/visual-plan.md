@@ -110,7 +110,7 @@ Every plan board uses the **Warm Paper** design system so reviewers immediately 
 
 ## Attach to an open pull request (when one exists)
 
-If the working folder is in a git repository, `gh` is on `PATH`, and `gh pr view --json number,url,body,state` succeeds with `state: "OPEN"` for the current branch:
+If the working folder is in a git repository, `gh` is on `PATH`, `gh pr view --json number,url,title,body,state` succeeds with `state: "OPEN"` for the current branch, and the plan is about that pull request's work (compare the plan with the pull request's title and changes; when it is not, skip this section, leave the pull request description unchanged, do not make the plan public, and say why in one sentence):
 
 1. Call `document_update({ documentId, isPublic: true })` on the `unpaged` server. It makes the plan public — anyone with its link can read it without an account, and copy it once signed in — and redraws the link-preview picture from the root canvas as it is now. The plan's public link `<url>` is the one the reply gives; when the reply gives none, it is `<web app>/share/<documentId>`, where `<web app>` is the web app address the `unpaged` server's instructions name (`https://unpaged.io` for `mcp.unpaged.io`). If the call is refused (for example, only the plan's owner can make it public), skip this section, leave the pull request description unchanged and say why in one sentence.
 2. Splice ONLY the standalone bounded `<!-- unpaged-plan:start --> ... <!-- unpaged-plan:end -->` section into the pull request's `body` (never matching markers inside backticks or fenced code blocks, and never passing a canvas title on a shell command line), preserving all surrounding PR description text untouched:
