@@ -13,6 +13,8 @@ import {
   availableActions,
   dayLabel,
   describeStatus,
+  durationLabel,
+  elapsedDays,
   filterSkipPatterns,
   formatAttentionMarkdown,
   isRunActive,
@@ -176,7 +178,9 @@ test("shownState, lightColor, staleness (90 days), and active runs follow the sp
   });
   assert.equal(isRunActive(sameMsRun, currentVerdict, Date.parse("2026-11-24T12:00:00.000Z")), true);
   assert.match(actionPrompt("create", { repoName: "demo", documentId: DOC_1 }), /already names canvas/);
-  assert.equal(describeStatus({ shown: "behind", verdict: behindVerdict }, nov25).headline, "Behind since 18 Nov");
+  const behindDesc = describeStatus({ shown: "behind", verdict: behindVerdict }, nov25);
+  assert.equal(behindDesc.headline, "7 days behind");
+  assert.ok(behindDesc.detail.includes("Behind since 18 Nov"));
 });
 
 test("formatAttentionMarkdown stays silent for healthy states and escapes untrusted titles", () => {
@@ -356,7 +360,7 @@ test("session-start.mjs stays silent when current/unknown/none and emits zero-to
     assert.equal(noticeOut.injectSteps[0].systemMessage.systemMessage, "");
     const md = noticeOut.injectSteps[0].systemMessage.metadata.user_markdown;
     assert.ok(md.includes("behind-repo"));
-    assert.ok(md.includes("Behind since 18 Nov"));
+    assert.ok(md.includes("7 days behind (since 18 Nov)"));
     assert.ok(!md.includes("ok-repo"));
     assert.ok(md.includes("[Unpaged Architecture](sidecar://unpaged/architecture/)"));
 
@@ -400,4 +404,71 @@ test("runKeyForRepo resolves symlinks to match the canonical repository path", a
     }
     assert.equal(runKeyForRepo(linkRepo), runKeyForRepo(realRepo));
   });
+});
+
+test("elapsedDays, durationLabel, describeStatus, and formatAttentionMarkdown format elapsed time cleanly", () => {
+  const nov25 = Date.parse("2026-11-25T12:00:00Z");
+
+  assert.equal(elapsedDays("2026-11-25", nov25), 0);
+  assert.equal(elapsedDays("2026-11-24", nov25), 1);
+  assert.equal(elapsedDays("2026-11-09", nov25), 16);
+  assert.equal(elapsedDays("2026-11-26", Date.parse("2026-11-25T23:00:00Z")), 0);
+  assert.equal(elapsedDays("not-a-day", nov25), null);
+  assert.equal(elapsedDays(null, nov25), null);
+
+  const boundaries = [
+    [0, "today"],
+    [1, "1 day"],
+    [7, "7 days"],
+    [16, "16 days"],
+    [29, "29 days"],
+    [30, "4 weeks"],
+    [45, "6 weeks"],
+    [59, "8 weeks"],
+    [60, "2 months"],
+    [91, "3 months"],
+    [125, "4 months"],
+    [364, "11 months"],
+    [365, "1 year"],
+    [730, "2 years"],
+  ];
+  for (const [days, expected] of boundaries) {
+    assert.equal(durationLabel(days), expected);
+  }
+  assert.equal(durationLabel(-1), null);
+  assert.equal(durationLabel(Number.NaN), null);
+  assert.equal(durationLabel(null), null);
+  assert.equal(durationLabel("5"), null);
+
+  const behindToday = { shown: "behind", documentId: DOC_1, title: "demo", verdict: { behindSince: "2026-11-25", checkedAt: "2026-11-25" } };
+  assert.equal(describeStatus(behindToday, nov25).headline, "Behind since today");
+  assert.ok(describeStatus(behindToday, nov25).detail.includes("Behind since 25 Nov"));
+  assert.ok(formatAttentionMarkdown([behindToday], nov25).includes("Behind since today (25 Nov)."));
+
+  const behind1d = { shown: "behind", documentId: DOC_1, title: "demo", verdict: { behindSince: "2026-11-24", checkedAt: "2026-11-25" } };
+  assert.equal(describeStatus(behind1d, nov25).headline, "1 day behind");
+  assert.ok(describeStatus(behind1d, nov25).detail.includes("Behind since 24 Nov"));
+  assert.ok(formatAttentionMarkdown([behind1d], nov25).includes("1 day behind (since 24 Nov)."));
+
+  const behind16d = { shown: "behind", documentId: DOC_1, title: "demo", verdict: { behindSince: "2026-11-09", checkedAt: "2026-11-15" } };
+  assert.equal(describeStatus(behind16d, nov25).headline, "16 days behind");
+  assert.ok(describeStatus(behind16d, nov25).detail.includes("Behind since 9 Nov"));
+  assert.ok(formatAttentionMarkdown([behind16d], nov25).includes("16 days behind (since 9 Nov)."));
+
+  const stale4m = { shown: "stale", documentId: DOC_1, title: "demo", verdict: { checkedAt: "2026-07-23" } };
+  assert.equal(describeStatus(stale4m, nov25).headline, "Not compared for 4 months");
+  assert.ok(describeStatus(stale4m, nov25).detail.includes("Last checked 23 Jul"));
+  assert.ok(formatAttentionMarkdown([stale4m], nov25).includes("Not compared for 4 months (since 23 Jul)."));
+
+  const currentToday = { shown: "current", verdict: { checkedAt: "2026-11-25", commit: "a1b2c3d" } };
+  assert.equal(describeStatus(currentToday, nov25).headline, "Checked today");
+  assert.equal(describeStatus(currentToday, nov25).detail, "Up to date on 25 Nov at commit a1b2c3d");
+
+  const currentYesterday = { shown: "current", verdict: { checkedAt: "2026-11-24" } };
+  assert.equal(describeStatus(currentYesterday, nov25).headline, "Checked yesterday");
+  assert.equal(describeStatus(currentYesterday, nov25).detail, "All checked claims held on 24 Nov.");
+
+  const current10d = { shown: "current", verdict: { checkedAt: "2026-11-15" } };
+  assert.equal(describeStatus(current10d, nov25).headline, "Checked 10 days ago");
+  assert.equal(describeStatus(current10d, nov25).detail, "All checked claims held on 15 Nov.");
 });

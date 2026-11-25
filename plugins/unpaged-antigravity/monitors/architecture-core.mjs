@@ -175,6 +175,26 @@ export function dayLabel(isoDay, nowMs = Date.now()) {
     : `${label} ${d.getUTCFullYear()}`;
 }
 
+export function elapsedDays(isoDay, nowMs = Date.now()) {
+  const ms = dayMs(isoDay);
+  if (ms === null || !Number.isFinite(nowMs)) return null;
+  const d = new Date(nowMs);
+  const todayUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return Math.max(0, Math.floor((todayUtc - ms) / (24 * 60 * 60 * 1000)));
+}
+
+export function durationLabel(days) {
+  if (typeof days !== "number" || !Number.isFinite(days) || days < 0) return null;
+  const whole = Math.floor(days);
+  if (whole === 0) return "today";
+  if (whole === 1) return "1 day";
+  if (whole < 30) return `${whole} days`;
+  if (whole < 60) return `${Math.floor(whole / 7)} weeks`;
+  if (whole < 365) return `${Math.min(11, Math.floor(whole / 30))} months`;
+  const years = Math.floor(whole / 365);
+  return years === 1 ? "1 year" : `${years} years`;
+}
+
 export function describeStatus(status, nowMs = Date.now()) {
   const shown = status?.shown ?? "none";
   const verdict = status?.verdict ?? null;
@@ -218,26 +238,60 @@ export function describeStatus(status, nowMs = Date.now()) {
     };
   }
   if (shown === "stale") {
-    const label = dayLabel(verdict?.checkedAt, nowMs);
+    const checkedDay = verdict?.checkedAt ?? null;
+    const label = dayLabel(checkedDay, nowMs);
+    const days = elapsedDays(checkedDay, nowMs);
+    const duration = durationLabel(days);
+    if (duration && days > 0) {
+      return {
+        headline: `Not compared for ${duration}`,
+        detail: label ? `Last checked ${label} — over three months ago.` : "Last checked over three months ago.",
+      };
+    }
     return {
       headline: `Not compared since ${label ?? "an unknown day"}`,
       detail: "Last checked over three months ago.",
     };
   }
   if (shown === "behind") {
-    const label = dayLabel(verdict?.behindSince ?? verdict?.checkedAt, nowMs);
+    const sinceDay = verdict?.behindSince ?? verdict?.checkedAt ?? null;
+    const label = dayLabel(sinceDay, nowMs);
+    const days = elapsedDays(sinceDay, nowMs);
+    const duration = durationLabel(days);
+    const detail = label
+      ? `Behind since ${label} · Code changed after the last check.`
+      : "Code changed after the last architecture check.";
+    if (days === 0) {
+      return { headline: "Behind since today", detail };
+    }
+    if (duration) {
+      return { headline: `${duration} behind`, detail };
+    }
     return {
       headline: `Behind since ${label ?? "an unknown day"}`,
       detail: "Code changed after the last architecture check.",
     };
   }
-  const checked = dayLabel(verdict?.checkedAt, nowMs);
-  return {
-    headline: checked ? `Checked ${checked}` : "Up to date when last compared",
-    detail: verdict?.commit
-      ? `Up to date at commit ${verdict.commit}`
-      : "All checked claims held on last check.",
-  };
+  const checkedDay = verdict?.checkedAt ?? null;
+  const checked = dayLabel(checkedDay, nowMs);
+  const days = elapsedDays(checkedDay, nowMs);
+  const duration = durationLabel(days);
+  const headline =
+    days === 0
+      ? "Checked today"
+      : days === 1
+        ? "Checked yesterday"
+        : duration
+          ? `Checked ${duration} ago`
+          : checked
+            ? `Checked ${checked}`
+            : "Up to date when last compared";
+  const detail = verdict?.commit
+    ? `${checked ? `Up to date on ${checked}` : "Up to date"} at commit ${verdict.commit}`
+    : checked
+      ? `All checked claims held on ${checked}.`
+      : "All checked claims held on last check.";
+  return { headline, detail };
 }
 
 export function needsAttention(shown) {
@@ -296,8 +350,18 @@ export function formatAttentionMarkdown(statuses, nowMs = Date.now()) {
     const title = sanitizeMarkdownLabel(item.title || item.repoName || item.documentId || "Architecture");
     const url = boardUrlFor(item.documentId);
     const { headline } = describeStatus(item, nowMs);
+    const sinceDay =
+      item.shown === "behind"
+        ? (item.verdict?.behindSince ?? item.verdict?.checkedAt)
+        : item.shown === "stale"
+          ? item.verdict?.checkedAt
+          : null;
+    const sinceLabel = sinceDay ? dayLabel(sinceDay, nowMs) : null;
+    const suffix = sinceLabel
+      ? (headline.toLowerCase().includes("since") ? ` (${sinceLabel})` : ` (since ${sinceLabel})`)
+      : "";
     const titlePart = url ? `[${title}](${url})` : title;
-    return `**Unpaged Architecture** (${titlePart}): ${headline}.`;
+    return `**Unpaged Architecture** (${titlePart}): ${headline}${suffix}.`;
   });
   return `${parts.join(" ")} [Unpaged Architecture](${SIDECAR_PILL_URL})`;
 }
