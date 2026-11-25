@@ -4,6 +4,24 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-11-25
+
+### Changed
+
+- **Pull requests carry the plan's public link, not a team link.** A reviewer who was signed out met the Log in page behind the **Can view** team link, needed an account with a confirmed address, and took one of the plan owner's collaborator places. When a pull request is open or opened on a branch with a visual plan, the agent now makes the plan public (`document_update` with `isPublic: true`, which also redraws the preview picture), puts `/share/<documentId>` and `/share/<documentId>/preview.png` in the bounded `<!-- unpaged-plan:start -->` section, and tells you the plan is public and that **Share → Public link** turns it off. This applies on private repositories too: anyone who has the link can read the plan without an account, a signed-in person can copy it, and a search engine may list it once the link is on a public page. `monitors/plans.mjs splice` takes the public link alone, derives the picture link from it, and refuses a `/join/<token>` team link. A section an earlier version wrote is replaced in place the next time `/unpaged:visual-plan` or `/unpaged:as-built` runs on the branch; team links earlier versions made stay as they are until you revoke them in the Share dialog. If the plan cannot be made public (only its owner can), nothing is attached and the agent says why.
+
+## [unpaged-antigravity 0.5.0] - 2026-11-25
+
+### Changed
+
+- `skills/visual-plan`, `skills/as-built` and `rules/AGENTS.md` make the plan public and attach its public link to the pull request as in 1.20.0; `monitors/plans.mjs splice` refuses a team link.
+
+## [unpaged-codex 0.12.0] - 2026-11-25
+
+### Changed
+
+- `skills/visual-plan` and `skills/as-built` make the plan public and attach its public link to the pull request as in 1.20.0; `runtime/pr-preview.mjs splice` and the local `pr_splice` operation refuse a team link.
+
 ## [unpaged-antigravity 0.4.1] - 2026-11-19
 
 ### Fixed

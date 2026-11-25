@@ -90,14 +90,14 @@ Every plan board uses the **Warm Paper** design system so reviewers immediately 
 
 Right after rendering and checking the canvas pictures — before replying to the user — read `references/listener-and-pr.md` in this skill folder and follow every step:
 
-1. Record the visual plan for the current git branch (`monitors/plans.mjs record <documentId>`) and, if an open pull request exists for the branch, attach its **Can view** invite link and preview (`document_join_link` + `monitors/plans.mjs splice`). Never pass a canvas title on the shell command line, and never splice by hand if `plans.mjs splice` refuses.
+1. Record the visual plan for the current git branch (`monitors/plans.mjs record <documentId>`) and, if an open pull request exists for the branch, make the plan public and attach its link and preview (`document_update` with `isPublic: true` + `monitors/plans.mjs splice`). Never pass a canvas title on the shell command line, and never splice by hand if `plans.mjs splice` refuses.
 2. Arm `@agent` comment push for this canvas (`monitors/keys.mjs check` / `store` + `agent_listener_key_create` + background `monitors/listen.mjs --once <documentId>` with `WaitMsBeforeAsync: 500`, `IsDaemon: false`, and `BypassSandbox: true` if Standard Sandbox Mode blocks `~/.gemini/unpaged` or network). The mint result is a credential: pass it to `keys.mjs store` only on stdin via a quoted heredoc (`<<'EOF'`), never on the command line or with `echo`; never `cat` a key file or repeat the key in a reply; if the store fails, revoke the key right away with `agent_listener_key_revoke`.
 
 ## Finish
 
 Reply to the user with:
 - The edit link: `https://unpaged.io/document/<documentId>/edit` — call it a canvas (or whiteboard) in your reply, never a board.
-- If an open pull request for this branch was updated, one short sentence naming that pull request and noting that its **Can view** preview is attached.
+- If an open pull request for this branch was updated, one short sentence naming that pull request and saying that the plan is attached and is now public — anyone with the link can read it without an account — and that **Share → Public link** in Unpaged turns that off.
 - When the plan had mocks, one sentence saying how many went on which canvases, and the sentence from `references/mocks.md` for any left out.
 - One sentence: approving the plan will stamp the canvas EXECUTING, and the Decision log fills in while the plan is implemented.
 - Once `listen.mjs --once <documentId>` is running in the background: *"I'm listening on this canvas — comment @agent there and I reply on it."* and end your turn.
