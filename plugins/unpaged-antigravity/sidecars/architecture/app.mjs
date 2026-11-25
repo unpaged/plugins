@@ -237,6 +237,30 @@ function readJsonBody(req, maxBytes) {
   });
 }
 
+export function injectHtmlTokenParams(html, tokenParam, conversationId = "") {
+  if (typeof html !== "string" || !tokenParam) return html;
+  const cleanConv =
+    typeof conversationId === "string" && SAFE_ID_SHAPE.test(conversationId.trim())
+      ? conversationId.trim()
+      : "";
+  const query = `token=${encodeURIComponent(tokenParam)}${
+    cleanConv ? `&conversationId=${encodeURIComponent(cleanConv)}` : ""
+  }`;
+  return html.replace(/\b(href|src)=(["'])(\/[^"'\s>]*)\2/g, (full, attr, quote, path) => {
+    if (path.startsWith("//")) return full;
+    const [beforeHash, ...hashParts] = path.split("#");
+    const hash = hashParts.length > 0 ? `#${hashParts.join("#")}` : "";
+    const sep = beforeHash.includes("?") ? "&" : "?";
+    return `${attr}=${quote}${beforeHash}${sep}${query}${hash}${quote}`;
+  });
+}
+
+function applyCorsHeaders(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Sidecar-Token");
+}
+
 export function createArchitectureSidecarServer({
   port = 0,
   token = process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN || "",
@@ -261,10 +285,17 @@ export function createArchitectureSidecarServer({
 
   const expectedTokenBuf = token ? Buffer.from(token, "utf8") : null;
 
+  function extractProvidedToken(req, url) {
+    const header = req.headers["x-sidecar-token"];
+    const headerToken = typeof header === "string" ? header.trim() : "";
+    const queryToken = url.searchParams.get("token")?.trim() || "";
+    return queryToken || headerToken;
+  }
+
   function validateToken(req, url) {
     if (!expectedTokenBuf) return true;
-    const provided = req.headers["x-sidecar-token"] || url.searchParams.get("token");
-    if (typeof provided !== "string") return false;
+    const provided = extractProvidedToken(req, url);
+    if (!provided) return false;
     const providedBuf = Buffer.from(provided, "utf8");
     if (providedBuf.length !== expectedTokenBuf.length) return false;
     return timingSafeEqual(providedBuf, expectedTokenBuf);
@@ -277,20 +308,38 @@ export function createArchitectureSidecarServer({
   }
 
   const server = createServer(async (req, res) => {
+    applyCorsHeaders(res);
     const url = new URL(req.url || "/", `http://${BIND_HOST}:${port || 80}`);
 
-    if (req.method === "GET") {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" || req.method === "HEAD") {
       const asset = staticPages.get(url.pathname);
       if (!asset) {
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("Not found");
+        res.end(req.method === "HEAD" ? undefined : "Not found");
         return;
+      }
+      let body = asset.body;
+      if (
+        req.method === "GET" &&
+        asset.contentType.startsWith("text/html") &&
+        expectedTokenBuf &&
+        validateToken(req, url)
+      ) {
+        const verifiedToken = extractProvidedToken(req, url);
+        const convId = url.searchParams.get("conversationId") || "";
+        body = injectHtmlTokenParams(body, verifiedToken, convId);
       }
       res.writeHead(200, {
         "Content-Type": asset.contentType,
         "Cache-Control": "no-store",
       });
-      res.end(asset.body);
+      res.end(req.method === "HEAD" ? undefined : body);
       return;
     }
 

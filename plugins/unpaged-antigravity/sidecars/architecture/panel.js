@@ -1,3 +1,6 @@
+(() => {
+"use strict";
+
 // Frontend controller for the Unpaged Architecture side-pane panel.
 // Security invariant: never assign innerHTML with dynamic data — build all UI
 // nodes via createElement + textContent and validate canvas links against
@@ -5,6 +8,7 @@
 
 const VISIBLE_POLL_MS = 2500;
 const RUNNING_POLL_MS = 1500;
+const WORKSPACE_TIMEOUT_MS = 2000;
 
 const appEl = document.getElementById("app");
 
@@ -265,43 +269,95 @@ async function handleAction(repo, action) {
   }
 }
 
-function parseLuminance(color) {
-  if (typeof color !== "string") return null;
-  const s = color.trim();
-  let r, g, b;
-  const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if (hex) {
-    const h = hex[1];
-    if (h.length === 3) {
-      r = parseInt(h[0] + h[0], 16);
-      g = parseInt(h[1] + h[1], 16);
-      b = parseInt(h[2] + h[2], 16);
-    } else {
-      r = parseInt(h.slice(0, 2), 16);
-      g = parseInt(h.slice(2, 4), 16);
-      b = parseInt(h.slice(4, 6), 16);
-    }
-  } else {
-    const rgb = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
-    if (!rgb) return null;
-    r = Number(rgb[1]);
-    g = Number(rgb[2]);
-    b = Number(rgb[3]);
-  }
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+function measureColorLuminance(cssColor) {
+  if (typeof cssColor !== "string" || !cssColor.trim()) return null;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;";
+  probe.style.color = cssColor.trim();
+  if (!probe.style.color) return null;
+  const mount = document.body || document.documentElement;
+  mount.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  probe.remove();
+  const nums = (resolved.match(/[\d.]+/g) || []).map(Number);
+  if (nums.length < 3 || nums.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+  const scale = resolved.startsWith("color(") ? 1 : 255;
+  const [r, g, b] = nums.slice(0, 3).map((v) => v / scale);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 function syncHostTheme(vars) {
   const root = document.documentElement;
   const bg = vars?.["--background"] || getComputedStyle(root).getPropertyValue("--background");
-  const lum = parseLuminance(bg);
+  const lum = measureColorLuminance(bg);
   if (lum !== null) {
     root.dataset.followHost = "true";
     root.dataset.theme = lum < 0.45 ? "dark" : "light";
     return;
   }
+  delete root.dataset.followHost;
   const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
   root.dataset.theme = prefersDark ? "dark" : "light";
+}
+
+function extractWorkspaceUrisFromMetadata(data) {
+  const meta =
+    data?.response?.conversationMetadata?.metadata ||
+    data?.response?.conversation_metadata?.metadata ||
+    data?.metadata ||
+    null;
+  if (!meta || typeof meta !== "object") return [];
+  const seen = new Set();
+  const uris = [];
+  const addUri = (raw) => {
+    if (typeof raw !== "string") return;
+    const trimmed = raw.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      uris.push(trimmed);
+    }
+  };
+  if (Array.isArray(meta.workspaceUris)) {
+    for (const uri of meta.workspaceUris) addUri(uri);
+  }
+  if (Array.isArray(meta.workspaces)) {
+    for (const ws of meta.workspaces) {
+      addUri(ws?.gitRootAbsoluteUri || ws?.workspaceFolderAbsoluteUri);
+    }
+  }
+  return uris;
+}
+
+async function resolveInitialWorkspaceUris() {
+  let uris = [];
+  if (window.sidecar?.getWorkspaceUris) {
+    let timerId = null;
+    try {
+      const result = await Promise.race([
+        window.sidecar.getWorkspaceUris(),
+        new Promise((resolveTimeout) => {
+          timerId = setTimeout(() => resolveTimeout(null), WORKSPACE_TIMEOUT_MS);
+        }),
+      ]);
+      if (Array.isArray(result)) {
+        uris = result;
+      }
+    } catch {
+      uris = [];
+    } finally {
+      if (timerId !== null) clearTimeout(timerId);
+    }
+  }
+  if (!uris.length && window.sidecar?.conversationId && window.sidecar?.agent?.getConversationMetadata) {
+    try {
+      const metaRes = await window.sidecar.agent.getConversationMetadata(window.sidecar.conversationId);
+      const fallback = extractWorkspaceUrisFromMetadata(metaRes);
+      if (fallback.length) uris = fallback;
+    } catch {
+      // Keep empty list until the host pushes workspace URIs.
+    }
+  }
+  return uris;
 }
 
 function scheduleNextPoll() {
@@ -330,8 +386,10 @@ async function init() {
 
   renderEmpty("Loading architecture status…", "Checking workspace repositories.");
 
+  let sawWorkspacePush = false;
   if (window.sidecar?.onWorkspaceChange) {
     window.sidecar.onWorkspaceChange((nextUris) => {
+      sawWorkspacePush = true;
       workspaceUris = Array.isArray(nextUris) ? nextUris : [];
       refreshStatus();
     });
@@ -346,10 +404,12 @@ async function init() {
     }
   });
 
-  if (window.sidecar?.getWorkspaceUris) {
-    workspaceUris = await window.sidecar.getWorkspaceUris();
+  const resolvedUris = await resolveInitialWorkspaceUris();
+  if (!sawWorkspacePush || !workspaceUris.length) {
+    workspaceUris = resolvedUris;
   }
   await refreshStatus();
 }
 
 init();
+})();

@@ -6,9 +6,19 @@
     <title>Unpaged Architecture</title>
     <link rel="stylesheet" href="/panel.css" />
     <script src="/preload.js"></script>
-    <script type="module" src="/panel.js"></script>
   </head>
   <body>
-    <main id="app" class="panel-root" aria-live="polite"></main>
+    <main id="app" class="panel-root" aria-live="polite">
+      <section class="panel-card">
+        <header class="panel-header">
+          <span class="eyebrow">UNPAGED ARCHITECTURE</span>
+        </header>
+        <div class="empty-state">
+          <h2 class="status-headline">Loading architecture status…</h2>
+          <p class="status-detail">Connecting to the Antigravity workspace.</p>
+        </div>
+      </section>
+    </main>
+    <script src="/panel.js"></script>
   </body>
 </html>
