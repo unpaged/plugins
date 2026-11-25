@@ -6,12 +6,18 @@ import { isDocumentId } from "./listen-core.mjs";
 export const POINTER_RELATIVE = ".unpaged/architecture.json";
 export const VERDICT_DIR_RELATIVE = ".gemini/unpaged/architecture";
 export const RUN_DIR_RELATIVE = ".gemini/unpaged/architecture/runs";
+export const SYNC_DIR_RELATIVE = ".gemini/unpaged/architecture/sync-attempts";
 export const STALE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 export const RUN_TIMEOUT_MS = 15 * 60 * 1000;
+export const SYNC_TIMEOUT_MS = 2 * 60 * 1000;
+export const SYNC_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export const SIDECAR_PILL_URL = "sidecar://unpaged/architecture/";
+export const CHECKED_PREFIX = "**Checked:**";
+export const BEHIND_PREFIX = "**Behind since:**";
+export const COMMIT_PREFIX = "compared at ";
 
 export const VERDICT_STATES = Object.freeze(["current", "behind", "lost"]);
-export const RUN_ACTIONS = Object.freeze(["compare", "update", "create"]);
+export const RUN_ACTIONS = Object.freeze(["compare", "update", "create", "sync"]);
 
 const DAY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMIT_SHAPE = /^[0-9a-f]{7,40}$/;
@@ -135,7 +141,8 @@ export function isRunActive(runRecord, verdict, nowMs = Date.now()) {
   if (!runRecord) return false;
   const startedMs = Date.parse(runRecord.startedAt);
   if (!Number.isFinite(startedMs)) return false;
-  if (nowMs - startedMs >= RUN_TIMEOUT_MS) return false;
+  const timeoutMs = runRecord.action === "sync" ? SYNC_TIMEOUT_MS : RUN_TIMEOUT_MS;
+  if (nowMs - startedMs >= timeoutMs) return false;
   if (verdict?.reportedAt) {
     const reportedMs = Date.parse(verdict.reportedAt);
     if (Number.isFinite(reportedMs) && reportedMs > startedMs) {
@@ -143,6 +150,84 @@ export function isRunActive(runRecord, verdict, nowMs = Date.now()) {
     }
   }
   return true;
+}
+
+export function verdictFromDocument(documentId, value) {
+  if (!isDocumentId(documentId)) return null;
+  let doc;
+  try {
+    doc = typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    return null;
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+  if (typeof doc.id === "string" && doc.id.trim() && doc.id.trim() !== documentId) return null;
+  const nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
+  const root =
+    nodes.find((n) => n && n.id === doc.rootNodeId) ??
+    nodes.find((n) => n && !n.parentId && !n.parentNodeId) ??
+    nodes[0];
+  if (!root || typeof root !== "object") return null;
+
+  let state = null;
+  let noteDay = null;
+  let commitDay = null;
+  let behindSince = null;
+  let commit = null;
+  for (const element of Array.isArray(root.elements) ? root.elements : []) {
+    const content = typeof element?.properties?.text === "string" ? element.properties.text.trim() : "";
+    if (content.startsWith(CHECKED_PREFIX)) {
+      if (state !== "behind") state = "current";
+      noteDay = validDay(content.slice(CHECKED_PREFIX.length)) ?? noteDay;
+    } else if (content.startsWith(BEHIND_PREFIX)) {
+      state = "behind";
+      behindSince = validDay(content.slice(BEHIND_PREFIX.length)) ?? behindSince;
+    } else if (content.startsWith(COMMIT_PREFIX)) {
+      const rest = content.slice(COMMIT_PREFIX.length).trim();
+      const sha = rest.split(/\s+/)[0];
+      commit = validCommit(sha) ?? commit;
+      commitDay = validDay(rest.match(/\bon\s+(\d{4}-\d{2}-\d{2})\s*$/)?.[1]) ?? commitDay;
+    }
+  }
+  if (!state) return null;
+
+  const checkedAt = commitDay ?? noteDay ?? null;
+  const resolvedBehindSince = state === "behind" ? (behindSince ?? checkedAt) : null;
+  const title = typeof doc.title === "string" && doc.title.trim() ? doc.title.trim() : null;
+  return {
+    documentId,
+    state,
+    title,
+    checkedAt,
+    commit,
+    behindSince: resolvedBehindSince,
+  };
+}
+
+export function normalizeSyncAttempt(raw) {
+  let parsed;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const documentId = typeof parsed.documentId === "string" ? parsed.documentId.trim() : "";
+  if (!isDocumentId(documentId)) return null;
+  const attemptedAt = typeof parsed.attemptedAt === "string" ? parsed.attemptedAt : "";
+  const attemptedMs = Date.parse(attemptedAt);
+  if (!Number.isFinite(attemptedMs)) return null;
+  return {
+    documentId,
+    attemptedAt: new Date(attemptedMs).toISOString(),
+  };
+}
+
+export function isSyncCooldownActive(attempt, documentId, nowMs = Date.now()) {
+  if (!attempt || !isDocumentId(documentId) || attempt.documentId !== documentId) return false;
+  const ms = Date.parse(attempt.attemptedAt);
+  if (!Number.isFinite(ms)) return false;
+  return nowMs - ms < SYNC_COOLDOWN_MS && nowMs >= ms - 60_000;
 }
 
 export function shownState(pointer, verdict, runRecord, nowMs = Date.now()) {
@@ -208,6 +293,12 @@ export function describeStatus(status, nowMs = Date.now()) {
     };
   }
   if (shown === "comparing") {
+    if (activeRun?.action === "sync") {
+      return {
+        headline: "Checking canvas status…",
+        detail: "Reading the last check date from Unpaged in a background chat.",
+      };
+    }
     if (activeRun?.action === "update") {
       return {
         headline: "Updating canvas…",
@@ -228,7 +319,9 @@ export function describeStatus(status, nowMs = Date.now()) {
   if (shown === "unknown") {
     return {
       headline: "Not compared from this machine yet",
-      detail: "Click Compare to check claims against today's code.",
+      detail: status?.syncCooldownActive
+        ? "Automatic status check did not finish. Click Compare, or retry sync below."
+        : "Click Compare to check claims against today's code.",
     };
   }
   if (shown === "lost") {
@@ -316,9 +409,18 @@ export function sanitizeRepoLabel(value) {
     .trim();
 }
 
+export function syncChatTitle(repoName) {
+  const clean = sanitizeRepoLabel(repoName);
+  return clean ? `Unpaged Architecture · ${clean}`.slice(0, 120) : "Unpaged Architecture";
+}
+
 export function actionPrompt(action, { repoName = "", documentId = null } = {}) {
   const cleanName = sanitizeRepoLabel(repoName);
   const target = cleanName ? `repository "${cleanName}"` : "this repository";
+  if (action === "sync") {
+    const idClause = isDocumentId(documentId) ? ` (canvas id ${documentId})` : "";
+    return `Automatic status sync from the Unpaged Architecture side panel for ${target}${idClause}. Run the \`architecture\` skill in \`sync\` mode now: do NOT run git or read codebase files, and do NOT edit the canvas or post comments. Call ONLY \`document_get\` on the \`unpaged\` MCP server for the canvas in \`.unpaged/architecture.json\`, pass its output file (or JSON on stdin) to \`monitors/architecture.mjs report-document\` (or \`clear-run\` if Unpaged sign-in is missing, a network error occurred, or the canvas has no date note yet; report \`lost\` only when Unpaged confirms the canvas is not found or inaccessible), then reply in one short sentence.`;
+  }
   if (action === "compare") {
     return `The user clicked Compare in the Unpaged Architecture side panel for ${target}. Run the \`architecture\` skill in \`compare\` mode now: run a clean-slate check in a separate helper, mark the canvas without rewriting cards, and finish by saving the verdict with \`monitors/architecture.mjs report\`.`;
   }

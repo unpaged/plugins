@@ -53,3 +53,18 @@ Rewrites the architecture document to today's code — the whole canvas, not onl
 6. **Visual check (`node_picture`):** inspect every canvas with changed cards or redrawn flows, resize cards/canvases if longer text overflows without disturbing other cards, and re-check at most twice.
 7. **Save verdict locally** via `node "<plugin-root>/monitors/architecture.mjs" report "<top level>" <<'EOF' ... EOF` (`state: "current"` when no `MISSING`, else `"behind"` with `behindSince` matching the root date note).
 8. **Reply** with counts and names of rewritten cards / redrawn flows, open threads answered, any missing items keeping status behind until drawn and updated again, `https://unpaged.io/document/<documentId>/edit`, that changed cards carry old-text comments, and `[Unpaged Architecture](sidecar://unpaged/architecture/)`.
+
+## Sync
+
+Read-only status sync, started automatically by the **Unpaged Architecture** side panel when a tracked repository has no local verdict yet. Never edit the canvas, never post comments, never run `git`, and never read repository source files other than `.unpaged/architecture.json`.
+
+1. **Read the pointer.** Read `<top level>/.unpaged/architecture.json` and extract `documentId`. If missing or invalid (malformed JSON or invalid id), run `node "<plugin-root>/monitors/architecture.mjs" clear-run "<top level>"` (retry once with `BypassSandbox: true` if `~/.gemini/unpaged` hits `EACCES`/`EPERM`), reply in one short sentence, and stop.
+2. **Fetch the canvas (`document_get`).** Call ONLY `document_get({ documentId })` on the `unpaged` MCP server.
+   - If the `unpaged` tool is missing, returns a sign-in or authentication error, or fails with a transient network/server error → run `node "<plugin-root>/monitors/architecture.mjs" clear-run "<top level>"` (do **not** save `"lost"`), tell the user in one short sentence that Unpaged sign-in or connectivity is needed to sync the status, and stop.
+   - If Unpaged explicitly confirms the canvas is not found or this account lacks access → save `"lost"` locally via `node "<plugin-root>/monitors/architecture.mjs" report "<top level>" <<'EOF'` (`{"documentId":"<documentId>","state":"lost","title":"<pointer title>","checkedAt":null,"commit":null,"behindSince":null}`), reply in one short sentence, and stop.
+3. **Parse and save deterministically (`report-document`).**
+   - If Antigravity saved `document_get`'s output to a file `<outputFile>`, run:
+     `node "<plugin-root>/monitors/architecture.mjs" report-document "<top level>" "<outputFile>"`
+     (retrying once with `BypassSandbox: true` if `~/.gemini/unpaged` hits `EACCES` or `EPERM`). Do not read or paginate through `<outputFile>` first.
+   - If `document_get` returned inline JSON instead of a file path, pipe it via a quoted heredoc to `node "<plugin-root>/monitors/architecture.mjs" report-document "<top level>" <<'EOF' ... EOF` (or pass the 6-field verdict JSON to `report "<top level>"`).
+4. **Reply** in one short sentence with the synced status (or that the canvas has no architecture date note yet if `report-document` printed `no-date-note`), and include `[Unpaged Architecture](sidecar://unpaged/architecture/)` if the side panel is not already open.

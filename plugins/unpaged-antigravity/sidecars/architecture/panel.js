@@ -17,8 +17,10 @@ let repos = [];
 let selectedRepoRoot = null;
 let lastError = null;
 let pendingAction = null;
+let syncInFlight = false;
 let pollTimer = null;
 let refreshInFlight = false;
+const autoSyncAttempted = new Set();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -107,6 +109,7 @@ function renderPanel() {
       selectedRepoRoot = event.target.value;
       lastError = null;
       renderPanel();
+      maybeAutoSync(currentRepo());
     });
     header.appendChild(select);
   } else {
@@ -157,26 +160,36 @@ function renderPanel() {
             : "btn btn-secondary";
       const btn = el("button", toneClass, pendingAction === action ? "Starting…" : label);
       btn.type = "button";
-      btn.disabled = pendingAction !== null;
+      btn.disabled = pendingAction !== null || syncInFlight;
       btn.addEventListener("click", () => handleAction(repo, action));
       actionsWrap.appendChild(btn);
     });
   }
   card.appendChild(actionsWrap);
 
+  if (repo.shown === "unknown" && repo.syncCooldownActive) {
+    const retryRow = el("div", "sync-retry-row");
+    const retryBtn = el("button", "btn-link", syncInFlight ? "Checking…" : "Retry status sync");
+    retryBtn.type = "button";
+    retryBtn.disabled = pendingAction !== null || syncInFlight;
+    retryBtn.addEventListener("click", () => maybeAutoSync(repo, { force: true }));
+    retryRow.appendChild(retryBtn);
+    card.appendChild(retryRow);
+  }
+
   if (lastError) {
     card.appendChild(el("p", "error-banner", lastError));
   }
 
-  const footer = el(
-    "footer",
-    "panel-footer",
+  const footerText =
     repo.shown === "comparing"
-      ? "Settles automatically once the open chat finishes."
+      ? repo.activeRun?.action === "sync"
+        ? "Settles automatically once the background status check finishes."
+        : "Settles automatically once the open chat finishes."
       : repo.shown === "none"
         ? "Reads the code and draws a new canvas in your open chat."
-        : "Runs in your currently open chat (starts a new chat if none is open)."
-  );
+        : "Runs in your currently open chat (starts a new chat if none is open).";
+  const footer = el("footer", "panel-footer", footerText);
   card.appendChild(footer);
   appEl.appendChild(card);
 }
@@ -200,6 +213,54 @@ async function sidecarFetch(path, body) {
   return res.json();
 }
 
+function canAutoSyncHost() {
+  return Boolean(window.sidecar?.conversationId) || window.parent !== window;
+}
+
+async function maybeAutoSync(repo, { force = false } = {}) {
+  if (!repo || repo.shown !== "unknown" || !repo.documentId || pendingAction !== null || syncInFlight) {
+    return;
+  }
+  const attemptKey = `${repo.repoRoot}::${repo.documentId}`;
+  if (!force) {
+    if (!canAutoSyncHost() || repo.syncCooldownActive || autoSyncAttempted.has(attemptKey)) {
+      return;
+    }
+    autoSyncAttempted.add(attemptKey);
+  }
+
+  syncInFlight = true;
+  if (force) {
+    lastError = null;
+    renderPanel();
+  }
+  try {
+    const result = await sidecarFetch("/api/sync-status", {
+      repoRoot: repo.repoRoot,
+      workspaceUris,
+      conversationId: window.sidecar?.conversationId || "",
+      force,
+    });
+    if (result?.status) {
+      repos = repos.map((item) => (item.repoRoot === repo.repoRoot ? result.status : item));
+      renderPanel();
+      scheduleNextPoll();
+    }
+    if (force && !result?.started && result?.error) {
+      lastError = String(result.error);
+      renderPanel();
+    }
+  } catch (error) {
+    if (force) {
+      lastError = error?.message || "Could not sync canvas status.";
+      renderPanel();
+    }
+  } finally {
+    syncInFlight = false;
+    renderPanel();
+  }
+}
+
 async function refreshStatus() {
   if (refreshInFlight) return;
   refreshInFlight = true;
@@ -213,6 +274,7 @@ async function refreshStatus() {
     repos = Array.isArray(data?.repos) ? data.repos : [];
     renderPanel();
     scheduleNextPoll();
+    maybeAutoSync(currentRepo());
   } catch (error) {
     lastError = error?.message || "Could not read architecture status.";
     renderPanel();
@@ -222,7 +284,7 @@ async function refreshStatus() {
 }
 
 async function handleAction(repo, action) {
-  if (pendingAction) return;
+  if (pendingAction || syncInFlight) return;
   pendingAction = action;
   lastError = null;
   renderPanel();

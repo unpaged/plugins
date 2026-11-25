@@ -405,6 +405,37 @@ body {
   color: var(--up-btn-disabled-ink);
 }
 
+.sync-retry-row {
+  padding: 0 14px 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--up-link);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.btn-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.btn-link:focus-visible {
+  outline: 2px solid var(--up-link);
+  outline-offset: 2px;
+}
+
+.btn-link:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .error-banner {
   margin: 0 14px 10px;
   padding: 8px 10px;

@@ -9,6 +9,8 @@ import {
   POINTER_RELATIVE,
   RUN_TIMEOUT_MS,
   STALE_AFTER_MS,
+  SYNC_COOLDOWN_MS,
+  SYNC_TIMEOUT_MS,
   actionPrompt,
   availableActions,
   dayLabel,
@@ -18,23 +20,29 @@ import {
   filterSkipPatterns,
   formatAttentionMarkdown,
   isRunActive,
+  isSyncCooldownActive,
   lightColor,
   needsAttention,
   normalizeRunRecord,
+  normalizeSyncAttempt,
   normalizeVerdict,
   parseArchitecturePointer,
   sanitizeMarkdownLabel,
   shownState,
+  syncChatTitle,
   validCommit,
   validDay,
+  verdictFromDocument,
 } from "./architecture-core.mjs";
 import {
   clearRunState,
   findRepositoryRoot,
   readRepositoryStatus,
   recordRunStart,
+  recordSyncAttempt,
   runKeyForRepo,
   saveVerdictForRepo,
+  saveVerdictFromDocumentForRepo,
 } from "./architecture.mjs";
 import { buildSessionStartOutput } from "./session-start.mjs";
 
@@ -471,4 +479,189 @@ test("elapsedDays, durationLabel, describeStatus, and formatAttentionMarkdown fo
   const current10d = { shown: "current", verdict: { checkedAt: "2026-11-15" } };
   assert.equal(describeStatus(current10d, nov25).headline, "Checked 10 days ago");
   assert.equal(describeStatus(current10d, nov25).detail, "All checked claims held on 15 Nov.");
+});
+
+test("verdictFromDocument extracts behind/current verdicts safely and handles edge cases", () => {
+  const behindDoc = {
+    id: DOC_1,
+    title: "  unpaged  ",
+    rootNodeId: "root-1",
+    nodes: [
+      { id: "child-1", parentId: "root-1", elements: [{ properties: { text: "**Checked:** 2026-11-25" } }] },
+      {
+        id: "root-1",
+        elements: [
+          { properties: { text: "compared at cee26c0f7 (base 9de434877) on 2026-11-15" } },
+          { properties: { text: "**Behind since:** 2026-11-09" } },
+        ],
+      },
+    ],
+  };
+  assert.deepEqual(verdictFromDocument(DOC_1, behindDoc), {
+    documentId: DOC_1,
+    state: "behind",
+    title: "unpaged",
+    checkedAt: "2026-11-15",
+    commit: "cee26c0f7",
+    behindSince: "2026-11-09",
+  });
+
+  // Falls back to top-level parentNodeId node and respects behind precedence regardless of element order.
+  const mixedDoc = {
+    nodes: [
+      { id: "child", parentNodeId: "top", elements: [] },
+      {
+        id: "top",
+        elements: [
+          { properties: { text: "**Behind since:** 2026-11-05" } },
+          { properties: { text: "**Checked:** 2026-11-20" } },
+          { properties: { text: "compared at abc12 (base def34) on 2026-11-20" } },
+        ],
+      },
+    ],
+  };
+  assert.deepEqual(verdictFromDocument(DOC_1, JSON.stringify(mixedDoc)), {
+    documentId: DOC_1,
+    state: "behind",
+    title: null,
+    checkedAt: "2026-11-20",
+    commit: null,
+    behindSince: "2026-11-05",
+  });
+
+  const currentDoc = {
+    id: DOC_1,
+    title: "demo",
+    rootNodeId: "root",
+    nodes: [
+      {
+        id: "root",
+        elements: [
+          { properties: { text: "**Checked:** 2026-11-24" } },
+          { properties: { text: "compared at 1234567 (base 89abcde) on 2026-11-24" } },
+        ],
+      },
+    ],
+  };
+  assert.deepEqual(verdictFromDocument(DOC_1, currentDoc), {
+    documentId: DOC_1,
+    state: "current",
+    title: "demo",
+    checkedAt: "2026-11-24",
+    commit: "1234567",
+    behindSince: null,
+  });
+
+  // Missing date note, id mismatch, and invalid documentId return null.
+  assert.equal(verdictFromDocument(DOC_1, { id: DOC_2, nodes: currentDoc.nodes }), null);
+  assert.equal(verdictFromDocument(DOC_1, { id: DOC_1, nodes: [{ id: "r", elements: [] }] }), null);
+  assert.equal(verdictFromDocument("bad-id", currentDoc), null);
+});
+
+test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support report-document CLI", async () => {
+  await withTempDir(async (dir) => {
+    const homeDir = join(dir, "home");
+    const repo = join(dir, "sync-repo");
+    const docPath = join(dir, "document_get_output.txt");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(repo, ".unpaged"), { recursive: true });
+    await writeFile(join(repo, POINTER_RELATIVE), JSON.stringify({ documentId: DOC_1, title: "unpaged" }), "utf8");
+
+    const t0 = Date.parse("2026-11-25T10:00:00Z");
+    const syncRun = normalizeRunRecord({ action: "sync", repoRoot: repo, startedAt: new Date(t0).toISOString() });
+    const compareRun = normalizeRunRecord({ action: "compare", repoRoot: repo, startedAt: new Date(t0).toISOString() });
+    assert.equal(isRunActive(syncRun, null, t0 + SYNC_TIMEOUT_MS - 1), true);
+    assert.equal(isRunActive(syncRun, null, t0 + SYNC_TIMEOUT_MS), false);
+    assert.equal(isRunActive(compareRun, null, t0 + SYNC_TIMEOUT_MS + 60_000), true);
+
+    assert.equal(syncChatTitle('repo"\n`\tname'), "Unpaged Architecture · repo name");
+    assert.equal(syncChatTitle('"`'), "Unpaged Architecture");
+    const syncPrompt = actionPrompt("sync", { repoName: "unpaged", documentId: DOC_1 });
+    assert.match(syncPrompt, /document_get/);
+    assert.match(syncPrompt, /report-document/);
+    assert.match(syncPrompt, /do NOT run git/i);
+
+    const syncStatusDesc = describeStatus({ shown: "comparing", activeRun: syncRun }, t0);
+    assert.equal(syncStatusDesc.headline, "Checking canvas status…");
+
+    // Start sync run + cooldown record.
+    await recordRunStart(repo, "sync", { homeDir, now: () => t0 });
+    const duringRun = await readRepositoryStatus(repo, { homeDir, now: () => t0 + 1000 });
+    assert.equal(duringRun.shown, "comparing");
+    assert.equal(duringRun.activeRun.action, "sync");
+    assert.equal(duringRun.syncCooldownActive, false);
+
+    const attemptRes = await recordSyncAttempt(repo, DOC_1, { homeDir, now: () => t0 });
+    assert.equal(attemptRes.ok, true);
+    const attemptPath = join(homeDir, ".gemini", "unpaged", "architecture", "sync-attempts", `${runKeyForRepo(repo)}.json`);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(attemptPath)).mode & 0o777, 0o600);
+    }
+    const normalizedAttempt = normalizeSyncAttempt(await readFile(attemptPath, "utf8"));
+    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_1, t0 + SYNC_COOLDOWN_MS - 1), true);
+    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_1, t0 + SYNC_COOLDOWN_MS), false);
+    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_2, t0 + 1000), false);
+
+    // report-document on canvas without a date note clears the run but preserves the cooldown.
+    await writeFile(
+      docPath,
+      JSON.stringify({ id: DOC_1, rootNodeId: "root", nodes: [{ id: "root", elements: [] }] }),
+      "utf8"
+    );
+    const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+    const noNoteCli = spawnSync(process.execPath, [CLI_PATH, "report-document", repo, docPath], {
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(noNoteCli.status, 0);
+    assert.equal(noNoteCli.stdout.trim(), `no-date-note ${DOC_1}`);
+
+    const cooldownStatus = await readRepositoryStatus(repo, { homeDir, now: () => t0 + 5000 });
+    assert.equal(cooldownStatus.shown, "unknown");
+    assert.equal(cooldownStatus.syncCooldownActive, true);
+    assert.match(cooldownStatus.detail, /retry sync below/i);
+
+    const expiredCooldown = await readRepositoryStatus(repo, { homeDir, now: () => t0 + SYNC_COOLDOWN_MS });
+    assert.equal(expiredCooldown.syncCooldownActive, false);
+
+    // Oversized raw string rejection.
+    const tooLarge = await saveVerdictFromDocumentForRepo(repo, "x".repeat(16 * 1024 * 1024 + 8), { homeDir });
+    assert.equal(tooLarge.ok, false);
+
+    // report-document from file with behind note saves verdict and cleans up run + sync attempt.
+    await recordRunStart(repo, "sync", { homeDir, now: () => t0 + 6000 });
+    await writeFile(
+      docPath,
+      JSON.stringify({
+        id: DOC_1,
+        title: "unpaged",
+        rootNodeId: "root",
+        nodes: [
+          {
+            id: "root",
+            elements: [
+              { properties: { text: "**Behind since:** 2026-11-09" } },
+              { properties: { text: "compared at cee26c0f7 (base 9de434877) on 2026-11-15" } },
+            ],
+          },
+        ],
+      }),
+      "utf8"
+    );
+    const fileCli = spawnSync(process.execPath, [CLI_PATH, "report-document", repo, docPath], {
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(fileCli.status, 0);
+    assert.equal(fileCli.stdout.trim(), `reported behind ${DOC_1}`);
+    await assert.rejects(() => readFile(attemptPath, "utf8"));
+
+    const syncedStatus = await readRepositoryStatus(repo, {
+      homeDir,
+      now: () => Date.parse("2026-11-25T12:00:00Z"),
+    });
+    assert.equal(syncedStatus.shown, "behind");
+    assert.equal(syncedStatus.headline, "16 days behind");
+    assert.equal(syncedStatus.syncCooldownActive, false);
+  });
 });

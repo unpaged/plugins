@@ -5,6 +5,7 @@
 //
 //   node architecture.mjs status [path]
 //   node architecture.mjs report [path]             (verdict JSON on stdin)
+//   node architecture.mjs report-document [path] [filePath]
 //   node architecture.mjs start-run <action> [path]
 //   node architecture.mjs clear-run [path]
 //
@@ -12,7 +13,7 @@
 // tmp + rename) and never write inside the repository working tree.
 
 import { createHash, randomBytes } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { realpathSync } from "node:fs";
@@ -21,22 +22,28 @@ import {
   POINTER_RELATIVE,
   RUN_ACTIONS,
   RUN_DIR_RELATIVE,
+  SYNC_DIR_RELATIVE,
   VERDICT_DIR_RELATIVE,
   actionPrompt,
   availableActions,
   boardUrlFor,
   describeStatus,
   isRunActive,
+  isSyncCooldownActive,
   lightColor,
   needsAttention,
   normalizeRunRecord,
+  normalizeSyncAttempt,
   normalizeVerdict,
   parseArchitecturePointer,
   shownState,
+  verdictFromDocument,
 } from "./architecture-core.mjs";
+import { isDocumentId } from "./listen-core.mjs";
 
 const MAX_POINTER_BYTES = 256 * 1024;
 const MAX_VERDICT_BYTES = 64 * 1024;
+const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
 
 function say(line) {
   process.stdout.write(`${line}\n`);
@@ -96,7 +103,8 @@ function pathsFor(homeDir) {
   const unpagedRoot = join(homeDir, ".gemini", "unpaged");
   const verdictDir = join(homeDir, VERDICT_DIR_RELATIVE);
   const runDir = join(homeDir, RUN_DIR_RELATIVE);
-  return { unpagedRoot, verdictDir, runDir };
+  const syncDir = join(homeDir, SYNC_DIR_RELATIVE);
+  return { unpagedRoot, verdictDir, runDir, syncDir };
 }
 
 export async function readRepositoryStatus(
@@ -121,6 +129,7 @@ export async function readRepositoryStatus(
       pointerInvalid: false,
       verdict: null,
       activeRun: null,
+      syncCooldownActive: false,
       shown: "none",
       color: "gray",
       headline: "Not a git repository",
@@ -131,7 +140,7 @@ export async function readRepositoryStatus(
   }
 
   const repoName = basename(repoRoot);
-  const { verdictDir, runDir } = pathsFor(homeDir);
+  const { verdictDir, runDir, syncDir } = pathsFor(homeDir);
   let pointer = null;
   let pointerInvalid = false;
 
@@ -162,8 +171,9 @@ export async function readRepositoryStatus(
   }
 
   let activeRun = null;
+  const repoKey = runKeyForRepo(repoRoot);
   try {
-    const rawRun = await fs.readFile(join(runDir, `${runKeyForRepo(repoRoot)}.json`), "utf8");
+    const rawRun = await fs.readFile(join(runDir, `${repoKey}.json`), "utf8");
     const parsedRun = normalizeRunRecord(rawRun);
     if (isRunActive(parsedRun, verdict, nowMs)) {
       activeRun = parsedRun;
@@ -172,7 +182,20 @@ export async function readRepositoryStatus(
     activeRun = null;
   }
 
+  let syncAttempt = null;
+  if (pointer && !verdict) {
+    try {
+      const rawSync = await fs.readFile(join(syncDir, `${repoKey}.json`), "utf8");
+      if (Buffer.byteLength(rawSync, "utf8") <= MAX_VERDICT_BYTES) {
+        syncAttempt = normalizeSyncAttempt(rawSync);
+      }
+    } catch {
+      syncAttempt = null;
+    }
+  }
+
   const shown = shownState(pointer, verdict, activeRun, nowMs);
+  const syncCooldownActive = shown === "unknown" && isSyncCooldownActive(syncAttempt, pointer?.documentId, nowMs);
   const title = verdict?.title || pointer?.title || repoName;
   const statusObj = {
     isGitRepo: true,
@@ -185,6 +208,7 @@ export async function readRepositoryStatus(
     pointerInvalid,
     verdict,
     activeRun,
+    syncCooldownActive,
     shown,
     color: lightColor(shown),
     needsAttention: needsAttention(shown),
@@ -230,13 +254,100 @@ export async function saveVerdictForRepo(
     title: normalized.title || pointer.title || basename(repoRoot),
     reportedAt: new Date(now()).toISOString(),
   };
-  const { unpagedRoot, verdictDir, runDir } = pathsFor(homeDir);
+  const { unpagedRoot, verdictDir, runDir, syncDir } = pathsFor(homeDir);
   await writeAtomicJson(unpagedRoot, verdictDir, join(verdictDir, `${pointer.documentId}.json`), saved, {
     fs,
     pid,
   });
-  await fs.rm(join(runDir, `${runKeyForRepo(repoRoot)}.json`), { force: true }).catch(() => {});
+  const repoKey = runKeyForRepo(repoRoot);
+  await fs.rm(join(runDir, `${repoKey}.json`), { force: true }).catch(() => {});
+  await fs.rm(join(syncDir, `${repoKey}.json`), { force: true }).catch(() => {});
   return { ok: true, verdict: saved, repoRoot };
+}
+
+export async function recordSyncAttempt(
+  targetPath,
+  documentId,
+  {
+    homeDir = homedir(),
+    fs = { access, mkdir, rename, writeFile },
+    now = () => Date.now(),
+    pid = process.pid,
+  } = {}
+) {
+  const cleanId = typeof documentId === "string" ? documentId.trim() : "";
+  if (!isDocumentId(cleanId)) {
+    return { ok: false, error: "invalid documentId" };
+  }
+  const repoRoot = await findRepositoryRoot(targetPath, fs);
+  if (!repoRoot) {
+    return { ok: false, error: "not inside a git repository" };
+  }
+  const record = {
+    documentId: cleanId,
+    attemptedAt: new Date(now()).toISOString(),
+  };
+  const { unpagedRoot, syncDir } = pathsFor(homeDir);
+  await writeAtomicJson(unpagedRoot, syncDir, join(syncDir, `${runKeyForRepo(repoRoot)}.json`), record, {
+    fs,
+    pid,
+  });
+  return { ok: true, record, repoRoot };
+}
+
+export async function saveVerdictFromDocumentForRepo(
+  targetPath,
+  rawDocument,
+  {
+    homeDir = homedir(),
+    fs = { access, mkdir, readFile, rename, rm, writeFile },
+    now = () => Date.now(),
+    pid = process.pid,
+  } = {}
+) {
+  const repoRoot = await findRepositoryRoot(targetPath, fs);
+  if (!repoRoot) {
+    return { ok: false, error: "not inside a git repository" };
+  }
+  let pointerRaw;
+  try {
+    pointerRaw = await fs.readFile(join(repoRoot, POINTER_RELATIVE), "utf8");
+  } catch {
+    return { ok: false, error: `missing ${POINTER_RELATIVE}; write the pointer file before reporting` };
+  }
+  const pointer = parseArchitecturePointer(pointerRaw);
+  if (!pointer) {
+    return { ok: false, error: `invalid ${POINTER_RELATIVE}; expected valid documentId` };
+  }
+  let parsed;
+  if (typeof rawDocument === "string") {
+    if (Buffer.byteLength(rawDocument, "utf8") > MAX_DOCUMENT_BYTES) {
+      return { ok: false, error: `document payload exceeds ${MAX_DOCUMENT_BYTES} bytes` };
+    }
+    try {
+      parsed = JSON.parse(rawDocument);
+    } catch {
+      return { ok: false, error: "invalid document JSON" };
+    }
+  } else {
+    parsed = rawDocument;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "invalid document JSON" };
+  }
+  if (typeof parsed.id === "string" && parsed.id.trim() && parsed.id.trim() !== pointer.documentId) {
+    return { ok: false, error: `documentId mismatch (expected ${pointer.documentId})` };
+  }
+  const extracted = verdictFromDocument(pointer.documentId, parsed);
+  if (!extracted) {
+    await clearRunState(repoRoot, { homeDir, fs });
+    return { ok: true, found: false, documentId: pointer.documentId, repoRoot };
+  }
+  const saved = await saveVerdictForRepo(repoRoot, extracted, { homeDir, fs, now, pid });
+  if (!saved.ok) {
+    return saved;
+  }
+  return { ok: true, found: true, verdict: saved.verdict, repoRoot };
 }
 
 export async function recordRunStart(
@@ -312,6 +423,38 @@ async function runCli() {
       say(`reported ${result.verdict.state} ${result.verdict.documentId}`);
       return 0;
     }
+    case "report-document": {
+      const target = resolve(first || process.cwd());
+      let raw;
+      if (second && second !== "-") {
+        const docPath = resolve(second);
+        let fileStat;
+        try {
+          fileStat = await stat(docPath);
+        } catch (error) {
+          process.stderr.write(`architecture.mjs report-document: ${error?.message || String(error)}\n`);
+          return 1;
+        }
+        if (fileStat.size > MAX_DOCUMENT_BYTES) {
+          process.stderr.write(`architecture.mjs report-document: file exceeds ${MAX_DOCUMENT_BYTES} bytes\n`);
+          return 1;
+        }
+        raw = await readFile(docPath, "utf8");
+      } else {
+        raw = await readStdin();
+      }
+      const result = await saveVerdictFromDocumentForRepo(target, raw);
+      if (!result.ok) {
+        process.stderr.write(`architecture.mjs report-document: ${result.error}\n`);
+        return 1;
+      }
+      if (!result.found) {
+        say(`no-date-note ${result.documentId}`);
+        return 0;
+      }
+      say(`reported ${result.verdict.state} ${result.verdict.documentId}`);
+      return 0;
+    }
     case "start-run": {
       const target = resolve(second || process.cwd());
       const result = await recordRunStart(target, first);
@@ -334,7 +477,7 @@ async function runCli() {
     }
     default:
       process.stderr.write(
-        "usage: architecture.mjs status [path] | report [path] | start-run <compare|update|create> [path] | clear-run [path]\n"
+        "usage: architecture.mjs status [path] | report [path] | report-document [path] [filePath] | start-run <compare|update|create|sync> [path] | clear-run [path]\n"
       );
       return 1;
   }
