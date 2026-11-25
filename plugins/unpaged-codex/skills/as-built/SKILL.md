@@ -291,13 +291,7 @@ Keep the existing listener and key through record completion. Inspect its live
 state before reporting it connected; use review-plan for recovery or an explicit
 stop. Do not arm a listener merely because this recording operation finished.
 When the current branch has an open GitHub pull request (`state: "OPEN"`),
-first ask the user, on every run, whether to make the plan public for this
-pull request, saying that the plan, and this record with it, become readable by
-anyone who has the link, without an account. Ask even when this task made the
-plan public earlier: its owner may have turned the public link off since, and
-the server does not say whether a plan is public. On a no, or when there is no
-one to ask, leave the pull request description unchanged and say so in one
-sentence. On a yes, call
+call
 remote `document_update({ documentId, isPublic: true })` so the plan is public
 — anyone with its link can read it without an account, and copy it once signed
 in — and the server re-renders the root preview. The plan's public link `<url>`
