@@ -12,15 +12,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUN_ACTIONS, syncChatTitle } from "../../monitors/architecture-core.mjs";
+import { RUN_ACTIONS } from "../../monitors/architecture-core.mjs";
 import {
   canonicalPath,
   clearRunState,
   findRepositoryRoot,
   readRepositoryStatus,
   recordRunStart,
-  recordSyncAttempt,
-  runKeyForRepo,
 } from "../../monitors/architecture.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -115,16 +113,6 @@ function sanitizeArgTitle(title) {
   if (typeof title !== "string") return "";
   const clean = title.replace(/[\r\n\t\x00-\x1f\x7f]+/g, " ").trim().slice(0, 120).trim();
   return !clean || clean.startsWith("-") ? "" : clean;
-}
-
-function extractProjectId(metaRes) {
-  const meta =
-    metaRes?.response?.conversationMetadata?.metadata ||
-    metaRes?.response?.conversation_metadata?.metadata ||
-    metaRes?.metadata ||
-    null;
-  if (!meta || typeof meta !== "object") return "";
-  return String(meta.projectId || meta.project_id || "").trim();
 }
 
 export function createDefaultAgentApi(execFn = defaultExecAgentApi) {
@@ -292,7 +280,6 @@ export function createArchitectureSidecarServer({
   preloadJs = loadPreloadScript(),
   agentApi = createDefaultAgentApi(),
   homeDir = homedir(),
-  defaultProjectId = process.env.ANTIGRAVITY_PROJECT_ID || "",
   now = () => Date.now(),
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
   assetDir = __dirname,
@@ -300,7 +287,6 @@ export function createArchitectureSidecarServer({
   const panelHtml = readFileSync(join(assetDir, "panel.html"), "utf8");
   const panelCss = readFileSync(join(assetDir, "panel.css"), "utf8");
   const panelJs = readFileSync(join(assetDir, "panel.js"), "utf8");
-  const inFlightSyncs = new Set();
 
   const staticPages = new Map([
     ["/", { body: panelHtml, contentType: "text/html; charset=utf-8" }],
@@ -414,83 +400,6 @@ export function createArchitectureSidecarServer({
           const result = await agentApi.getConversationMetadata(body.conversationId);
           sendJson(res, 200, result);
           return;
-        }
-        case "/api/sync-status": {
-          const roots = await resolveWorkspaceRepoRoots(body.workspaceUris);
-          const authorizedRoot = findAuthorizedRepoRoot(body.repoRoot, roots);
-          if (!authorizedRoot) {
-            sendJson(res, 403, { error: "repoRoot must match an active workspace repository" });
-            return;
-          }
-          const runKey = runKeyForRepo(authorizedRoot);
-          if (inFlightSyncs.has(runKey)) {
-            const status = await readRepositoryStatus(authorizedRoot, { homeDir, now });
-            sendJson(res, 200, { ok: true, started: false, reason: "in-flight", status });
-            return;
-          }
-          inFlightSyncs.add(runKey);
-          try {
-            const status = await readRepositoryStatus(authorizedRoot, { homeDir, now });
-            if (status.shown !== "unknown" || !status.documentId) {
-              sendJson(res, 200, { ok: true, started: false, reason: "not-unknown", status });
-              return;
-            }
-            if (!body.force && status.syncCooldownActive) {
-              sendJson(res, 200, { ok: true, started: false, reason: "cooldown", status });
-              return;
-            }
-
-            let projectId = typeof defaultProjectId === "string" ? defaultProjectId.trim() : "";
-            const convId = typeof body.conversationId === "string" ? body.conversationId.trim() : "";
-            if (!projectId && convId && SAFE_ID_SHAPE.test(convId)) {
-              try {
-                const metaRes = await agentApi.getConversationMetadata(convId);
-                projectId = extractProjectId(metaRes);
-              } catch {
-                projectId = "";
-              }
-            }
-
-            const started = await recordRunStart(authorizedRoot, "sync", { homeDir, now });
-            if (!started.ok) {
-              sendJson(res, 400, { error: started.error });
-              return;
-            }
-
-            let convResult;
-            try {
-              convResult = await agentApi.startConversation(started.prompt, {
-                model: "flash_lite",
-                title: syncChatTitle(status.repoName),
-                projectId,
-              });
-            } catch (err) {
-              convResult = { error: err?.message || String(err) };
-            }
-
-            if (!convResult || convResult.error) {
-              await clearRunState(authorizedRoot, { homeDir });
-              const afterClear = await readRepositoryStatus(authorizedRoot, { homeDir, now });
-              sendJson(res, 200, {
-                ok: false,
-                started: false,
-                error: String(convResult?.error || "Could not start status check chat"),
-                status: afterClear,
-              });
-              return;
-            }
-
-            await recordSyncAttempt(authorizedRoot, status.documentId, { homeDir, now });
-            sendJson(res, 200, {
-              ok: true,
-              started: true,
-              status: started.status,
-              conversationId: convResult.conversationId || null,
-            });
-            return;
-          } finally {
-            inFlightSyncs.delete(runKey);
-          }
         }
         case "/api/status": {
           const roots = await resolveWorkspaceRepoRoots(body.workspaceUris);

@@ -22,24 +22,20 @@ import {
   POINTER_RELATIVE,
   RUN_ACTIONS,
   RUN_DIR_RELATIVE,
-  SYNC_DIR_RELATIVE,
   VERDICT_DIR_RELATIVE,
   actionPrompt,
   availableActions,
   boardUrlFor,
   describeStatus,
   isRunActive,
-  isSyncCooldownActive,
   lightColor,
   needsAttention,
   normalizeRunRecord,
-  normalizeSyncAttempt,
   normalizeVerdict,
   parseArchitecturePointer,
   shownState,
   verdictFromDocument,
 } from "./architecture-core.mjs";
-import { isDocumentId } from "./listen-core.mjs";
 
 const MAX_POINTER_BYTES = 256 * 1024;
 const MAX_VERDICT_BYTES = 64 * 1024;
@@ -103,8 +99,7 @@ function pathsFor(homeDir) {
   const unpagedRoot = join(homeDir, ".gemini", "unpaged");
   const verdictDir = join(homeDir, VERDICT_DIR_RELATIVE);
   const runDir = join(homeDir, RUN_DIR_RELATIVE);
-  const syncDir = join(homeDir, SYNC_DIR_RELATIVE);
-  return { unpagedRoot, verdictDir, runDir, syncDir };
+  return { unpagedRoot, verdictDir, runDir };
 }
 
 export async function readRepositoryStatus(
@@ -129,7 +124,6 @@ export async function readRepositoryStatus(
       pointerInvalid: false,
       verdict: null,
       activeRun: null,
-      syncCooldownActive: false,
       shown: "none",
       color: "gray",
       headline: "Not a git repository",
@@ -140,7 +134,7 @@ export async function readRepositoryStatus(
   }
 
   const repoName = basename(repoRoot);
-  const { verdictDir, runDir, syncDir } = pathsFor(homeDir);
+  const { verdictDir, runDir } = pathsFor(homeDir);
   let pointer = null;
   let pointerInvalid = false;
 
@@ -182,20 +176,7 @@ export async function readRepositoryStatus(
     activeRun = null;
   }
 
-  let syncAttempt = null;
-  if (pointer && !verdict) {
-    try {
-      const rawSync = await fs.readFile(join(syncDir, `${repoKey}.json`), "utf8");
-      if (Buffer.byteLength(rawSync, "utf8") <= MAX_VERDICT_BYTES) {
-        syncAttempt = normalizeSyncAttempt(rawSync);
-      }
-    } catch {
-      syncAttempt = null;
-    }
-  }
-
   const shown = shownState(pointer, verdict, activeRun, nowMs);
-  const syncCooldownActive = shown === "unknown" && isSyncCooldownActive(syncAttempt, pointer?.documentId, nowMs);
   const title = verdict?.title || pointer?.title || repoName;
   const statusObj = {
     isGitRepo: true,
@@ -208,7 +189,6 @@ export async function readRepositoryStatus(
     pointerInvalid,
     verdict,
     activeRun,
-    syncCooldownActive,
     shown,
     color: lightColor(shown),
     needsAttention: needsAttention(shown),
@@ -254,45 +234,13 @@ export async function saveVerdictForRepo(
     title: normalized.title || pointer.title || basename(repoRoot),
     reportedAt: new Date(now()).toISOString(),
   };
-  const { unpagedRoot, verdictDir, runDir, syncDir } = pathsFor(homeDir);
+  const { unpagedRoot, verdictDir, runDir } = pathsFor(homeDir);
   await writeAtomicJson(unpagedRoot, verdictDir, join(verdictDir, `${pointer.documentId}.json`), saved, {
     fs,
     pid,
   });
-  const repoKey = runKeyForRepo(repoRoot);
-  await fs.rm(join(runDir, `${repoKey}.json`), { force: true }).catch(() => {});
-  await fs.rm(join(syncDir, `${repoKey}.json`), { force: true }).catch(() => {});
+  await fs.rm(join(runDir, `${runKeyForRepo(repoRoot)}.json`), { force: true }).catch(() => {});
   return { ok: true, verdict: saved, repoRoot };
-}
-
-export async function recordSyncAttempt(
-  targetPath,
-  documentId,
-  {
-    homeDir = homedir(),
-    fs = { access, mkdir, rename, writeFile },
-    now = () => Date.now(),
-    pid = process.pid,
-  } = {}
-) {
-  const cleanId = typeof documentId === "string" ? documentId.trim() : "";
-  if (!isDocumentId(cleanId)) {
-    return { ok: false, error: "invalid documentId" };
-  }
-  const repoRoot = await findRepositoryRoot(targetPath, fs);
-  if (!repoRoot) {
-    return { ok: false, error: "not inside a git repository" };
-  }
-  const record = {
-    documentId: cleanId,
-    attemptedAt: new Date(now()).toISOString(),
-  };
-  const { unpagedRoot, syncDir } = pathsFor(homeDir);
-  await writeAtomicJson(unpagedRoot, syncDir, join(syncDir, `${runKeyForRepo(repoRoot)}.json`), record, {
-    fs,
-    pid,
-  });
-  return { ok: true, record, repoRoot };
 }
 
 export async function saveVerdictFromDocumentForRepo(

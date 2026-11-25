@@ -56,10 +56,10 @@ Rewrites the architecture document to today's code — the whole canvas, not onl
 
 ## Sync
 
-Read-only status sync, started automatically by the **Unpaged Architecture** side panel when a tracked repository has no local verdict yet. Never edit the canvas, never post comments, never run `git`, and never read repository source files other than `.unpaged/architecture.json`.
+Read-only status sync, run in the currently open chat when the user clicks **Sync status** in the **Unpaged Architecture** side panel. Never edit the canvas, never post comments, never run `git`, and never read repository source files other than `.unpaged/architecture.json`.
 
 1. **Read the pointer.** Read `<top level>/.unpaged/architecture.json` and extract `documentId`. If missing or invalid (malformed JSON or invalid id), run `node "<plugin-root>/monitors/architecture.mjs" clear-run "<top level>"` (retry once with `BypassSandbox: true` if `~/.gemini/unpaged` hits `EACCES`/`EPERM`), reply in one short sentence, and stop.
-2. **Fetch the canvas (`document_get`).** Call ONLY `document_get({ documentId })` on the `unpaged` MCP server.
+2. **Fetch the canvas (`document_get`).** Call ONLY Unpaged's `document_get` MCP tool (server `unpaged_unpaged`, or whichever connected Unpaged MCP server provides `document_get`) with `{"documentId": "<documentId>"}`.
    - If the `unpaged` tool is missing, returns a sign-in or authentication error, or fails with a transient network/server error → run `node "<plugin-root>/monitors/architecture.mjs" clear-run "<top level>"` (do **not** save `"lost"`), tell the user in one short sentence that Unpaged sign-in or connectivity is needed to sync the status, and stop.
    - If Unpaged explicitly confirms the canvas is not found or this account lacks access → save `"lost"` locally via `node "<plugin-root>/monitors/architecture.mjs" report "<top level>" <<'EOF'` (`{"documentId":"<documentId>","state":"lost","title":"<pointer title>","checkedAt":null,"commit":null,"behindSince":null}`), reply in one short sentence, and stop.
 3. **Parse and save deterministically (`report-document`).**

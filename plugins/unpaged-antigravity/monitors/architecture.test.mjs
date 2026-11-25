@@ -9,7 +9,6 @@ import {
   POINTER_RELATIVE,
   RUN_TIMEOUT_MS,
   STALE_AFTER_MS,
-  SYNC_COOLDOWN_MS,
   SYNC_TIMEOUT_MS,
   actionPrompt,
   availableActions,
@@ -20,17 +19,14 @@ import {
   filterSkipPatterns,
   formatAttentionMarkdown,
   isRunActive,
-  isSyncCooldownActive,
   lightColor,
   needsAttention,
   normalizeRunRecord,
-  normalizeSyncAttempt,
   normalizeVerdict,
   parseArchitecturePointer,
   sanitizeMarkdownLabel,
   sanitizeRepoPath,
   shownState,
-  syncChatTitle,
   validCommit,
   validDay,
   verdictFromDocument,
@@ -40,7 +36,6 @@ import {
   findRepositoryRoot,
   readRepositoryStatus,
   recordRunStart,
-  recordSyncAttempt,
   runKeyForRepo,
   saveVerdictForRepo,
   saveVerdictFromDocumentForRepo,
@@ -630,7 +625,7 @@ test("verdictFromDocument extracts behind/current verdicts safely and handles ed
   assert.equal(verdictFromDocument("bad-id", currentDoc), null);
 });
 
-test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support report-document CLI", async () => {
+test("sync runs time out after SYNC_TIMEOUT_MS, name unpaged_unpaged, and support report-document CLI", async () => {
   await withTempDir(async (dir) => {
     const homeDir = join(dir, "home");
     const repo = join(dir, "sync-repo");
@@ -646,35 +641,26 @@ test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support re
     assert.equal(isRunActive(syncRun, null, t0 + SYNC_TIMEOUT_MS), false);
     assert.equal(isRunActive(compareRun, null, t0 + SYNC_TIMEOUT_MS + 60_000), true);
 
-    assert.equal(syncChatTitle('repo"\n`\tname'), "Unpaged Architecture · repo name");
-    assert.equal(syncChatTitle('"`'), "Unpaged Architecture");
-    const syncPrompt = actionPrompt("sync", { repoName: "unpaged", documentId: DOC_1 });
+    const syncPrompt = actionPrompt("sync", { repoName: "unpaged", repoRoot: repo, documentId: DOC_1 });
+    assert.match(syncPrompt, /unpaged_unpaged/);
     assert.match(syncPrompt, /document_get/);
+    assert.ok(syncPrompt.includes(DOC_1));
+    assert.ok(syncPrompt.includes(repo));
     assert.match(syncPrompt, /report-document/);
     assert.match(syncPrompt, /do NOT run git/i);
 
     const syncStatusDesc = describeStatus({ shown: "comparing", activeRun: syncRun }, t0);
     assert.equal(syncStatusDesc.headline, "Checking canvas status…");
+    assert.match(syncStatusDesc.detail, /open chat/i);
+    assert.match(describeStatus({ shown: "unknown" }, t0).detail, /Sync status/);
 
-    // Start sync run + cooldown record.
+    // Start sync run manually.
     await recordRunStart(repo, "sync", { homeDir, now: () => t0 });
     const duringRun = await readRepositoryStatus(repo, { homeDir, now: () => t0 + 1000 });
     assert.equal(duringRun.shown, "comparing");
     assert.equal(duringRun.activeRun.action, "sync");
-    assert.equal(duringRun.syncCooldownActive, false);
 
-    const attemptRes = await recordSyncAttempt(repo, DOC_1, { homeDir, now: () => t0 });
-    assert.equal(attemptRes.ok, true);
-    const attemptPath = join(homeDir, ".gemini", "unpaged", "architecture", "sync-attempts", `${runKeyForRepo(repo)}.json`);
-    if (process.platform !== "win32") {
-      assert.equal((await stat(attemptPath)).mode & 0o777, 0o600);
-    }
-    const normalizedAttempt = normalizeSyncAttempt(await readFile(attemptPath, "utf8"));
-    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_1, t0 + SYNC_COOLDOWN_MS - 1), true);
-    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_1, t0 + SYNC_COOLDOWN_MS), false);
-    assert.equal(isSyncCooldownActive(normalizedAttempt, DOC_2, t0 + 1000), false);
-
-    // report-document on canvas without a date note clears the run but preserves the cooldown.
+    // report-document on canvas without a date note clears the run cleanly.
     await writeFile(
       docPath,
       JSON.stringify({ id: DOC_1, rootNodeId: "root", nodes: [{ id: "root", elements: [] }] }),
@@ -688,19 +674,21 @@ test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support re
     assert.equal(noNoteCli.status, 0);
     assert.equal(noNoteCli.stdout.trim(), `no-date-note ${DOC_1}`);
 
-    const cooldownStatus = await readRepositoryStatus(repo, { homeDir, now: () => t0 + 5000 });
-    assert.equal(cooldownStatus.shown, "unknown");
-    assert.equal(cooldownStatus.syncCooldownActive, true);
-    assert.match(cooldownStatus.detail, /retry sync below/i);
+    const afterNoNote = await readRepositoryStatus(repo, { homeDir, now: () => t0 + 5000 });
+    assert.equal(afterNoNote.shown, "unknown");
 
-    const expiredCooldown = await readRepositoryStatus(repo, { homeDir, now: () => t0 + SYNC_COOLDOWN_MS });
-    assert.equal(expiredCooldown.syncCooldownActive, false);
+    // Mismatched document ID and oversized raw payload are rejected.
+    const mismatchCli = spawnSync(process.execPath, [CLI_PATH, "report-document", repo], {
+      env,
+      input: JSON.stringify({ id: DOC_2, rootNodeId: "r", nodes: [{ id: "r", elements: [] }] }),
+      encoding: "utf8",
+    });
+    assert.equal(mismatchCli.status, 1);
 
-    // Oversized raw string rejection.
     const tooLarge = await saveVerdictFromDocumentForRepo(repo, "x".repeat(16 * 1024 * 1024 + 8), { homeDir });
     assert.equal(tooLarge.ok, false);
 
-    // report-document from file with behind note saves verdict and cleans up run + sync attempt.
+    // report-document from file with behind note saves verdict and clears run state.
     await recordRunStart(repo, "sync", { homeDir, now: () => t0 + 6000 });
     await writeFile(
       docPath,
@@ -726,7 +714,6 @@ test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support re
     });
     assert.equal(fileCli.status, 0);
     assert.equal(fileCli.stdout.trim(), `reported behind ${DOC_1}`);
-    await assert.rejects(() => readFile(attemptPath, "utf8"));
 
     const syncedStatus = await readRepositoryStatus(repo, {
       homeDir,
@@ -734,6 +721,19 @@ test("sync runs time out after SYNC_TIMEOUT_MS, enforce cooldown, and support re
     });
     assert.equal(syncedStatus.shown, "behind");
     assert.equal(syncedStatus.headline, "16 days behind");
-    assert.equal(syncedStatus.syncCooldownActive, false);
+
+    // Stdin report-document updates to current cleanly.
+    const stdinCli = spawnSync(process.execPath, [CLI_PATH, "report-document", repo, "-"], {
+      env,
+      input: JSON.stringify({
+        id: DOC_1,
+        title: "unpaged",
+        rootNodeId: "root",
+        nodes: [{ id: "root", elements: [{ properties: { text: "**Checked:** 2026-11-25" } }] }],
+      }),
+      encoding: "utf8",
+    });
+    assert.equal(stdinCli.status, 0);
+    assert.equal(stdinCli.stdout.trim(), `reported current ${DOC_1}`);
   });
 });

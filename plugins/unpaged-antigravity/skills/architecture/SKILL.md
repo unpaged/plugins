@@ -12,7 +12,7 @@ It is built from the code alone — not from any document in the repository, whi
 ## Modes
 
 - **No argument / `create`** → read `references/create.md` in this skill folder and follow its steps verbatim: read the code, draw the canvas, write `.unpaged/architecture.json`, and save the local verdict.
-- **`sync`** → read `references/compare-and-update.md` in this skill folder and follow its **Sync** section verbatim: used automatically by the **Unpaged Architecture** side panel on first open when a tracked repo has no local verdict yet; reads ONLY the canvas's existing date note via `document_get` (zero git commands, zero codebase reads, zero canvas edits) and saves the local verdict with `monitors/architecture.mjs report-document`.
+- **`sync`** → read `references/compare-and-update.md` in this skill folder and follow its **Sync** section verbatim: runs in your open chat when the user clicks **Sync status** in the **Unpaged Architecture** side panel; reads ONLY the canvas's existing date note via `document_get` (zero git commands, zero codebase reads, zero canvas edits) and saves the local verdict with `monitors/architecture.mjs report-document`.
 - **`compare`** → read `references/compare-and-update.md` in this skill folder and follow its **Compare** section verbatim: compare every change since the last compared commit in a separate clean-slate helper, mark the canvas, never rewrite a card, and save the local verdict.
 - **`update`** → read `references/compare-and-update.md` in this skill folder and follow its **Update** section verbatim: re-check the whole canvas in a separate clean-slate helper, rewrite outdated cards and redraw changed flows with open comments, and save the local verdict.
 
@@ -22,7 +22,7 @@ It is built from the code alone — not from any document in the repository, whi
 
 ## Preconditions
 
-- The `unpaged` MCP server ships with this plugin (`mcp_config.json`). If its tools (e.g. `document_get`) are missing or return an authentication error, tell the user to open the plugin's settings (or `/mcp`), sign in to the **unpaged** MCP server with their Unpaged account (free tier works), and retry.
+- The Unpaged MCP server ships with this plugin (`mcp_config.json`, named `unpaged_unpaged` in Antigravity). Always call tools such as `document_get` on `unpaged_unpaged` (or whichever connected Unpaged MCP server provides `document_get`). If its tools are missing or return an authentication error, tell the user to open the plugin's settings (or `/mcp`), sign in to the Unpaged MCP server with their Unpaged account (free tier works), and retry.
 - When invoked from the side panel for a specific repository, the prompt names its exact path — use that path as **the top level** (for Sync, never run `git`; for multi-repo workspaces, this picks the repository chosen in the panel rather than the chat's current folder). Otherwise, the working folder must be inside a git repository: `git rev-parse --show-toplevel` succeeds, and the folder it names is **the top level**. Run every `git` step from `<top level>` (`git -C <top level> …`), and read paths relative to it so a session started in a subfolder of a monorepo sees the whole repository.
 - Every shell step in Sync, Compare, and Update is read-only (`git` in Compare/Update, reading files, and saving the local verdict), except writing `.unpaged/architecture.json` in Create.
 
