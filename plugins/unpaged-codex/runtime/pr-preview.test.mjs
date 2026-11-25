@@ -17,6 +17,7 @@ const THREAD_2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 const PLAN_DOCUMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const PUBLIC_URL = `https://unpaged.io/share/${PLAN_DOCUMENT_ID}`;
 const PREVIEW_URL = `${PUBLIC_URL}/preview.png`;
+const TEAM_LINK = `https://unpaged.io/join/${"a".repeat(32)}`;
 
 test("Codex PR section matches Claude/Copilot/Antigravity format byte-for-byte and keeps schema compact", () => {
   const opts = {
@@ -39,6 +40,25 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   });
   assert.equal(emptyStdin.status, 1);
   assert.equal(emptyStdin.stdout, "");
+
+  // A team link is refused: its reader would have to sign in.
+  const teamLink = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", TEAM_LINK], {
+    env,
+    input: "Body\n",
+    encoding: "utf8",
+  });
+  assert.equal(teamLink.status, 1);
+  assert.equal(teamLink.stdout, "");
+  assert.ok(teamLink.stderr.includes("a /join/<token> team link is not accepted"));
+
+  // The page link alone is enough: the picture link is derived from it.
+  const pageLinkOnly = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL], {
+    env,
+    input: "Body\n",
+    encoding: "utf8",
+  });
+  assert.equal(pageLinkOnly.status, 0);
+  assert.ok(pageLinkOnly.stdout.includes(`[![Visual plan](${PREVIEW_URL}?v=1763282222)](${PUBLIC_URL})`));
 
   const badPreview = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, "https://evil.example.com/p.png"], {
     env,
@@ -260,6 +280,17 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   assert.equal((await readdir(planDir)).length, 0);
   // reviews.sqlite was never created by plan_record or plan_lookup.
   await assert.rejects(() => stat(join(codexHome, "unpaged", "reviews.sqlite")), { code: "ENOENT" });
+
+  // pr_splice refuses a team link.
+  await assert.rejects(
+    () =>
+      executeControl(
+        { operation: "pr_splice", payload: { url: TEAM_LINK, body: "Body", bodyLength: 4 } },
+        context,
+        options
+      ),
+    /invalid_public_link_url/
+  );
 
   // pr_splice requires both `body` and `bodyLength`, and refuses shortened bodies.
   await assert.rejects(

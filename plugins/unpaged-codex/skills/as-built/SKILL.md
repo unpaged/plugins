@@ -297,7 +297,7 @@ in — and the server re-renders the root preview. The plan's public link `<url>
 is the one the reply gives; when the reply gives none, it is
 `<web app>/share/<documentId>`, where `<web app>` is the web app address the
 remote server's instructions name (`https://unpaged.io` for `mcp.unpaged.io`).
-If the call is refused (only the plan's owner can make it public), leave the
+If the call is refused (for example, only the plan's owner can make it public), leave the
 pull request description unchanged and say why in one sentence. Otherwise
 resolve `<plugin-root>` as two levels up from this
 `SKILL.md` file, and splice the updated standalone bounded
@@ -309,9 +309,10 @@ then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
 non-zero, leave the pull request description unchanged, delete the temporary
 files, and report in one sentence the reason `pr-preview.mjs splice` printed on
 stderr — never splice by hand after `splice` refused (skipping with a
-one-sentence note if `gh pr edit` is declined). When the section was updated,
-tell the user in one sentence that the plan is public and that
-**Share → Public link** in Unpaged turns that off.
+one-sentence note if `gh pr edit` is declined). Whenever the `document_update`
+call succeeded, even if the description was then left unchanged, tell the user
+in one sentence that the plan is public and that **Share → Public link** in
+Unpaged turns that off.
 
 Return:
 

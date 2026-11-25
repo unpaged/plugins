@@ -292,7 +292,11 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
   assert.ok(!ctx.includes("document_join_link"));
   assert.ok(ctx.includes(`<web app>/share/${DOC_1}`));
   assert.ok(ctx.includes("if the call is refused"));
-  assert.ok(ctx.includes("tell the person in one sentence that the plan is now public"));
+  assert.ok(
+    ctx.includes(
+      "whenever the document_update call succeeded, even if the splice or gh pr edit then failed and nothing was attached, tell the person in one sentence that the plan is now public"
+    )
+  );
   assert.ok(ctx.includes("Share → Public link"));
   assert.ok(ctx.includes("https://github.com/acme/shop/pull/42"));
   assert.ok(ctx.includes("never pass a canvas title on a shell command line"));

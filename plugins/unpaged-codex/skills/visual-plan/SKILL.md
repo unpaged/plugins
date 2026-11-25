@@ -282,7 +282,7 @@ in — and redraws the link-preview picture from the root canvas. The plan's
 public link `<url>` is the one the reply gives; when the reply gives none, it
 is `<web app>/share/<documentId>`, where `<web app>` is the web app address the
 remote server's instructions name (`https://unpaged.io` for `mcp.unpaged.io`).
-If the call is refused (only the plan's owner can make it public), leave the
+If the call is refused (for example, only the plan's owner can make it public), leave the
 pull request description unchanged and say why in one sentence. Otherwise
 resolve `<plugin-root>` as
 two levels up from this `SKILL.md` file, and splice ONLY the standalone bounded
@@ -293,9 +293,10 @@ the shell command line):
 `gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
 then delete `<inFile>` and `<outFile>` (skip `plan_record` once an open PR is
 updated so this plan's one-PR allowance is spent and not offered to a second PR).
-Then tell the user in one sentence that the plan is now public — anyone with
-the link can read it without an account — and that **Share → Public link** in
-Unpaged turns that off.
+Whenever the `document_update` call succeeded, even if the description was
+then left unchanged, tell the user in one sentence that the plan is now public
+— anyone with the link can read it without an account — and that
+**Share → Public link** in Unpaged turns that off.
 If `pr-preview.mjs splice` exits non-zero, leave the pull request description
 unchanged, delete the temporary files, and report in one sentence the reason
 `pr-preview.mjs splice` printed on stderr — never splice by hand after `splice`
@@ -344,9 +345,9 @@ then delete `<inFile>` and `<outFile>`) so long PR descriptions never pass
 through model context. If `pr-preview.mjs splice` exits non-zero, leave the pull
 request description unchanged, delete the temporary files, and report in one
 sentence the reason `pr-preview.mjs splice` printed on stderr — never splice by
-hand after `splice` refused. Once the plan is attached, tell the user in one
-sentence that it is now public and that **Share → Public link** in Unpaged
-turns that off.
+hand after `splice` refused. Whenever the `document_update` call succeeded,
+even if nothing was attached, tell the user in one sentence that the plan is
+now public and that **Share → Public link** in Unpaged turns that off.
 
 ## Hand over the review
 

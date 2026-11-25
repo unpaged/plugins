@@ -97,7 +97,7 @@ Right after rendering and checking the canvas pictures — before replying to th
 
 Reply to the user with:
 - The edit link: `https://unpaged.io/document/<documentId>/edit` — call it a canvas (or whiteboard) in your reply, never a board.
-- If an open pull request for this branch was updated, one short sentence naming that pull request and saying that the plan is attached and is now public — anyone with the link can read it without an account — and that **Share → Public link** in Unpaged turns that off.
+- If the plan was made public for an open pull request, one short sentence saying that the plan is now public — anyone with the link can read it without an account — and that **Share → Public link** in Unpaged turns that off. Say it even when the pull request description was then left unchanged; when it was updated, name that pull request.
 - When the plan had mocks, one sentence saying how many went on which canvases, and the sentence from `references/mocks.md` for any left out.
 - One sentence: approving the plan will stamp the canvas EXECUTING, and the Decision log fills in while the plan is implemented.
 - Once `listen.mjs --once <documentId>` is running in the background: *"I'm listening on this canvas — comment @agent there and I reply on it."* and end your turn.
