@@ -302,8 +302,14 @@ Listening continues through all phases until the user stops it. When a visual
 plan is created on a named git branch, `review` (`plan_record`, `plan_lookup`,
 `pr_splice`) stores the branch plan privately under `${CODEX_HOME:-~/.codex}/unpaged/plans/`
 (mode `0600`) without touching `hooks/hooks.json` or hook trust, so open pull
-requests and newly created pull requests receive a **Can view** join link and
+requests and newly created pull requests receive the plan's public link and a
 clickable preview image inside a bounded `<!-- unpaged-plan:start -->` section.
+The agent makes the plan public first (`document_update` with `isPublic: true`)
+and tells you it did, so a reviewer opens the plan without an account.
+`visual-plan` and `as-built` leave alone a plan that is not about the open pull
+request. Otherwise `as-built` keeps the plan public: the record it writes is part of the plan, so
+anyone with the link can read it, and a plan whose public link you turned off
+is made public again, which the agent says.
 
 The accepted digest remains an approval receipt as the current canvas digest
 advances through log entries, checklist progress and as-built records. Changes
@@ -392,13 +398,15 @@ The local tool and SessionStart hook use that same default directory; the MCP
 server forwards the native `CODEX_HOME` setting. Branch-scoped visual-plan records
 live alongside it under `${CODEX_HOME:-~/.codex}/unpaged/plans/` (mode `0600`); when a
 branch with a recorded visual plan has or opens a GitHub pull request, the agent
-writes that canvas's **Can view** `/join/<token>` link and `/join/<token>/preview.png`
-image URL into the pull request description via `gh pr edit` (on public repositories,
-anyone reading the pull request can view the canvas through that link and GitHub's
-image proxy fetches the preview picture; revoking the team link in Unpaged's Share dialog
-stops anyone new from joining through it and turns the preview into Unpaged's generic
-card; people who already opened it keep Can view until you remove them from the
-collaborator list in the same dialog). When a plan has mocks, visual-plan uploads
+makes that plan public and writes its public link (`/share/<documentId>`) and
+preview picture link (`/share/<documentId>/preview.png`) into the pull request
+description via `gh pr edit`; GitHub's image proxy fetches the preview picture.
+A public plan can be read by anyone who has the link, without an account, on
+private repositories too; a signed-in person can copy it into their own library;
+and a search engine may list it once the link is on a public page. Turning off
+**Public link** in the plan's Share dialog takes the page down and turns the
+preview into Unpaged's generic card; it does not remove copies people already
+made. When a plan has mocks, visual-plan uploads
 their pictures to that plan's canvas under your account: picture files and
 screenshots of mock pages that the task made or you pointed it at, never other
 files, sent to Unpaged's picture-upload address on Google Cloud Functions; for a

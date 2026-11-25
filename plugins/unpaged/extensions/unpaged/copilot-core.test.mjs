@@ -744,11 +744,11 @@ test("records visual plans per git branch and injects PR preview context on gh p
     });
     assert.ok(prCreated?.additionalContext?.includes(DOC_A));
     assert.ok(prCreated?.additionalContext?.includes("https://github.com/acme/shop/pull/55"));
-    assert.ok(prCreated?.additionalContext?.includes('role "viewer"'));
+    assert.ok(prCreated?.additionalContext?.includes("isPublic: true"));
     assert.ok(prCreated?.additionalContext?.includes(`checkout "${repo}"`));
     assert.ok(!prCreated?.additionalContext?.includes("ghp_FAKETOKEN"));
     assert.ok(!prCreated?.additionalContext?.includes("remote get-url origin"));
-    assert.ok(prCreated?.additionalContext?.includes('/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
+    assert.ok(prCreated?.additionalContext?.includes('/monitors/plans.mjs" splice "<url>" <'));
     assert.ok(prCreated?.additionalContext?.includes("headRepositoryOwner,headRepository,headRefName"));
     assert.ok(prCreated?.additionalContext?.includes('"acme/shop:feat/pr-preview"'));
     assert.ok(prCreated?.additionalContext?.includes("if this session has already attached it to another pull request"));

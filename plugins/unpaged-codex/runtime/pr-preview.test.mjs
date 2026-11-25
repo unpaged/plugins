@@ -14,14 +14,15 @@ const DOC_1 = "11111111-2222-3333-4444-555555555555";
 const DOC_2 = "22222222-3333-4444-8555-666666666666";
 const THREAD_1 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const THREAD_2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
-const JOIN_TOKEN = "a".repeat(32);
-const JOIN_URL = `https://unpaged.io/join/${JOIN_TOKEN}`;
-const PREVIEW_URL = `${JOIN_URL}/preview.png`;
+const PLAN_DOCUMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const PUBLIC_URL = `https://unpaged.io/share/${PLAN_DOCUMENT_ID}`;
+const PREVIEW_URL = `${PUBLIC_URL}/preview.png`;
+const TEAM_LINK = `https://unpaged.io/join/${"a".repeat(32)}`;
 
 test("Codex PR section matches Claude/Copilot/Antigravity format byte-for-byte and keeps schema compact", () => {
   const opts = {
     title: "shop-api: [Phase 1] Rate limiting",
-    url: JOIN_URL,
+    url: PUBLIC_URL,
     previewUrl: PREVIEW_URL,
     version: 1763289999,
   };
@@ -32,7 +33,7 @@ test("Codex PR section matches Claude/Copilot/Antigravity format byte-for-byte a
 test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdin/stdout and rejects 0-byte stdin", () => {
   const env = { ...process.env, UNPAGED_PREVIEW_VERSION: "1763282222" };
 
-  const emptyStdin = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const emptyStdin = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: "",
     encoding: "utf8",
@@ -40,7 +41,26 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   assert.equal(emptyStdin.status, 1);
   assert.equal(emptyStdin.stdout, "");
 
-  const badPreview = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, "https://evil.example.com/p.png"], {
+  // A team link is refused: its reader would have to sign in.
+  const teamLink = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", TEAM_LINK], {
+    env,
+    input: "Body\n",
+    encoding: "utf8",
+  });
+  assert.equal(teamLink.status, 1);
+  assert.equal(teamLink.stdout, "");
+  assert.ok(teamLink.stderr.includes("a /join/<token> team link is not accepted"));
+
+  // The page link alone is enough: the picture link is derived from it.
+  const pageLinkOnly = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL], {
+    env,
+    input: "Body\n",
+    encoding: "utf8",
+  });
+  assert.equal(pageLinkOnly.status, 0);
+  assert.ok(pageLinkOnly.stdout.includes(`[![Visual plan](${PREVIEW_URL}?v=1763282222)](${PUBLIC_URL})`));
+
+  const badPreview = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, "https://evil.example.com/p.png"], {
     env,
     input: "Body\n",
     encoding: "utf8",
@@ -48,7 +68,7 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   assert.equal(badPreview.status, 1);
   assert.ok(badPreview.stderr.includes("previewUrl must be"));
 
-  const strayMarker = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const strayMarker = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: `${PR_SECTION_START}\nstray\n`,
     encoding: "utf8",
@@ -59,7 +79,7 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   // 350-line (> 14 KiB) PR body stays completely intact without passing through model context.
   const longLines = Array.from({ length: 350 }, (_, idx) => `- [x] Verification item #${idx + 1}: checked end-to-end`);
   const longBody = `## Summary\n\n${longLines.join("\n")}\n`;
-  const spliced = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const spliced = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: longBody,
     encoding: "utf8",
@@ -70,14 +90,14 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   assert.ok(spliced.stdout.includes(`${PREVIEW_URL}?v=1763282222`));
 
   // Trailing unclosed code fence is closed before appending so a second splice updates in place.
-  const unclosed = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const unclosed = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: "```text\nunclosed log line\n",
     encoding: "utf8",
   });
   assert.equal(unclosed.status, 0);
   assert.ok(unclosed.stdout.startsWith("```text\nunclosed log line\n```\n\n<!-- unpaged-plan:start -->\n"));
-  const unclosedAgain = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const unclosedAgain = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: unclosed.stdout,
     encoding: "utf8",
@@ -85,14 +105,14 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
   assert.equal(unclosedAgain.status, 0);
   assert.equal(unclosedAgain.stdout, unclosed.stdout);
 
-  const listUnclosed = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const listUnclosed = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: "- Ran the suite:\n  ```text\n  ok\n",
     encoding: "utf8",
   });
   assert.equal(listUnclosed.status, 0);
   assert.ok(listUnclosed.stdout.startsWith("- Ran the suite:\n  ```text\n  ok\n  ```\n\n<!-- unpaged-plan:start -->\n"));
-  const listUnclosedAgain = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+  const listUnclosedAgain = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
     env,
     input: listUnclosed.stdout,
     encoding: "utf8",
@@ -104,7 +124,7 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
     "- Ran the full suite after the\nfix:\n  ```text\n  ok\nSummary at top level.\n",
     "- Tests\n  - unit: pass\n  ```text\n  log\nSummary.\n",
   ]) {
-    const onceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const onceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       env,
       input: trickyBody,
       encoding: "utf8",
@@ -112,7 +132,7 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
     assert.equal(onceTop.status, 0);
     assert.ok(onceTop.stdout.startsWith("<!-- unpaged-plan:start -->\n"));
     assert.ok(onceTop.stdout.endsWith(`\n\n${trickyBody}`));
-    const twiceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const twiceTop = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       env,
       input: onceTop.stdout,
       encoding: "utf8",
@@ -126,14 +146,14 @@ test("runtime/pr-preview.mjs CLI splices large PR descriptions directly via stdi
     `Use these markers:\n\n\t${PR_SECTION_START}\n\tyour text\n\t${PR_SECTION_END}\n\nThanks.\n`,
     `Single quoted start:\n\n    ${PR_SECTION_START}\n\nThanks.\n`,
   ]) {
-    const onceInd = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const onceInd = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       env,
       input: indentedExample,
       encoding: "utf8",
     });
     assert.equal(onceInd.status, 0);
     assert.ok(onceInd.stdout.startsWith(`${indentedExample.trimEnd()}\n\n<!-- unpaged-plan:start -->\n`));
-    const twiceInd = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const twiceInd = spawnSync(process.execPath, [PR_PREVIEW_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       env,
       input: onceInd.stdout,
       encoding: "utf8",
@@ -261,9 +281,20 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
   // reviews.sqlite was never created by plan_record or plan_lookup.
   await assert.rejects(() => stat(join(codexHome, "unpaged", "reviews.sqlite")), { code: "ENOENT" });
 
+  // pr_splice refuses a team link.
+  await assert.rejects(
+    () =>
+      executeControl(
+        { operation: "pr_splice", payload: { url: TEAM_LINK, body: "Body", bodyLength: 4 } },
+        context,
+        options
+      ),
+    /invalid_public_link_url/
+  );
+
   // pr_splice requires both `body` and `bodyLength`, and refuses shortened bodies.
   await assert.rejects(
-    () => executeControl({ operation: "pr_splice", payload: { url: JOIN_URL } }, context, options),
+    () => executeControl({ operation: "pr_splice", payload: { url: PUBLIC_URL } }, context, options),
     /invalid_control_arguments/
   );
   await assert.rejects(
@@ -271,7 +302,7 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
       executeControl(
         {
           operation: "pr_splice",
-          payload: { url: JOIN_URL, body: "Shortened … omitted 120 of 300 lines … tail", bodyLength: 9400 },
+          payload: { url: PUBLIC_URL, body: "Shortened … omitted 120 of 300 lines … tail", bodyLength: 9400 },
         },
         context,
         options
@@ -285,7 +316,7 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
     {
       operation: "pr_splice",
       payload: {
-        url: JOIN_URL,
+        url: PUBLIC_URL,
         previewUrl: PREVIEW_URL,
         title: "codex: Visual plan",
         body: existingBody,
@@ -295,10 +326,10 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
     context,
     options
   );
-  assert.equal(spliced.url, JOIN_URL);
+  assert.equal(spliced.url, PUBLIC_URL);
   assert.equal(spliced.previewUrl, PREVIEW_URL);
   assert.ok(spliced.body.startsWith(`${existingBody}\n<!-- unpaged-plan:start -->\n`));
-  assert.ok(spliced.body.includes("[Open visual plan on Unpaged (Can view)]"));
+  assert.ok(spliced.body.includes("[Open visual plan on Unpaged (no account needed)]"));
 
   const ambiguousBody = `Intro\n\n${PR_SECTION_START}\nAuthor text`;
   await assert.rejects(
@@ -307,7 +338,7 @@ test("executeControl supports plan_record, default-branch promotion on plan_look
         {
           operation: "pr_splice",
           payload: {
-            url: JOIN_URL,
+            url: PUBLIC_URL,
             body: ambiguousBody,
             bodyLength: [...ambiguousBody].length,
           },

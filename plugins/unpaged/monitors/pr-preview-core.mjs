@@ -17,7 +17,7 @@ export const GITHUB_PR_CREATE_TOOL =
 export const PR_URL_PATTERN = /https:\/\/[^\s"'<>)\]]+\/pull\/(\d+)/;
 
 const SHELL_TOOLS = new Set(["Bash", "bash", "powershell", "local_shell"]);
-const JOIN_PATH_PATTERN = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
+const SHARE_PATH_PATTERN = /^\/share\/([^/]+)\/?$/;
 const COMMON_DEFAULT_BRANCHES = new Set(["main", "master", "trunk"]);
 
 export function isShellToolName(toolName) {
@@ -289,37 +289,39 @@ function parseUnpagedHttpsUrl(raw) {
 }
 
 /**
- * Validates an Unpaged `/join/<token>` link and its `/join/<token>/preview.png`
- * image endpoint on the same HTTPS Unpaged origin.
+ * Validates a plan's public page link, `/share/<documentId>`, and its
+ * `/share/<documentId>/preview.png` picture on the same HTTPS Unpaged origin.
+ * A team link (`/join/<token>`) is refused: its reader has to sign in, so a
+ * pull request reviewer would meet the Log in page.
  */
-export function parseJoinLinkUrls({ url, previewUrl } = {}) {
-  const joinParsed = parseUnpagedHttpsUrl(url);
-  if (!joinParsed || joinParsed.search) return null;
-  const match = joinParsed.pathname.match(JOIN_PATH_PATTERN);
-  if (!match) return null;
-  const token = match[1];
-  const cleanUrl = `${joinParsed.origin}/join/${token}`;
-  const expectedPreviewPath = `/join/${token}/preview.png`;
+export function parsePublicLinkUrls({ url, previewUrl } = {}) {
+  const pageParsed = parseUnpagedHttpsUrl(url);
+  if (!pageParsed || pageParsed.search) return null;
+  const match = pageParsed.pathname.match(SHARE_PATH_PATTERN);
+  if (!match || !isDocumentId(match[1])) return null;
+  const documentId = match[1];
+  const cleanUrl = `${pageParsed.origin}/share/${documentId}`;
+  const expectedPreviewPath = `/share/${documentId}/preview.png`;
 
   if (previewUrl === undefined || previewUrl === null || previewUrl === "") {
-    return { url: cleanUrl, previewUrl: `${joinParsed.origin}${expectedPreviewPath}`, token };
+    return { url: cleanUrl, previewUrl: `${pageParsed.origin}${expectedPreviewPath}`, documentId };
   }
   const previewParsed = parseUnpagedHttpsUrl(previewUrl);
   if (
     !previewParsed ||
-    previewParsed.origin !== joinParsed.origin ||
+    previewParsed.origin !== pageParsed.origin ||
     previewParsed.pathname !== expectedPreviewPath
   ) {
     return null;
   }
-  return { url: cleanUrl, previewUrl: `${previewParsed.origin}${expectedPreviewPath}`, token };
+  return { url: cleanUrl, previewUrl: `${previewParsed.origin}${expectedPreviewPath}`, documentId };
 }
 
-export function describeJoinLinkError({ url, previewUrl } = {}) {
-  if (!parseJoinLinkUrls({ url })) {
-    return "url must be an Unpaged https /join/<token> link without query parameters";
+export function describePublicLinkError({ url, previewUrl } = {}) {
+  if (!parsePublicLinkUrls({ url })) {
+    return "url must be the plan's public Unpaged link, https /share/<documentId>, without query parameters (a /join/<token> team link is not accepted: its reader has to sign in)";
   }
-  return "previewUrl must be the matching https /join/<token>/preview.png link on the same Unpaged origin";
+  return "previewUrl must be the matching https /share/<documentId>/preview.png link on the same Unpaged origin";
 }
 
 export function appendPreviewVersion(previewUrl, version) {
@@ -333,9 +335,9 @@ export function appendPreviewVersion(previewUrl, version) {
  * Builds the bounded Markdown section embedded in a GitHub pull request body.
  */
 export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
-  const validated = parseJoinLinkUrls({ url, previewUrl });
+  const validated = parsePublicLinkUrls({ url, previewUrl });
   if (!validated) {
-    throw new Error("invalid_join_link_url");
+    throw new Error("invalid_public_link_url");
   }
   const safeTitle = escapeMarkdownText(title);
   const versionedPreview = appendPreviewVersion(validated.previewUrl, version);
@@ -345,7 +347,7 @@ export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
     "",
     `[![${safeTitle}](${versionedPreview})](${validated.url})`,
     "",
-    `[Open visual plan on Unpaged (Can view)](${validated.url})`,
+    `[Open visual plan on Unpaged (no account needed)](${validated.url})`,
     PR_SECTION_END,
   ].join("\n");
 }
@@ -554,13 +556,15 @@ export function prPlanAttachContext({
     repoAndBranchCheck +
     `Attach this plan to ${pullRequestUrl} now in this turn only if it is about this pull request's work ` +
     `(compare the plan's title — or read the canvas with document_get when the title isn't enough — against the pull request's title and changes; otherwise skip it, leave the PR description unchanged, and say in one sentence why): ` +
-    `1) call document_join_link on the unpaged server with documentId "${documentId}" and role "viewer" ` +
-    `(if document_join_link is unavailable on an older server, skip quietly and mention that PR previews need the current Unpaged server); ` +
+    `1) call document_update on the unpaged server with documentId "${documentId}" and isPublic: true — this makes the plan public (anyone with its link can read it without an account, and copy it once signed in) and redraws its link-preview picture; ` +
+    `if the call is refused (for example, only the plan's owner can make it public), attach nothing, leave the PR description unchanged, and say why in one sentence; ` +
+    `the plan's public link <url> is the one the reply gives, or, when the reply gives none, <web app>/share/${documentId} where <web app> is the web app address the unpaged server's instructions name (https://unpaged.io for mcp.unpaged.io); ` +
     `2) never pass a canvas title on a shell command line — when node is on PATH, write temporary files outside the repository and run ` +
-    `gh pr view "${pullRequestUrl}" --json body --jq .body > "<inFile>" && node "${scriptPath}" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "${pullRequestUrl}" --body-file "<outFile>", ` +
+    `gh pr view "${pullRequestUrl}" --json body --jq .body > "<inFile>" && node "${scriptPath}" splice "<url>" < "<inFile>" > "<outFile>" && gh pr edit "${pullRequestUrl}" --body-file "<outFile>", ` +
     `then delete "<inFile>" and "<outFile>" (if splice exits non-zero, leave the PR description unchanged, delete the temporary files, and report in one sentence the reason splice printed on stderr — never hand-splice after splice refused); ` +
     `only when node is not on PATH, read the current PR body with gh pr view "${pullRequestUrl}" --json body --jq .body, splice ONLY a single standalone bounded section ${PR_SECTION_START} ... ${PR_SECTION_END} containing "### Visual plan", a blank line, ` +
-    `"[![Visual plan](<previewUrl>?v=<unix-seconds>)](<url>)", a blank line, and "[Open visual plan on Unpaged (Can view)](<url>)" into "<outFile>" outside the repository (preserving all surrounding PR description text, or leaving the description unchanged if existing marker lines are unpaired or duplicated), ` +
-    `run gh pr edit "${pullRequestUrl}" --body-file "<outFile>", and delete "<outFile>".`
+    `"[![Visual plan](<url>/preview.png?v=<unix-seconds>)](<url>)", a blank line, and "[Open visual plan on Unpaged (no account needed)](<url>)" into "<outFile>" outside the repository (preserving all surrounding PR description text, or leaving the description unchanged if existing marker lines are unpaired or duplicated), ` +
+    `run gh pr edit "${pullRequestUrl}" --body-file "<outFile>", and delete "<outFile>"; ` +
+    `3) whenever the document_update call succeeded, even if the splice or gh pr edit then failed and nothing was attached, tell the person in one sentence that the plan is now public — anyone with the link can read it without an account — and that Share → Public link in Unpaged turns that off.`
   );
 }

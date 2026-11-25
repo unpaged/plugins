@@ -14,7 +14,7 @@ export const BRANCH_PLAN_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const AMBIGUOUS_PR_SECTION_MESSAGE =
   "the pull request description has stray or duplicate Unpaged plan marker lines; fix them by hand";
 
-const JOIN_PATH_PATTERN = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
+const SHARE_PATH_PATTERN = /^\/share\/([^/]+)\/?$/;
 const COMMON_DEFAULT_BRANCHES = new Set(["main", "master", "trunk"]);
 
 export function parseGitHeadBranch(rawHead) {
@@ -131,34 +131,34 @@ function parseUnpagedHttpsUrl(raw) {
   }
 }
 
-export function parseJoinLinkUrls({ url, previewUrl } = {}) {
-  const joinParsed = parseUnpagedHttpsUrl(url);
-  if (!joinParsed || joinParsed.search) return null;
-  const match = joinParsed.pathname.match(JOIN_PATH_PATTERN);
-  if (!match) return null;
-  const token = match[1];
-  const cleanUrl = `${joinParsed.origin}/join/${token}`;
-  const expectedPreviewPath = `/join/${token}/preview.png`;
+export function parsePublicLinkUrls({ url, previewUrl } = {}) {
+  const pageParsed = parseUnpagedHttpsUrl(url);
+  if (!pageParsed || pageParsed.search) return null;
+  const match = pageParsed.pathname.match(SHARE_PATH_PATTERN);
+  if (!match || !UUID.test(match[1])) return null;
+  const documentId = match[1];
+  const cleanUrl = `${pageParsed.origin}/share/${documentId}`;
+  const expectedPreviewPath = `/share/${documentId}/preview.png`;
 
   if (previewUrl === undefined || previewUrl === null || previewUrl === "") {
-    return { url: cleanUrl, previewUrl: `${joinParsed.origin}${expectedPreviewPath}`, token };
+    return { url: cleanUrl, previewUrl: `${pageParsed.origin}${expectedPreviewPath}`, documentId };
   }
   const previewParsed = parseUnpagedHttpsUrl(previewUrl);
   if (
     !previewParsed ||
-    previewParsed.origin !== joinParsed.origin ||
+    previewParsed.origin !== pageParsed.origin ||
     previewParsed.pathname !== expectedPreviewPath
   ) {
     return null;
   }
-  return { url: cleanUrl, previewUrl: `${previewParsed.origin}${expectedPreviewPath}`, token };
+  return { url: cleanUrl, previewUrl: `${previewParsed.origin}${expectedPreviewPath}`, documentId };
 }
 
-export function describeJoinLinkError({ url, previewUrl } = {}) {
-  if (!parseJoinLinkUrls({ url })) {
-    return "url must be an Unpaged https /join/<token> link without query parameters";
+export function describePublicLinkError({ url, previewUrl } = {}) {
+  if (!parsePublicLinkUrls({ url })) {
+    return "url must be the plan's public Unpaged link, https /share/<documentId>, without query parameters (a /join/<token> team link is not accepted: its reader has to sign in)";
   }
-  return "previewUrl must be the matching https /join/<token>/preview.png link on the same Unpaged origin";
+  return "previewUrl must be the matching https /share/<documentId>/preview.png link on the same Unpaged origin";
 }
 
 export function appendPreviewVersion(previewUrl, version) {
@@ -169,8 +169,8 @@ export function appendPreviewVersion(previewUrl, version) {
 }
 
 export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
-  const validated = parseJoinLinkUrls({ url, previewUrl });
-  if (!validated) throw new Error("invalid_join_link_url");
+  const validated = parsePublicLinkUrls({ url, previewUrl });
+  if (!validated) throw new Error("invalid_public_link_url");
   const safeTitle = escapeMarkdownText(title);
   const versionedPreview = appendPreviewVersion(validated.previewUrl, version);
   return [
@@ -179,7 +179,7 @@ export function renderPrPlanSection({ title, url, previewUrl, version } = {}) {
     "",
     `[![${safeTitle}](${versionedPreview})](${validated.url})`,
     "",
-    `[Open visual plan on Unpaged (Can view)](${validated.url})`,
+    `[Open visual plan on Unpaged (no account needed)](${validated.url})`,
     PR_SECTION_END,
   ].join("\n");
 }
@@ -509,8 +509,8 @@ export function buildSplicedPrBody({ url, previewUrl, title = "", body, bodyLeng
   if (typeof body !== "string") throw new Error("invalid_pr_body");
   if (!Number.isSafeInteger(bodyLength) || bodyLength < 0) throw new Error("invalid_pr_body_length");
   if ([...body].length !== bodyLength) throw new Error("truncated_pr_body");
-  const validated = parseJoinLinkUrls({ url, previewUrl });
-  if (!validated) throw new Error("invalid_join_link_url");
+  const validated = parsePublicLinkUrls({ url, previewUrl });
+  if (!validated) throw new Error("invalid_public_link_url");
   const resolvedVersion =
     Number.isSafeInteger(version) && version > 0 ? version : Math.floor(Date.now() / 1000);
   const section = renderPrPlanSection({
@@ -540,9 +540,9 @@ function readStdinText() {
 }
 
 async function spliceCli(url, previewUrl) {
-  const validated = parseJoinLinkUrls({ url, previewUrl });
+  const validated = parsePublicLinkUrls({ url, previewUrl });
   if (!validated) {
-    process.stderr.write(`pr-preview.mjs splice: ${describeJoinLinkError({ url, previewUrl })}\n`);
+    process.stderr.write(`pr-preview.mjs splice: ${describePublicLinkError({ url, previewUrl })}\n`);
     return 1;
   }
   if (process.stdin.isTTY) {

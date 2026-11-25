@@ -2,8 +2,8 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "unpaged",
   "displayName": "Unpaged",
-  "description": "Visual plans, architecture documents, and whiteboards on Unpaged — render plans as interactive canvases, keep repository architecture docs in step with the code from a native side panel, attach Can view invite links to GitHub PRs, receive @agent comments, keep Decision logs, and compile as-built records.",
-  "version": "0.5.0",
+  "description": "Visual plans, architecture documents, and whiteboards on Unpaged — render plans as interactive canvases, keep repository architecture docs in step with the code from a native side panel, make a plan public and attach its link to its GitHub pull request, receive @agent comments, keep Decision logs, and compile as-built records.",
+  "version": "0.6.0",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Unpaged",

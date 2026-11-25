@@ -19,12 +19,12 @@ import { isDocumentId } from "./listen-core.mjs";
 import {
   AMBIGUOUS_PR_SECTION_MESSAGE,
   BRANCH_PLAN_MAX_AGE_MS,
-  describeJoinLinkError,
+  describePublicLinkError,
   isDefaultBranchName,
   isPlanRecordFresh,
   normalizePlanRecord,
   parseGitHeadBranch,
-  parseJoinLinkUrls,
+  parsePublicLinkUrls,
   parseOriginHeadBranch,
   pendingPlanStoreKey,
   planStoreKey,
@@ -308,9 +308,9 @@ async function forgetPlan(target) {
 }
 
 async function spliceFromStdin(url, previewUrl) {
-  const validated = parseJoinLinkUrls({ url, previewUrl });
+  const validated = parsePublicLinkUrls({ url, previewUrl });
   if (!validated) {
-    process.stderr.write(`plans.mjs splice: ${describeJoinLinkError({ url, previewUrl })}\n`);
+    process.stderr.write(`plans.mjs splice: ${describePublicLinkError({ url, previewUrl })}\n`);
     return 1;
   }
   if (process.stdin.isTTY) {

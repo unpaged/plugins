@@ -290,20 +290,32 @@ Do not manufacture an `execute` instruction just to stamp a historical record.
 Keep the existing listener and key through record completion. Inspect its live
 state before reporting it connected; use review-plan for recovery or an explicit
 stop. Do not arm a listener merely because this recording operation finished.
-When the current branch has an open GitHub pull request (`state: "OPEN"`), call
-remote `document_join_link({ documentId, role: "viewer" })` so the server
-re-renders the root preview, resolve `<plugin-root>` as two levels up from this
+When the current branch has an open GitHub pull request (`state: "OPEN"`) and
+the plan is about that pull request's work (compare the plan with the pull
+request's title and changes; when it is not, leave the pull request description
+unchanged, do not make the plan public, and say why in one sentence), call
+remote `document_update({ documentId, isPublic: true })` so the plan is public
+— anyone with its link can read it without an account, and copy it once signed
+in — and the server re-renders the root preview. The plan's public link `<url>`
+is the one the reply gives; when the reply gives none, it is
+`<web app>/share/<documentId>`, where `<web app>` is the web app address the
+remote server's instructions name (`https://unpaged.io` for `mcp.unpaged.io`).
+If the call is refused (for example, only the plan's owner can make it public), leave the
+pull request description unchanged and say why in one sentence. Otherwise
+resolve `<plugin-root>` as two levels up from this
 `SKILL.md` file, and splice the updated standalone bounded
 `<!-- unpaged-plan:start -->` section directly through temporary files outside
 the repository (never routing the PR body through model context or passing a
 canvas title on the shell command line):
-`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" "<previewUrl>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
+`gh pr view "<prUrl>" --json body --jq .body > "<inFile>" && node "<plugin-root>/runtime/pr-preview.mjs" splice "<url>" < "<inFile>" > "<outFile>" && gh pr edit "<prUrl>" --body-file "<outFile>"`,
 then delete `<inFile>` and `<outFile>`. If `pr-preview.mjs splice` exits
 non-zero, leave the pull request description unchanged, delete the temporary
 files, and report in one sentence the reason `pr-preview.mjs splice` printed on
 stderr — never splice by hand after `splice` refused (skipping with a
-one-sentence note if `document_join_link` is unavailable on an older server or
-`gh pr edit` is declined).
+one-sentence note if `gh pr edit` is declined). Whenever the `document_update`
+call succeeded, even if the description was then left unchanged, tell the user
+in one sentence that the plan is public and that **Share → Public link** in
+Unpaged turns that off.
 
 Return:
 
