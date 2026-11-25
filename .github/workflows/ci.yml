@@ -26,7 +26,9 @@ jobs:
             plugins/unpaged/hooks/hooks.json \
             plugins/unpaged/hooks/plan-approved-context.json \
             plugins/unpaged-antigravity/plugin.json \
-            plugins/unpaged-antigravity/mcp_config.json; do
+            plugins/unpaged-antigravity/mcp_config.json \
+            plugins/unpaged-antigravity/hooks.json \
+            plugins/unpaged-antigravity/sidecars/architecture/sidecar.json; do
             node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
             echo "ok $f"
           done
@@ -109,12 +111,12 @@ jobs:
 
       - name: Listener syntax
         run: |
-          for f in plugins/unpaged/monitors/*.mjs plugins/unpaged/extensions/unpaged/*.mjs plugins/unpaged-antigravity/monitors/*.mjs; do
+          for f in plugins/unpaged/monitors/*.mjs plugins/unpaged/extensions/unpaged/*.mjs plugins/unpaged-antigravity/monitors/*.mjs plugins/unpaged-antigravity/sidecars/architecture/*.mjs plugins/unpaged-antigravity/sidecars/architecture/*.js; do
             node --check "$f" || exit 1
           done
 
       - name: Tests
-        run: node --test 'plugins/unpaged/monitors/*.test.mjs' 'plugins/unpaged/extensions/unpaged/*.test.mjs' 'plugins/unpaged-antigravity/monitors/*.test.mjs'
+        run: node --test 'plugins/unpaged/monitors/*.test.mjs' 'plugins/unpaged/extensions/unpaged/*.test.mjs' 'plugins/unpaged-antigravity/monitors/*.test.mjs' 'plugins/unpaged-antigravity/sidecars/architecture/*.test.mjs'
 
   mod:
     runs-on: ubuntu-latest

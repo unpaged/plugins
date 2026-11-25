@@ -171,30 +171,42 @@ async function resolveWorkspaceRepoRoots(workspaceUris) {
   return roots;
 }
 
-function sendJson(res, status, payload) {
-  res.writeHead(status, {
+function sendJson(res, status, payload, { closeAfter = false, req = null } = {}) {
+  const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+  };
+  if (closeAfter) {
+    headers.Connection = "close";
+  }
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(payload), () => {
+    if (closeAfter && req && !req.destroyed) {
+      req.destroy();
+    }
   });
-  res.end(JSON.stringify(payload));
 }
 
 function readJsonBody(req, maxBytes) {
   return new Promise((resolvePromise, rejectPromise) => {
     let size = 0;
+    let settled = false;
     const chunks = [];
     req.on("data", (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > maxBytes) {
+        settled = true;
         const err = new Error("Payload Too Large");
         err.status = 413;
         rejectPromise(err);
-        req.destroy();
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       const raw = Buffer.concat(chunks).toString("utf8").trim();
       if (!raw) {
         resolvePromise({});
@@ -215,7 +227,11 @@ function readJsonBody(req, maxBytes) {
         rejectPromise(err);
       }
     });
-    req.on("error", rejectPromise);
+    req.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(err);
+    });
   });
 }
 
@@ -279,7 +295,8 @@ export function createArchitectureSidecarServer({
     try {
       body = await readJsonBody(req, maxBodyBytes);
     } catch (error) {
-      sendJson(res, error?.status || 400, { error: error?.message || "Invalid request" });
+      const status = error?.status || 400;
+      sendJson(res, status, { error: error?.message || "Invalid request" }, { closeAfter: status === 413, req });
       return;
     }
 

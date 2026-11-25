@@ -327,7 +327,7 @@ body {
 }
 
 .btn:disabled {
-  cursor: default;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -364,12 +364,6 @@ body {
   background: var(--up-btn-disabled-bg);
   border-color: var(--up-border-soft);
   color: var(--up-btn-disabled-ink);
-}
-
-.hint-text {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--up-ink-muted);
 }
 
 .error-banner {

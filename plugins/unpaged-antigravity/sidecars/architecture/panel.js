@@ -141,9 +141,6 @@ function renderPanel() {
     busyBtn.type = "button";
     busyBtn.disabled = true;
     actionsWrap.appendChild(busyBtn);
-    actionsWrap.appendChild(
-      el("p", "hint-text", "Runs in your open chat and settles automatically once finished.")
-    );
   } else {
     repo.actions.forEach((action, idx) => {
       const isPrimary = idx === 0;
@@ -170,9 +167,11 @@ function renderPanel() {
   const footer = el(
     "footer",
     "panel-footer",
-    repo.shown === "none"
-      ? "Reads the code and draws a new canvas in your open chat."
-      : "Runs in your currently open chat (starts a new chat if none is open)."
+    repo.shown === "comparing"
+      ? "Settles automatically once the open chat finishes."
+      : repo.shown === "none"
+        ? "Reads the code and draws a new canvas in your open chat."
+        : "Runs in your currently open chat (starts a new chat if none is open)."
   );
   card.appendChild(footer);
   appEl.appendChild(card);
