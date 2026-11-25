@@ -290,8 +290,10 @@ Do not manufacture an `execute` instruction just to stamp a historical record.
 Keep the existing listener and key through record completion. Inspect its live
 state before reporting it connected; use review-plan for recovery or an explicit
 stop. Do not arm a listener merely because this recording operation finished.
-When the current branch has an open GitHub pull request (`state: "OPEN"`),
-call
+When the current branch has an open GitHub pull request (`state: "OPEN"`) and
+the plan is about that pull request's work (compare the plan with the pull
+request's title and changes; when it is not, leave the pull request description
+unchanged, do not make the plan public, and say why in one sentence), call
 remote `document_update({ documentId, isPublic: true })` so the plan is public
 — anyone with its link can read it without an account, and copy it once signed
 in — and the server re-renders the root preview. The plan's public link `<url>`

@@ -306,8 +306,8 @@ requests and newly created pull requests receive the plan's public link and a
 clickable preview image inside a bounded `<!-- unpaged-plan:start -->` section.
 The agent makes the plan public first (`document_update` with `isPublic: true`)
 and tells you it did, so a reviewer opens the plan without an account.
-`visual-plan` leaves alone a plan that is not about the open pull request, and
-`as-built` keeps the plan public: the record it writes is part of the plan, so
+`visual-plan` and `as-built` leave alone a plan that is not about the open pull
+request. Otherwise `as-built` keeps the plan public: the record it writes is part of the plan, so
 anyone with the link can read it, and a plan whose public link you turned off
 is made public again, which the agent says.
 
