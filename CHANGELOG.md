@@ -10,7 +10,7 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 
 - **Pull requests carry the plan's public link, not a team link.** A reviewer who was signed out met the Log in page behind the **Can view** team link, needed an account with a confirmed address, and took one of the plan owner's collaborator places. When a pull request is open or opened on a branch with a visual plan, the agent now makes the plan public (`document_update` with `isPublic: true`, which also redraws the preview picture), puts `/share/<documentId>` and `/share/<documentId>/preview.png` in the bounded `<!-- unpaged-plan:start -->` section, and tells you the plan is public and that **Share → Public link** turns it off. This applies on private repositories too: anyone who has the link can read the plan without an account, a signed-in person can copy it, and a search engine may list it once the link is on a public page. `monitors/plans.mjs splice` takes the public link alone, derives the picture link from it, and refuses a `/join/<token>` team link. `/unpaged:visual-plan` attaches, and makes public, only a plan that is about the open pull request. `/unpaged:as-built` keeps the plan public while a pull request is open: the record it writes is part of the plan, and a plan whose public link you turned off, or one an earlier version shared through a team link, is made public again, which the agent says. A section an earlier version wrote is replaced in place the next time `/unpaged:visual-plan` or `/unpaged:as-built` updates the pull request; team links earlier versions made stay as they are until you revoke them in the Share dialog. If the plan cannot be made public (for example, only its owner can), nothing is attached and the agent says why. If the plan was made public and attaching then failed, the agent still tells you the plan is public.
 
-## [unpaged-antigravity 0.5.0] - 2026-11-25
+## [unpaged-antigravity 0.6.0] - 2026-11-25
 
 ### Changed
 
@@ -21,6 +21,14 @@ All notable changes to the Unpaged plugins. The format follows [Keep a Changelog
 ### Changed
 
 - `skills/visual-plan` and `skills/as-built` make the plan public and attach its public link to the pull request as in 1.20.0; `runtime/pr-preview.mjs splice` and the local `pr_splice` operation refuse a team link.
+
+## [unpaged-antigravity 0.5.0] - 2026-11-25
+
+### Added
+
+- **Architecture document sync (`skills/architecture/`):** Create, compare, and update repository architecture canvases on Unpaged (`create`, `compare`, and `update` modes split across `SKILL.md`, `references/create.md`, and `references/compare-and-update.md` under Antigravity's 24,000-byte loader limit), backed by a pure state module (`monitors/architecture-core.mjs`) and mode-`0600` local verdict/run CLI (`monitors/architecture.mjs`).
+- **Native auxiliary side-pane panel (`sidecars/architecture/`):** Theme-aware UI panel showing the repository's green/yellow/red/grey architecture status light (pulsing yellow while a run is active) with elapsed time since the canvas fell behind or was checked, canvas link, multi-repo workspace switcher, and one-click **Compare**, **Update**, **Create**, and **Sync status** actions (backed by the deterministic `monitors/architecture.mjs report-document` parser) that run in your currently open chat without spawning background chats or sidebar projects.
+- **Attention-only `SessionStart` notice (`hooks.json`, `monitors/session-start.mjs`):** Zero-token user-only banner with a one-click `[Unpaged Architecture](sidecar://unpaged/architecture/)` pill shown at session start only when the repo's architecture canvas is behind, stale (> 90 days), or unreachable, staying silent when current or unchecked.
 
 ## [unpaged-antigravity 0.4.1] - 2026-11-19
 

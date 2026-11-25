@@ -85,7 +85,13 @@ test("every Antigravity skill body and rule fits within the 24,000-byte loader l
   const skills = readdirSync(skillsRoot).filter((entry) =>
     statSync(join(skillsRoot, entry)).isDirectory()
   );
-  assert.ok(skills.length >= 3, "expected at least 3 Antigravity skills");
+  assert.ok(skills.length >= 4, "expected at least 4 Antigravity skills");
+
+  const hooks = JSON.parse(readFileSync(join(pluginRoot, "hooks.json"), "utf8"));
+  assert.ok(Array.isArray(hooks["unpaged-architecture-notice"]?.SessionStart));
+  const sidecar = JSON.parse(readFileSync(join(pluginRoot, "sidecars/architecture/sidecar.json"), "utf8"));
+  assert.equal(sidecar.has_web_ui, true);
+  assert.equal(sidecar.ui_config?.views?.[0]?.entrypoint, "SIDECAR_UI_ENTRYPOINT_AUX_PANE");
 
   for (const skill of skills) {
     const skillDir = join(skillsRoot, skill);
