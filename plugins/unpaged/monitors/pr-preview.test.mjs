@@ -15,7 +15,8 @@ import {
   parseGitHeadBranch,
   parseGitHubRepoSlug,
   parseGitHubToolHeadRepoSlug,
-  parseJoinLinkUrls,
+  describePublicLinkError,
+  parsePublicLinkUrls,
   parseOriginRemoteUrl,
   planStoreKey,
   prPlanAttachContext,
@@ -27,9 +28,9 @@ import {
 const PLANS_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "plans.mjs");
 const DOC_1 = "11111111-2222-3333-4444-555555555555";
 const DOC_2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-const JOIN_TOKEN = "a".repeat(32);
-const JOIN_URL = `https://unpaged.io/join/${JOIN_TOKEN}`;
-const PREVIEW_URL = `${JOIN_URL}/preview.png`;
+const PLAN_DOCUMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const PUBLIC_URL = `https://unpaged.io/share/${PLAN_DOCUMENT_ID}`;
+const PREVIEW_URL = `${PUBLIC_URL}/preview.png`;
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "unpaged-pr-preview-"));
@@ -66,41 +67,71 @@ test("resolveGitDirPointer resolves relative and absolute worktree gitdir pointe
   assert.equal(resolveGitDirPointer("not-a-gitdir-file\n", "/repo"), null);
 });
 
-test("parseJoinLinkUrls enforces HTTPS Unpaged /join/<token> and matching /preview.png", () => {
-  assert.deepEqual(parseJoinLinkUrls({ url: JOIN_URL }), {
-    url: JOIN_URL,
+test("parsePublicLinkUrls enforces HTTPS Unpaged /share/<documentId> and matching /preview.png", () => {
+  assert.deepEqual(parsePublicLinkUrls({ url: PUBLIC_URL }), {
+    url: PUBLIC_URL,
     previewUrl: PREVIEW_URL,
-    token: JOIN_TOKEN,
+    documentId: PLAN_DOCUMENT_ID,
   });
   assert.deepEqual(
-    parseJoinLinkUrls({
-      url: `https://staging.unpaged.io/join/${JOIN_TOKEN}/`,
-      previewUrl: `https://staging.unpaged.io/join/${JOIN_TOKEN}/preview.png`,
+    parsePublicLinkUrls({
+      url: `https://staging.unpaged.io/share/${PLAN_DOCUMENT_ID}/`,
+      previewUrl: `https://staging.unpaged.io/share/${PLAN_DOCUMENT_ID}/preview.png`,
     }),
     {
-      url: `https://staging.unpaged.io/join/${JOIN_TOKEN}`,
-      previewUrl: `https://staging.unpaged.io/join/${JOIN_TOKEN}/preview.png`,
-      token: JOIN_TOKEN,
+      url: `https://staging.unpaged.io/share/${PLAN_DOCUMENT_ID}`,
+      previewUrl: `https://staging.unpaged.io/share/${PLAN_DOCUMENT_ID}/preview.png`,
+      documentId: PLAN_DOCUMENT_ID,
     }
   );
-  assert.equal(parseJoinLinkUrls({ url: `http://unpaged.io/join/${JOIN_TOKEN}` }), null);
-  assert.equal(parseJoinLinkUrls({ url: `https://evil.example.com/join/${JOIN_TOKEN}` }), null);
-  assert.equal(parseJoinLinkUrls({ url: `https://unpaged.io:8443/join/${JOIN_TOKEN}` }), null);
-  assert.equal(parseJoinLinkUrls({ url: `https://user@unpaged.io/join/${JOIN_TOKEN}` }), null);
-  assert.equal(parseJoinLinkUrls({ url: `${JOIN_URL}?extra=1` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `http://unpaged.io/share/${PLAN_DOCUMENT_ID}` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `https://evil.example.com/share/${PLAN_DOCUMENT_ID}` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `https://unpaged.io:8443/share/${PLAN_DOCUMENT_ID}` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `https://user@unpaged.io/share/${PLAN_DOCUMENT_ID}` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `${PUBLIC_URL}?extra=1` }), null);
+  assert.equal(parsePublicLinkUrls({ url: `${PUBLIC_URL}/data.json` }), null);
+  assert.equal(parsePublicLinkUrls({ url: "https://unpaged.io/share/a.b" }), null);
+  assert.equal(parsePublicLinkUrls({ url: `https://unpaged.io/document/${PLAN_DOCUMENT_ID}/edit` }), null);
   assert.equal(
-    parseJoinLinkUrls({
-      url: JOIN_URL,
-      previewUrl: `https://unpaged.io/join/${"b".repeat(32)}/preview.png`,
+    parsePublicLinkUrls({
+      url: PUBLIC_URL,
+      previewUrl: `https://unpaged.io/share/${DOC_1}/preview.png`,
     }),
     null
   );
 });
 
+test("a team link is refused: its reader would have to sign in", () => {
+  const teamLink = `https://unpaged.io/join/${"a".repeat(32)}`;
+  assert.equal(parsePublicLinkUrls({ url: teamLink }), null);
+  assert.equal(parsePublicLinkUrls({ url: PUBLIC_URL, previewUrl: `${teamLink}/preview.png` }), null);
+  assert.throws(() => renderPrPlanSection({ title: "Plan", url: teamLink, version: 1 }), /invalid_public_link_url/);
+  assert.ok(describePublicLinkError({ url: teamLink }).includes("/share/<documentId>"));
+});
+
+test("a section an older plugin wrote with a team link is replaced in place by the public link", () => {
+  const teamLink = `https://unpaged.io/join/${"a".repeat(32)}`;
+  const oldSection = [
+    PR_SECTION_START,
+    "### Visual plan",
+    "",
+    `[![Visual plan](${teamLink}/preview.png?v=100)](${teamLink})`,
+    "",
+    `[Open visual plan on Unpaged (Can view)](${teamLink})`,
+    PR_SECTION_END,
+  ].join("\n");
+  const body = `## Summary\n\nAuthor text.\n\n${oldSection}\n\nFooter stays.`;
+  const section = renderPrPlanSection({ title: "Plan", url: PUBLIC_URL, version: 200 });
+  const updated = splicePrPlanSection(body, section);
+  assert.equal(updated, `## Summary\n\nAuthor text.\n\n${section}\n\nFooter stays.`);
+  assert.ok(!updated.includes("/join/"));
+  assert.ok(updated.includes(`[Open visual plan on Unpaged (no account needed)](${PUBLIC_URL})`));
+});
+
 test("renderPrPlanSection escapes Markdown characters, appends ?v=, and uses no banned wording", () => {
   const section = renderPrPlanSection({
     title: "shop-api: [Phase 1] Rate `limiting` <draft>",
-    url: JOIN_URL,
+    url: PUBLIC_URL,
     previewUrl: PREVIEW_URL,
     version: 1763280000,
   });
@@ -108,17 +139,17 @@ test("renderPrPlanSection escapes Markdown characters, appends ?v=, and uses no 
   assert.ok(section.endsWith(PR_SECTION_END));
   assert.ok(
     section.includes(
-      `[![${escapeMarkdownText("shop-api: [Phase 1] Rate `limiting` <draft>")}](${PREVIEW_URL}?v=1763280000)](${JOIN_URL})`
+      `[![${escapeMarkdownText("shop-api: [Phase 1] Rate `limiting` <draft>")}](${PREVIEW_URL}?v=1763280000)](${PUBLIC_URL})`
     )
   );
-  assert.ok(section.includes(`[Open visual plan on Unpaged (Can view)](${JOIN_URL})`));
+  assert.ok(section.includes(`[Open visual plan on Unpaged (no account needed)](${PUBLIC_URL})`));
   assert.ok(!/\bboard\b/i.test(section));
   assert.ok(!/\bbox\b/i.test(section));
 });
 
 test("splicePrPlanSection appends cleanly and replaces an existing block byte-for-byte in place", () => {
-  const first = renderPrPlanSection({ title: "Plan v1", url: JOIN_URL, version: 100 });
-  const second = renderPrPlanSection({ title: "Plan v2", url: JOIN_URL, version: 200 });
+  const first = renderPrPlanSection({ title: "Plan v1", url: PUBLIC_URL, version: 100 });
+  const second = renderPrPlanSection({ title: "Plan v2", url: PUBLIC_URL, version: 200 });
 
   assert.equal(splicePrPlanSection("", first), `${first}\n`);
 
@@ -256,10 +287,16 @@ test("extractCreatedPullRequest matches gh pr create and GitHub MCP PR tools, ig
     spliceScript: "/opt/unpaged/monitors/plans.mjs",
   });
   assert.ok(ctx.includes(DOC_1));
-  assert.ok(ctx.includes('role "viewer"'));
+  assert.ok(ctx.includes("call document_update on the unpaged server"));
+  assert.ok(ctx.includes("isPublic: true"));
+  assert.ok(!ctx.includes("document_join_link"));
+  assert.ok(ctx.includes(`<web app>/share/${DOC_1}`));
+  assert.ok(ctx.includes("if the call is refused"));
+  assert.ok(ctx.includes("tell the person in one sentence that the plan is now public"));
+  assert.ok(ctx.includes("Share → Public link"));
   assert.ok(ctx.includes("https://github.com/acme/shop/pull/42"));
   assert.ok(ctx.includes("never pass a canvas title on a shell command line"));
-  assert.ok(ctx.includes('node "/opt/unpaged/monitors/plans.mjs" splice "<url>" "<previewUrl>"'));
+  assert.ok(ctx.includes('node "/opt/unpaged/monitors/plans.mjs" splice "<url>" <'));
   assert.ok(ctx.includes('checkout "/work/shop-api"'));
   assert.ok(!ctx.includes("remote get-url origin"));
   assert.ok(ctx.includes("headRepositoryOwner,headRepository,headRefName"));
@@ -448,7 +485,7 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.equal(reftableSecondChk.stdout.trim(), "missing");
 
     // 0-byte stdin, bad url vs bad previewUrl, and unpaired markers print distinct human-readable stderr messages.
-    const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: "",
@@ -458,7 +495,7 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.equal(emptyStdin.stdout, "");
     assert.ok(emptyStdin.stderr.includes("0 bytes received"));
 
-    const badUrl = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", "http://localhost/join/abc", PREVIEW_URL], {
+    const badUrl = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", "http://localhost/share/abc", PREVIEW_URL], {
       cwd: repo,
       env,
       input: "Body\n",
@@ -467,7 +504,27 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.equal(badUrl.status, 1);
     assert.ok(badUrl.stderr.includes("url must be"));
 
-    const badPreview = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, "https://evil.example.com/p.png"], {
+    const teamLink = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", `https://unpaged.io/join/${"a".repeat(32)}`], {
+      cwd: repo,
+      env,
+      input: "Body\n",
+      encoding: "utf8",
+    });
+    assert.equal(teamLink.status, 1);
+    assert.equal(teamLink.stdout, "");
+    assert.ok(teamLink.stderr.includes("a /join/<token> team link is not accepted"));
+
+    // The page link alone is enough: the picture link is derived from it.
+    const pageLinkOnly = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL], {
+      cwd: repo,
+      env,
+      input: "Body\n",
+      encoding: "utf8",
+    });
+    assert.equal(pageLinkOnly.status, 0);
+    assert.ok(pageLinkOnly.stdout.includes(`[![Visual plan](${PREVIEW_URL}?v=1763281234)](${PUBLIC_URL})`));
+
+    const badPreview = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, "https://evil.example.com/p.png"], {
       cwd: repo,
       env,
       input: "Body\n",
@@ -476,7 +533,7 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.equal(badPreview.status, 1);
     assert.ok(badPreview.stderr.includes("previewUrl must be"));
 
-    const strayMarker = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const strayMarker = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: `Intro\n${PR_SECTION_START}\nUnclosed section\n`,
@@ -486,7 +543,7 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.ok(strayMarker.stderr.includes(AMBIGUOUS_PR_SECTION_MESSAGE));
 
     // Empty PR body from `gh pr view --json body --jq .body` arrives as "\n" and succeeds.
-    const newlineOnly = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const newlineOnly = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: "\n",
@@ -496,7 +553,7 @@ test("plans.mjs CLI spends plans once on check, handles branch renames and detac
     assert.ok(newlineOnly.stdout.startsWith("<!-- unpaged-plan:start -->\n"));
 
     // Splice reads stdin and preserves backticks / $variables untouched.
-    const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: "Existing PR summary with `$PATH` and `<!-- unpaged-plan:start -->`.\n",

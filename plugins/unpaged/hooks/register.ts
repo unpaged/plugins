@@ -1554,8 +1554,8 @@ export const register: Register = on => {
   })
 
   // When a pull request is opened on a branch that has a visual plan recorded
-  // in the plugin's store, add one context line so the agent attaches its Can
-  // view join link and preview in the same turn. Submits no prompt and starts
+  // in the plugin's store, add one context line so the agent makes the plan public and attaches
+  // its public link and preview in the same turn. Submits no prompt and starts
   // no comparison turn.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)

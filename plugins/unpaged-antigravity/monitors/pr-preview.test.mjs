@@ -16,9 +16,9 @@ import {
 
 const PLANS_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "plans.mjs");
 const DOC_1 = "11111111-2222-3333-4444-555555555555";
-const JOIN_TOKEN = "a".repeat(32);
-const JOIN_URL = `https://unpaged.io/join/${JOIN_TOKEN}`;
-const PREVIEW_URL = `${JOIN_URL}/preview.png`;
+const PLAN_DOCUMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const PUBLIC_URL = `https://unpaged.io/share/${PLAN_DOCUMENT_ID}`;
+const PREVIEW_URL = `${PUBLIC_URL}/preview.png`;
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "unpaged-agy-pr-preview-"));
@@ -32,7 +32,7 @@ async function withTempDir(fn) {
 test("Antigravity PR section matches Claude/Copilot format byte-for-byte and ignores inline/fenced markers", () => {
   const opts = {
     title: "shop-api: [Phase 1] Rate limiting",
-    url: JOIN_URL,
+    url: PUBLIC_URL,
     previewUrl: PREVIEW_URL,
     version: 1763289999,
   };
@@ -120,7 +120,7 @@ test("Antigravity plans.mjs spends mode-0600 records under ~/.gemini/unpaged/pla
     assert.equal(renamedChk.stdout.trim(), `plan ${DOC_1}`);
     assert.equal((await readdir(planDir)).length, 0);
 
-    const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const emptyStdin = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: "",
@@ -128,7 +128,7 @@ test("Antigravity plans.mjs spends mode-0600 records under ~/.gemini/unpaged/pla
     });
     assert.equal(emptyStdin.status, 1);
 
-    const stray = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const stray = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: `${PR_SECTION_START}\nstray\n`,
@@ -137,7 +137,7 @@ test("Antigravity plans.mjs spends mode-0600 records under ~/.gemini/unpaged/pla
     assert.equal(stray.status, 1);
     assert.ok(stray.stderr.includes(AMBIGUOUS_PR_SECTION_MESSAGE));
 
-    const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", JOIN_URL, PREVIEW_URL], {
+    const spliced = spawnSync(process.execPath, [PLANS_SCRIPT, "splice", PUBLIC_URL, PREVIEW_URL], {
       cwd: repo,
       env,
       input: "Summary text",
