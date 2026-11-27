@@ -2,7 +2,9 @@
 
 Claude Code, GitHub Copilot, Codex, and Google Antigravity plugins by [Unpaged](https://unpaged.io) — the whiteboard where humans and agents work on the same canvas.
 
-![A Claude Code plan rendered as a canvas on Unpaged](docs/images/visual-plan-overview.png)
+[![Watch the 45-second split-screen demo on the Unpaged blog](docs/images/visual-plans-demo-poster.png)](https://unpaged.io/blog/review-your-coding-agents-plan)
+
+Watch the 45-second demo and read the full walkthrough on the Unpaged blog: [Review your coding agent's plan before it writes the code](https://unpaged.io/blog/review-your-coding-agents-plan) · Explore a live visual plan with no account required: [Public API rate limiting example](https://unpaged.io/share/f93886b9-50cc-4815-9577-271501f816d6).
 
 ## Install for Claude Code
 
